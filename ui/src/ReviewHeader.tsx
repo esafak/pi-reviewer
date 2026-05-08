@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { SubmitPanel } from "./SubmitPanel";
-import { LayoutPanel } from "./LayoutPanel";
+import { SettingsPanel } from "./SettingsPanel";
 
 interface ReviewHeaderProps {
   source?: string;
@@ -17,8 +17,11 @@ interface ReviewHeaderProps {
   onJumpToNext: () => void;
   onAction: (type: string, globalComment: string) => void;
   summary: string;
-  viewMode: "split" | "unified";
-  onViewModeChange: (mode: "split" | "unified") => void;
+  currentModel?: string;
+  currentThinking?: string;
+  severityCounts?: Record<string, number>;
+  allCollapsed: boolean;
+  onToggleCollapse: () => void;
 }
 
 export function ReviewHeader({
@@ -26,10 +29,14 @@ export function ReviewHeader({
   onSummaryToggle, sidebarOpen, onSidebarToggle,
   decidedCount, totalComments, allDone, hasAccepted,
   onJumpToNext, onAction, summary,
-  viewMode, onViewModeChange,
+  currentModel, currentThinking,
+  severityCounts, allCollapsed, onToggleCollapse,
 }: ReviewHeaderProps) {
   const [submitOpen, setSubmitOpen] = useState(false);
-  const [layoutOpen, setLayoutOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+
+  const reviewedByParts = [currentModel?.split("/").pop(), currentThinking].filter(Boolean);
+  const reviewedByLabel = reviewedByParts.length ? reviewedByParts.join(" · ") : undefined;
 
   return (
     <div id="sticky-top">
@@ -44,6 +51,7 @@ export function ReviewHeader({
           </svg>
           {" "}
           <span>Review</span>
+          <span id="wordmark-version">v{__APP_VERSION__}</span>
         </h1>
         <button className="icon-btn" onClick={onThemeToggle} data-tooltip={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"} style={{ color: theme === "dark" ? "#f0b429" : "#79c0ff" }}>
           {theme === "dark" ? (
@@ -66,8 +74,23 @@ export function ReviewHeader({
           </svg>
         </button>
         <span id="hdr2-sep" />
-        <span id="hdr2-source">{source ? (ssh ? `SSH · ${source}` : source) : ""}</span>
-        <span id="progress">{decidedCount} / {totalComments} decided</span>
+        <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 8, overflow: "hidden", minWidth: 0 }}>
+          <span id="hdr2-source">{source ? (ssh ? `SSH · ${source}` : source) : ""}</span>
+          {reviewedByLabel && (
+            <span className="reviewed-by" data-tooltip={[currentModel, currentThinking].filter(Boolean).join(" · ")}>
+              {reviewedByLabel}
+            </span>
+          )}
+        </div>
+        {severityCounts && (
+          <span className="sev-counts">
+            {severityCounts["critical"] ? <span className="sev-pip sev-critical">🔴 {severityCounts["critical"]}</span> : null}
+            {severityCounts["warn"] ? <span className="sev-pip sev-warn">🟡 {severityCounts["warn"]}</span> : null}
+            {severityCounts["info"] ? <span className="sev-pip sev-info">🔵 {severityCounts["info"]}</span> : null}
+          </span>
+        )}
+        <span id="hdr2-sep" />
+        <span id="progress">{decidedCount} / {totalComments} <span style={{ color: "var(--text-muted)" }}>decided</span></span>
         <button className="icon-btn" disabled={allDone} onClick={onJumpToNext} data-tooltip="Jump to next undecided comment">
           <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{display:"block"}}><circle cx="12" cy="12" r="10"/><polyline points="12 8 16 12 12 16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
         </button>
@@ -81,17 +104,21 @@ export function ReviewHeader({
           Finish review
         </button>
         <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
-          <button className="icon-btn" onClick={() => setLayoutOpen((o) => !o)} data-tooltip="Layout settings">
+          <button className="icon-btn" onClick={() => setSettingsOpen((o) => !o)} data-tooltip="Settings">
             <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{display:"block"}}><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
           </button>
-          {layoutOpen && (
-            <LayoutPanel
-              viewMode={viewMode}
-              onViewModeChange={onViewModeChange}
-              onClose={() => setLayoutOpen(false)}
-            />
+          {settingsOpen && (
+            <SettingsPanel onClose={() => setSettingsOpen(false)} />
           )}
         </div>
+        <span id="hdr2-sep" />
+        <button className="icon-btn" onClick={onToggleCollapse} data-tooltip={allCollapsed ? "Expand all files" : "Collapse all files"}>
+          {allCollapsed ? (
+            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{display:"block"}}><path d="m7 20 5-5 5 5"/><path d="m7 4 5 5 5-5"/></svg>
+          ) : (
+            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{display:"block"}}><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg>
+          )}
+        </button>
         <span id="hdr2-sep" />
         <button className="icon-btn" onClick={onSummaryToggle} data-tooltip="Overview">
           <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{display:"block"}}><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>

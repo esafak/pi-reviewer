@@ -30,7 +30,7 @@ Progress is shown in the pi TUI as the review runs — diff fetch, context load,
 
 ### SSH mode (`--ssh`)
 
-For reviewing code on a remote machine. Instead of fetching the diff locally, the agent fetches it on the remote via its SSH-redirected bash tool — no local git access needed. Requires an SSH extension (e.g. [ssh.ts](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/examples/extensions/ssh.ts)) to be active.
+For reviewing code on a remote machine. Instead of spawning a subprocess, SSH mode runs directly inside the current pi agent session — which already has SSH bash tool access to the remote. The agent fetches the diff and conventions on the remote, runs the review, and saves `pi-review.md` there. No local git access needed. Requires an SSH extension (e.g. [ssh.ts](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/examples/extensions/ssh.ts)) to be active.
 
 ```
 /review --ssh
@@ -40,9 +40,11 @@ For reviewing code on a remote machine. Instead of fetching the diff locally, th
 
 The agent reads `AGENTS.md` / `CLAUDE.md` and `REVIEW.md` from the remote project root, runs the review, and saves `pi-review.md` directly on the remote.
 
+> **Note:** `--model` and `--thinking` have no effect in SSH mode. Because the review runs inside the existing pi session (not a subprocess), the model and thinking level are fixed to whatever the parent session is using.
+
 ### UI mode (`--ui`)
 
-Opens a local browser-based review interface after the agent finishes. You can inspect every finding against the diff, decide per-comment (accept / reject / discuss), and choose what to do:
+Opens a local browser-based review interface after the agent finishes. You can inspect every finding against the diff, decide per-comment (accept / reject / discuss), then click **Finish review** to open a panel with three options and an optional global comment:
 
 - **Save** — write decisions to `pi-review.md`
 - **Send** — inject accepted findings into the agent as a follow-up turn
@@ -53,9 +55,9 @@ Opens a local browser-based review interface after the agent finishes. You can i
 /review --ssh --ui
 ```
 
-Cards change color after each decision (accepted → green tint, rejected → dimmed) so you can see at a glance what still needs attention. A "jump to next pending" button lets you move through unreviewed comments quickly.
+The UI includes a file tree sidebar, split and unified diff views, severity breakdown in the header, and a summary overview panel. Cards change color after each decision (accepted → green tint, rejected → dimmed). A "jump to next pending" button moves through unreviewed comments quickly. Files can be marked as viewed once all their comments are resolved, and collapsed individually or all at once.
 
-The dark/light theme toggle is remembered across reviews via `~/.pi/pi-reviewer/config.json`.
+Theme, view mode, default model, and thinking level are all remembered across reviews via `~/.pi/pi-reviewer/config.json` and can be changed from the settings panel inside the UI.
 
 `--ssh --ui` works the same as local `--ui` — the diff is captured silently from the agent's tool output and displayed in the browser without a second SSH round-trip.
 
@@ -188,7 +190,46 @@ Then inside the pi TUI:
 | `--ssh` | SSH mode: agent fetches diff and conventions on the remote (requires SSH extension) | `--ssh` |
 | `--ui` | Open browser review UI after the agent finishes | `--ui` |
 | `--min-severity <level>` | Only report issues at this level and above: `info`, `warn`, or `critical` (default: `info`) | `--min-severity warn` |
+| `--model <id>` | Model to use for this review in `provider/id` format, overrides config default. **Local mode only** — ignored in `--ssh`. | `--model openai/gpt-4o` |
+| `--thinking <level>` | Agent thinking budget: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`. **Local mode only** — ignored in `--ssh`. | `--thinking low` |
+| `--verbose` | Print full agent output to the console | |
 | `--dry-run` | Print the diff and prompt without calling the agent | |
+
+`--model` and `--thinking` are one-shot overrides — they apply to the current run only and do not update the saved default. To change the permanent default, use the settings panel inside `--ui`. You can also edit `~/.pi/pi-reviewer/config.json` directly — useful if a saved model is no longer available and you need to clear it without opening a review.
+
+### Configuration
+
+Persistent settings are stored in `~/.pi/pi-reviewer/config.json`. All fields are optional. Example of a fully populated file:
+
+```json
+{
+  "theme": "dark",
+  "viewMode": "split",
+  "model": "anthropic/claude-sonnet-4-6",
+  "thinking": "low",
+  "minSeverity": "INFO",
+  "defaultBranch": "main",
+  "autoCollapseViewed": false,
+  "verbose": false
+}
+```
+
+| Field | Values | Default | How to set |
+|---|---|---|---|
+| `theme` | `"dark"` \| `"light"` | `"dark"` | Settings panel in `--ui` |
+| `viewMode` | `"split"` \| `"unified"` | `"split"` | Settings panel in `--ui` |
+| `model` | `"provider/id"` string | _(parent session's model)_ | Settings panel in `--ui`, or edit directly |
+| `thinking` | `"off"` \| `"minimal"` \| `"low"` \| `"medium"` \| `"high"` \| `"xhigh"` | _(parent session's level)_ | Settings panel in `--ui`, or edit directly |
+| `minSeverity` | `"INFO"` \| `"WARN"` \| `"CRITICAL"` | `"INFO"` | Edit directly — no UI |
+| `defaultBranch` | any branch name | _(auto-detected from `origin/HEAD`)_ | Edit directly — no UI |
+| `autoCollapseViewed` | `true` \| `false` | `false` | Settings panel in `--ui` |
+| `verbose` | `true` \| `false` | `false` | Edit directly — no UI |
+
+**`minSeverity`** filters which findings the agent is asked to report. `"INFO"` (default) reports everything; `"WARN"` skips informational notes; `"CRITICAL"` only surfaces blockers. The `--min-severity` CLI flag uses lowercase (`info`, `warn`, `critical`) but the config file uses uppercase.
+
+**`defaultBranch`** sets the base branch used when no `--branch` flag is given. If unset, pi-reviewer auto-detects it from `git symbolic-ref refs/remotes/origin/HEAD`. Set this when auto-detection is unreliable (e.g. `origin/HEAD` not configured, monorepo with a non-standard base).
+
+**`model`** and **`thinking`** default to whatever the parent pi session is using when not set. The `--model` and `--thinking` CLI flags override for a single run without touching this file.
 
 ### Diff coverage
 

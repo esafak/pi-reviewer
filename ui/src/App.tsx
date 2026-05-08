@@ -7,11 +7,14 @@ import { FileTree, buildTree } from "./FileTree";
 import { ReviewHeader } from "./ReviewHeader";
 import { OrphanComments } from "./OrphanComments";
 import { SummaryPanel } from "./SummaryPanel";
+import { SettingsProvider } from "./SettingsContext";
+import { ScrollToTop } from "./ScrollToTop";
 
 declare global {
   interface Window {
     __DATA__: UIData | null;
   }
+  const __APP_VERSION__: string;
 }
 
 interface DecisionState {
@@ -32,9 +35,9 @@ export default function App() {
   const [decisions, setDecisions] = useState<Record<number, DecisionState>>({});
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [summaryOpen, setSummaryOpen] = useState(false);
-  const [viewMode, setViewMode] = useState<"split" | "unified">(data.viewMode ?? "split");
   const [submitted, setSubmitted] = useState(false);
   const [theme, setTheme] = useState<"dark" | "light">(data.theme ?? "dark");
+  const [viewedFiles, setViewedFiles] = useState<Record<string, boolean>>({});
   const [collapsedFolders, setCollapsedFolders] = useState<Record<string, boolean>>({});
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [openFiles, setOpenFiles] = useState<Record<string, boolean>>({});
@@ -45,12 +48,8 @@ export default function App() {
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
-    fetch("/theme", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ theme }) }).catch(() => {});
+    fetch("/config", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ theme }) }).catch(() => {});
   }, [theme]);
-
-  useEffect(() => {
-    fetch("/viewmode", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ viewMode }) }).catch(() => {});
-  }, [viewMode]);
 
   useEffect(() => {
     const iv = setInterval(() => { fetch("/ping").catch(() => {}); }, 30_000);
@@ -76,17 +75,45 @@ export default function App() {
     return () => document.removeEventListener("click", handler);
   }, []);
 
+  useEffect(() => {
+    setViewedFiles((prev) => {
+      const next = { ...prev };
+      let changed = false;
+      const fileIdxs: Record<string, number[]> = {};
+      result.comments.forEach((c: ReviewComment, i: number) => {
+        if (!fileIdxs[c.file]) fileIdxs[c.file] = [];
+        fileIdxs[c.file].push(i);
+      });
+      for (const [file, idxs] of Object.entries(fileIdxs)) {
+        if (!prev[file] && idxs.every((i) => decisions[i]?.decision)) {
+          next[file] = true;
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [decisions]);
+
   const decidedCount = Object.values(decisions).filter((d) => d.decision).length;
   const allDone = totalComments > 0 && decidedCount === totalComments;
   const hasAccepted = Object.values(decisions).some((d) => d.decision && d.decision !== "reject");
+
+  const severityCounts = result.comments.reduce(
+    (acc: Record<string, number>, c: ReviewComment) => {
+      const s = (c.severity || "info").toLowerCase();
+      acc[s] = (acc[s] || 0) + 1;
+      return acc;
+    },
+    {} as Record<string, number>
+  );
+
+  const [allCollapsed, setAllCollapsed] = useState(false);
 
   function jumpToNextPending() {
     for (let i = 0; i < totalComments; i++) {
       if (!decisions[i]?.decision) {
         const targetFile = result.comments[i]?.file;
-        if (targetFile) {
-          setOpenFiles((prev) => ({ ...prev, [targetFile]: true }));
-        }
+        if (targetFile) setOpenFiles((prev) => ({ ...prev, [targetFile]: true }));
         setTimeout(() => {
           document.getElementById(`cmt-${i}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
         }, 50);
@@ -131,7 +158,15 @@ export default function App() {
   const tree = buildTree(parsed.map((f) => f.file), commentsByFile);
 
   return (
-    <>
+    <SettingsProvider
+      initial={{
+        viewMode: data.viewMode ?? "split",
+        model: data.defaultModel,
+        thinking: data.defaultThinking,
+        autoCollapseViewed: data.autoCollapseViewed ?? false,
+      }}
+      availableModels={data.availableModels ?? []}
+    >
       <ReviewHeader
         source={source}
         ssh={ssh}
@@ -147,8 +182,11 @@ export default function App() {
         onJumpToNext={jumpToNextPending}
         onAction={doAction}
         summary={result.summary}
-        viewMode={viewMode}
-        onViewModeChange={setViewMode}
+        currentModel={data.currentModel}
+        currentThinking={data.currentThinking}
+        severityCounts={severityCounts}
+        allCollapsed={allCollapsed}
+        onToggleCollapse={() => setAllCollapsed((c) => !c)}
       />
       <div id="layout">
         {sidebarOpen && (
@@ -161,6 +199,20 @@ export default function App() {
           />
         )}
         <div id="files">
+          {totalComments === 0 && (
+            <div className="empty-state">
+              <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+              <p>No issues found</p>
+              <span>The review came back clean.</span>
+            </div>
+          )}
+          {parsed.length === 0 && totalComments > 0 && (
+            <div className="empty-state">
+              <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/></svg>
+              <p>No diff available</p>
+              <span>Comments are shown below as orphans.</span>
+            </div>
+          )}
           {parsed.map((file, i) => (
             <FileDiff
               key={file.file + i}
@@ -170,7 +222,9 @@ export default function App() {
               onDecide={onDecide}
               selected={file.file === selectedFile}
               forceOpen={openFiles[file.file] ?? false}
-              viewMode={viewMode}
+              viewed={viewedFiles[file.file] ?? false}
+              onToggleViewed={() => setViewedFiles((prev) => ({ ...prev, [file.file]: !prev[file.file] }))}
+              collapseSignal={allCollapsed}
             />
           ))}
           <OrphanComments
@@ -183,6 +237,7 @@ export default function App() {
           <SummaryPanel summary={result.summary} onClose={() => setSummaryOpen(false)} />
         )}
       </div>
-    </>
+      <ScrollToTop />
+    </SettingsProvider>
   );
 }

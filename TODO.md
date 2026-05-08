@@ -41,7 +41,8 @@ jobs:
 ### 2. Pi extension (local dev, inside pi TUI)
 
 Registers a `/review` command inside the pi TUI.
-Spawns `pi --mode json -p --no-session` as a subprocess — same pattern as the official subagent example.
+**Local mode** spawns `pi --mode json -p --no-session` as a subprocess — accepts `--model` and `--thinking` to control the review agent independently of the parent session.
+**SSH mode** does not spawn a subprocess — it runs directly inside the current pi agent session, which already has SSH bash tool access to the remote machine. Because of this, `--model` and `--thinking` have no effect in SSH mode; the model and thinking level are fixed to whatever the parent session uses.
 No shared code with the GitHub Action.
 
 ```
@@ -158,9 +159,17 @@ tests/
 - [x] Fix truncation to drop whole file sections instead of slicing the string mid-diff (section-boundary truncation)
 - [x] Append skipped file names to the user prompt so the agent acknowledges them in its summary
 
-### 19. Untracked file support
+### ✅ 19. Untracked file support
 
-- [ ] Run `git add -N .` before diffing to register untracked new files as intent-to-add, making them visible to `git diff` without staging their content; restore index state after diff is captured
+- [x] Run `git add -N` on untracked files before diffing to register them as intent-to-add, making them visible to `git diff` without staging their content; restore index state after diff is captured with `git rm --cached`
+- [x] Applied to both `--branch` / default merge-base path and `--diff` path; `--pr` uses remote diff as-is
+
+### 20. Monorepo path scoping (`--path`)
+
+- [ ] Add `--path <dir>` flag to `/review` command — limit the diff to a subdirectory (e.g. `--path packages/frontend` or `--path packages/backend`)
+- [ ] Pass the path to `git diff` as a pathspec so only files under that directory are included
+- [ ] Surface the scoped path in the footer and UI source label so it's clear what was reviewed
+- [ ] Works with all diff modes (`--branch`, `--pr`, `--diff`, `--ssh`)
 
 ### ✅ 9. SSH support (`--ssh`)
 
@@ -234,15 +243,25 @@ tests/
 - [x] Stream thinking sentences via `thinking_delta` from `message_update` events
 - [x] Show `Writing review…` when model starts writing the JSON output (`text_start`)
 - [x] Note: local mode makes no tool calls (diff + context are pre-loaded in prompt) — no tool-call log available unlike SSH mode where the agent fetches them itself
+- [x] Footer shows active model short name and thinking level during review (e.g. `gpt-5.4-mini · low`); omitted when neither is set
+- [x] Actionable error messages for API errors (`stopReason: error`) and thinking-only responses (model returned reasoning but no text output)
 
-### 17. User config (`~/.pi/pi-reviewer/config.json`)
+### ✅ 17. User config (`~/.pi/pi-reviewer/config.json`)
 
-Config file already created for theme persistence. Future settings to add:
-
-- [ ] `verbose` — default `false`; when `true`, behave as if `--verbose` is always passed
-- [ ] `minSeverity` — default `"info"`; persist last used value so it doesn't need to be repeated
-- [ ] `theme` — already implemented ✅
-- [ ] `model` — default model override (e.g. `anthropic/claude-opus-4-6`) so user doesn't need to set it per-run
+- [x] `theme` — persisted via `POST /config`; default `"dark"`
+- [x] `viewMode` — persisted via `POST /config`; default `"split"`
+- [x] `verbose` — read from config; set via `--verbose` flag or manually in config file
+- [x] `minSeverity` — read from config; set via `--min-severity` flag or manually in config file
+- [x] `model` — persisted via `POST /config` from the UI settings panel; default `undefined` (uses parent session model)
+- [x] `thinking` — persisted via `POST /config` from the UI settings panel; default `undefined` (no thinking override)
+- [x] `autoCollapseViewed` — persisted via `POST /config`; default `false`
+- [x] All persistence goes through a single `POST /config` route with `applyConfigPatch()` per-key validation
+- [x] `applyConfigPatch` uses a `VALID` lookup table for enum fields — no per-field if-chains
+- [x] CLI reads config but never writes it
+- [x] Refactored `src/core/ui/server.ts` → `server/{types,config,routes,index}.ts`; config logic moved to `src/core/config.ts` (shared, not UI-specific)
+- [x] Route table replaces if/else chain; individual config routes consolidated into one
+- [x] `SettingsContext` eliminates prop drilling — components read/write settings via `useSettings()`
+- [x] `defaultBranch` — config-only (no UI); falls back to `git symbolic-ref refs/remotes/origin/HEAD` when unset
 
 ### 18. UI improvements (GitHub-inspired)
 
@@ -251,11 +270,23 @@ Config file already created for theme persistence. Future settings to add:
 - [x] **Submit review panel** — replace Save / Send / Save & Send buttons with a single "Finish review" button; click opens a panel with a global comment textarea and 3 radio options (Send / Save / Save & Send); submit triggers the selected action with the comment injected
 - [x] **Summary overview panel** — replace the inline summary dropdown with an ⓘ icon button; click opens a side panel (GitHub-style Overview) rendering the summary markdown; add a separator between the left icon cluster and the right action cluster in hdr2
 - [x] **Layout settings panel** — replace the split/unified toggle icon with a ⚙ gear icon; click opens a dropdown panel (GitHub-style) with layout options: Unified / Split (radio); extracted as `LayoutPanel` component; gear button placed next to "Finish review"
-- [ ] **Viewed file checkbox** — add a "Viewed" toggle in each file header; checked files are visually dimmed and tracked so the user knows what they've already reviewed; state persists in session
+- [x] **Model/thinking display** — read-only "reviewed by" chip next to the diff source showing the model short name and thinking level used for this review (e.g. `gpt-5.4-mini · low`)
+- [x] **Settings panel** — unified settings panel (replaces LayoutPanel) with three sections: Layout (split/unified), Default model (scrollable list grouped by provider, checkmark on active default), Default thinking level; selections persisted to config via HTTP
+- [x] **Viewed file checkbox** — "Viewed" toggle in each file header; disabled while comments are unresolved; auto-checked when the last comment in the file is decided; viewed files are visually dimmed; auto-collapse on viewed (off by default, toggle in settings panel); scroll-to-top button appears after 400 px, fixed bottom-right
 - [ ] **Annotate** — unified annotation feature: click a line or the file header to attach a free-form note; line-level and file-level notes both injected into agent context on Send
 - [ ] **Keyboard shortcuts** — `n`/`p` next/prev comment, `a`/`r`/`d` accept/reject/discuss, `f` finish review; show shortcut hints on hover
 - [ ] **Comment severity filter** — in-UI toggle to show/hide INFO / WARN / CRITICAL comments without re-running the agent; lets user focus on what matters on large diffs
 - [ ] **Re-run review** — button available before finishing; re-sends the same diff to the agent with optionally different settings (model, min-severity); replaces the current comments with the new result; useful when you edit `REVIEW.md` or want a stricter/looser severity pass before acting
+- [x] **Markdown rendering in comment bodies** — render backticks, bold, lists, and code blocks in comment body text instead of plain text; makes complex review comments significantly easier to scan
+- [ ] **Bulk decisions** — "Accept all INFO", "Reject all WARN", or "Reject all" buttons; reduces clicking on large diffs with many low-severity comments
+- [ ] **Decision undo indicator** — visual "changed" badge when a decision has been altered after first being set, so the user can track what they reconsidered
+- [x] **Comment count badge by severity** — show `3 🔴 · 5 🟡 · 2 🔵` breakdown in the header progress area for at-a-glance severity distribution
+- [ ] **Expand context lines** — GitHub-style "…" button between diff hunks to load additional surrounding context lines without leaving the page
+- [ ] **Word-level diff highlighting** — within a changed line, highlight the exact words/tokens that differ rather than the whole line background
+- [x] **Empty state** — when the review has zero comments, show a clear "No issues found" message instead of a blank file list
+- [x] **Collapse all / Expand all** — single button in the header to collapse or expand every file at once
+- [x] **File tree folder compression** — collapse single-child directory chains into combined names (e.g. `providers/oauth/handlers`) à la VS Code; contained hover highlight with margin + border-radius; widen sidebar to 296 px; bump tree and comment body font size to 13 px
+- [x] **Version in wordmark** — display `vX.Y.Z` next to the wordmark, injected at build time from `package.json` via Vite `define`
 
 ### 10. Custom system prompt
 

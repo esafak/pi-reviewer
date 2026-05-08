@@ -1,8 +1,9 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { ReviewComment } from "./types";
 import { ParsedFile, SplitRow, UnifiedRow, buildSplitRows, buildUnifiedRows } from "./diff-parser";
 import { CommentCard } from "./CommentCard";
 import { getLanguage, highlightLine } from "./highlight";
+import { useSettings } from "./SettingsContext";
 
 const AUTO_COLLAPSE_THRESHOLD = 200;
 const TRUNCATE_THRESHOLD = 300;
@@ -18,8 +19,10 @@ interface Props {
   decisions: Record<number, DecisionState>;
   onDecide: (idx: number, decision: string, discussText: string) => void;
   selected?: boolean;
-  viewMode: "split" | "unified";
   forceOpen?: boolean;
+  viewed?: boolean;
+  onToggleViewed?: () => void;
+  collapseSignal?: boolean;
 }
 
 type PlacedComment = { comment: ReviewComment; idx: number; snapped: boolean };
@@ -110,7 +113,10 @@ function hl(content: string | undefined, lang: string | null): React.ReactNode {
   return <span dangerouslySetInnerHTML={{ __html: highlightLine(content, lang) }} />;
 }
 
-export function FileDiff({ file, comments: fc, decisions, onDecide, selected, viewMode, forceOpen }: Props) {
+export function FileDiff({ file, comments: fc, decisions, onDecide, selected, forceOpen, viewed, onToggleViewed, collapseSignal }: Props) {
+  const { settings: { viewMode, autoCollapseViewed } } = useSettings();
+  const autoCollapseRef = useRef(autoCollapseViewed);
+  useEffect(() => { autoCollapseRef.current = autoCollapseViewed; }, [autoCollapseViewed]);
   const allRows = useMemo(() => buildSplitRows(file), [file]);
   const allUnifiedRows = useMemo(() => buildUnifiedRows(file), [file]);
   const lang = useMemo(() => getLanguage(file.file), [file.file]);
@@ -124,6 +130,14 @@ export function FileDiff({ file, comments: fc, decisions, onDecide, selected, vi
   useEffect(() => {
     if (forceOpen) setCollapsed(false);
   }, [forceOpen]);
+
+  useEffect(() => {
+    if (collapseSignal !== undefined) setCollapsed(collapseSignal);
+  }, [collapseSignal]);
+
+  useEffect(() => {
+    if (viewed && autoCollapseRef.current) setCollapsed(true);
+  }, [viewed]);
 
   const rows = showAll ? allRows : allRows.slice(0, TRUNCATE_THRESHOLD);
   const unifiedRows = showAll ? allUnifiedRows : allUnifiedRows.slice(0, TRUNCATE_THRESHOLD);
@@ -139,6 +153,8 @@ export function FileDiff({ file, comments: fc, decisions, onDecide, selected, vi
   const sizeBadge = isLarge ? (
     <span className="cbadge">{activeRows.length} lines</span>
   ) : null;
+
+  const hasUnresolved = fc.some(({ idx }) => !decisions[idx]?.decision);
 
   const splitPlacements = useMemo(() => buildSplitPlacements(fc, allRows), [fc, allRows]);
   const unifiedPlacements = useMemo(() => buildUnifiedPlacements(fc, allUnifiedRows), [fc, allUnifiedRows]);
@@ -284,12 +300,31 @@ export function FileDiff({ file, comments: fc, decisions, onDecide, selected, vi
   });
 
   return (
-    <div className={`fblock${selected ? " fblock-selected" : ""}`} id={`file-${CSS.escape(file.file)}`}>
+    <div className={`fblock${selected ? " fblock-selected" : ""}${viewed ? " fblock-viewed" : ""}`} id={`file-${CSS.escape(file.file)}`}>
       <div className="fhdr" onClick={() => setCollapsed((c) => !c)} style={{ cursor: "pointer" }}>
-        <span className="collapse-icon">{collapsed ? "▶" : "▼"}</span>
+        <span className="collapse-icon">
+          {collapsed
+            ? <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{display:"block"}}><polyline points="9 18 15 12 9 6"/></svg>
+            : <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{display:"block"}}><polyline points="6 9 12 15 18 9"/></svg>
+          }
+        </span>
         <span className="fname">{file.file}</span>
         {badge}
         {sizeBadge}
+        <span style={{ flex: 1 }} />
+        <label
+          className="viewed-check"
+          onClick={(e) => e.stopPropagation()}
+          data-tooltip={hasUnresolved ? "Resolve all comments first" : undefined}
+        >
+          <input
+            type="checkbox"
+            checked={viewed ?? false}
+            onChange={onToggleViewed}
+            disabled={hasUnresolved}
+          />
+          Viewed
+        </label>
       </div>
       {!collapsed && (
         file.binary ? (
