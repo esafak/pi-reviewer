@@ -1,0 +1,70 @@
+<svg width="760" height="480" viewBox="0 0 760 480" xmlns="http://www.w3.org/2000/svg" font-family="'SF Mono','Fira Code',Consolas,monospace">
+  <defs>
+    <marker id="ag" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#484f58"/>
+    </marker>
+    <marker id="aor" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#9e6a03"/>
+    </marker>
+  </defs>
+
+  <!-- Background -->
+  <rect width="760" height="480" fill="#0d1117" rx="12"/>
+
+  <!-- ── pi-reviewer core ── -->
+  <rect x="230" y="28" width="300" height="60" rx="6" fill="#0c2d6b" stroke="#1f6feb" stroke-width="1.5"/>
+  <text x="380" y="51" text-anchor="middle" fill="#58a6ff" font-size="14" font-weight="bold">pi-reviewer</text>
+  <text x="380" y="69" text-anchor="middle" fill="#8b949e" font-size="9">emits: "pi-reviewer:collect-context-providers"</text>
+
+  <!-- Fork left arrow (to built-in) -->
+  <line x1="305" y1="88" x2="190" y2="148" stroke="#484f58" stroke-width="1.5" marker-end="url(#ag)"/>
+
+  <!-- Fork right arrow (to user ext, dashed) -->
+  <line x1="455" y1="88" x2="570" y2="148" stroke="#e3b341" stroke-width="1.5" stroke-dasharray="5 3" marker-end="url(#aor)"/>
+
+  <!-- ── built-in: pi-reviewer-doc-context ── -->
+  <rect x="30" y="148" width="300" height="186" rx="6" fill="#0d2119" stroke="#238636" stroke-width="1.5"/>
+  <!-- badge -->
+  <rect x="38" y="156" width="62" height="17" rx="3" fill="#238636"/>
+  <text x="69" y="168" text-anchor="middle" fill="#ffffff" font-size="9" font-weight="bold">built-in</text>
+  <!-- title -->
+  <text x="180" y="192" text-anchor="middle" fill="#3fb950" font-size="12" font-weight="bold">pi-reviewer-doc-context</text>
+  <!-- divider -->
+  <line x1="50" y1="201" x2="310" y2="201" stroke="#238636" stroke-width="0.5" opacity="0.4"/>
+  <!-- steps -->
+  <text x="58" y="220" fill="#8b949e" font-size="10">① diffFiles  →  extract keywords</text>
+  <text x="58" y="240" fill="#8b949e" font-size="10">② scan .pi/notes · .claude/notes</text>
+  <text x="58" y="260" fill="#8b949e" font-size="10">③ match .md by description</text>
+  <text x="58" y="280" fill="#8b949e" font-size="10">④ inject matched docs</text>
+  <!-- output -->
+  <text x="180" y="316" text-anchor="middle" fill="#3fb950" font-size="11" font-weight="bold">→  ContextFile[]</text>
+
+  <!-- ── your extension (future) ── -->
+  <rect x="430" y="148" width="300" height="186" rx="6" fill="#0f0e07" stroke="#e3b341" stroke-width="1.5" stroke-dasharray="6 3"/>
+  <!-- badge -->
+  <rect x="438" y="156" width="82" height="17" rx="3" fill="#9e6a03"/>
+  <text x="479" y="168" text-anchor="middle" fill="#ffffff" font-size="9" font-weight="bold">add yours</text>
+  <!-- title -->
+  <text x="580" y="192" text-anchor="middle" fill="#e3b341" font-size="12" font-weight="bold">your extension</text>
+  <!-- divider -->
+  <line x1="450" y1="201" x2="710" y2="201" stroke="#e3b341" stroke-width="0.5" opacity="0.4"/>
+  <!-- steps -->
+  <text x="458" y="220" fill="#8b949e" font-size="10">① listen for event at load time</text>
+  <text x="458" y="240" fill="#8b949e" font-size="10">② register("name", fn)</text>
+  <text x="458" y="260" fill="#8b949e" font-size="10">③ filter by diffFiles</text>
+  <text x="458" y="280" fill="#8b949e" font-size="10">④ fs.read(your docs)</text>
+  <!-- output -->
+  <text x="580" y="316" text-anchor="middle" fill="#e3b341" font-size="11" font-weight="bold">→  ContextFile[]</text>
+
+  <!-- Merge arrows → system prompt -->
+  <line x1="180" y1="334" x2="295" y2="400" stroke="#484f58" stroke-width="1.5" marker-end="url(#ag)"/>
+  <line x1="580" y1="334" x2="465" y2="400" stroke="#484f58" stroke-width="1.5" stroke-dasharray="5 3" marker-end="url(#ag)"/>
+
+  <!-- ── system prompt ── -->
+  <rect x="220" y="400" width="320" height="52" rx="6" fill="#0c2d6b" stroke="#1f6feb" stroke-width="1.5"/>
+  <text x="380" y="423" text-anchor="middle" fill="#58a6ff" font-size="13" font-weight="bold">system prompt</text>
+  <text x="380" y="441" text-anchor="middle" fill="#8b949e" font-size="10">review agent context — merged from all providers</text>
+
+  <!-- Footer note -->
+  <text x="380" y="467" text-anchor="middle" fill="#30363d" font-size="9">providers collected synchronously, called in parallel via Promise.all</text>
+</svg>

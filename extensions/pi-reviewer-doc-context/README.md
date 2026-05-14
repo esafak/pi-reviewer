@@ -2,6 +2,8 @@
 
 A pi extension that automatically injects relevant documentation from your project into the pi-reviewer system prompt, based on what files changed in the diff.
 
+![System overview](system-overview.svg)
+
 ## How it works
 
 At review time, the extension:
@@ -74,6 +76,8 @@ All matched docs are included in the system prompt regardless of which level the
 ---
 
 ## Context Provider API
+
+![Context provider flow](context-provider-flow.svg)
 
 pi-reviewer exposes a hook that lets any pi extension contribute additional context to the review agent's system prompt. `pi-reviewer-doc-context` is the built-in implementation — you can build your own alongside it.
 
