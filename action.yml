@@ -25,6 +25,11 @@ inputs:
     required: false
     default: "info"
 
+  doc-dirs:
+    description: "Comma-separated dirs to scan for matching docs to inject into the review (e.g. '.pi/notes,docs/review'). Empty = inject nothing."
+    required: false
+    default: ""
+
 runs:
   using: "composite"
   steps:
@@ -47,6 +52,7 @@ runs:
         POST_COMMENT: ${{ inputs.post-comment }}
         PI_REVIEWER_MODEL: ${{ inputs.model }}
         MIN_SEVERITY: ${{ inputs.min-severity }}
+        PI_REVIEWER_DOC_DIRS: ${{ inputs.doc-dirs }}
       run: node ${{ github.action_path }}/dist/src/ci/action-entry.js
 
 branding:

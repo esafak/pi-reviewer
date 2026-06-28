@@ -39,6 +39,9 @@ jobs:
           github-token: \${{ secrets.GITHUB_TOKEN }}
           pi-api-key: \${{ secrets.PI_API_KEY }}
           min-severity: \${{ inputs.min-severity || 'info' }}
+          # Opt in to injecting matching project docs into the review.
+          # Comma-separated dirs scanned for .md files with a 'description' frontmatter.
+          # doc-dirs: '.pi/notes,docs/review'
 `;
 
 export async function init(options: InitOptions = {}): Promise<void> {

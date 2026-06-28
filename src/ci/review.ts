@@ -3,7 +3,8 @@ import { getModel } from "@mariozechner/pi-ai";
 import { createReadOnlyTools } from "@mariozechner/pi-coding-agent";
 
 import { loadContext, mergeContextFiles } from "../core/context.js";
-import { resolveDiff } from "../core/diff-resolver.js";
+import { resolveDiff, extractDiffFiles } from "../core/diff-resolver.js";
+import { loadDocContext } from "../core/doc-context.js";
 import { sendOutput, extractLastAssistantText, type OutputTarget, type Severity } from "../core/output.js";
 import { buildJSONSystemPrompt, buildUserPrompt, type MinSeverity } from "../core/prompt-builder.js";
 
@@ -20,8 +21,15 @@ export interface ReviewOptions {
   commitId?: string;
   model?: string; // format: "provider/modelId" e.g. "anthropic/claude-opus-4-6"
   minSeverity?: MinSeverity;
+  docDirs?: string[]; // dirs to scan for doc-context; empty = inject nothing (opt-in)
 }
 
+
+/** Parses a comma/newline-separated doc-dirs string into a trimmed, non-empty list. */
+export function parseDocDirs(raw: string | undefined): string[] {
+  if (!raw) return [];
+  return raw.split(/[,\n]/).map(d => d.trim()).filter(Boolean);
+}
 
 export async function review(options: ReviewOptions): Promise<void> {
   const cwd = options.cwd ?? process.cwd();
@@ -45,7 +53,15 @@ export async function review(options: ReviewOptions): Promise<void> {
     console.log("[pi-reviewer] context: no conventions found (AGENTS.md / CLAUDE.md / REVIEW.md)");
   }
 
-  const systemPrompt = buildJSONSystemPrompt(context, options.minSeverity);
+  const docDirs = options.docDirs ?? parseDocDirs(process.env.PI_REVIEWER_DOC_DIRS);
+  const docContextFiles = docDirs.length > 0
+    ? await loadDocContext({ cwd, diffFiles: extractDiffFiles(diff), docDirs })
+    : [];
+  if (docContextFiles.length > 0) {
+    console.log(`[pi-reviewer] doc-context loaded: ${docContextFiles.map(f => f.path).join(", ")}`);
+  }
+
+  const systemPrompt = buildJSONSystemPrompt(context, options.minSeverity, docContextFiles);
   const userPrompt = buildUserPrompt(diff, skippedFiles);
 
   const target: OutputTarget =

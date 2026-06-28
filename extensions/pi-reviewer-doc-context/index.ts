@@ -2,27 +2,25 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import { DEFAULT_DOC_DIRS, loadDocContext } from "../../src/core/doc-context.js";
+import type { FsOps } from "../../src/core/ssh.js";
+import type { ContextFile } from "../../src/core/context.js";
+
+// Re-export the shared scanning helpers so consumers/tests of this extension
+// keep their existing import surface.
+export { extractKeywords, parseDescription, isRelevant } from "../../src/core/doc-context.js";
 
 const CONTEXT_PROVIDER_EVENT = "pi-reviewer:collect-context-providers";
 
 const CONFIG_FILE = join(homedir(), ".pi", "pi-reviewer-doc-context", "config.json");
 
-interface Fs {
-  read: (path: string) => Promise<string | null>;
-  list: (path: string) => Promise<string[]>;
-  join: (...parts: string[]) => string;
-  dirname: (path: string) => string;
-}
-
-interface ContextFile {
-  path: string;
-  content: string;
-}
-
 interface ContextProviderEvent {
   cwd: string;
   diffFiles: string[];
-  register: (name: string, provider: (opts: { cwd: string; diffFiles: string[]; fs: Fs; gitRoot?: string }) => Promise<ContextFile[]>) => void;
+  register: (
+    name: string,
+    provider: (opts: { cwd: string; diffFiles: string[]; fs: FsOps; gitRoot?: string }) => Promise<ContextFile[]>,
+  ) => void;
 }
 
 function readDocDirs(): string[] {
@@ -32,99 +30,14 @@ function readDocDirs(): string[] {
       return config.docDirs as string[];
     }
   } catch { /* ignore */ }
-  return [".pi/notes", ".claude/notes", ".agents/notes"];
-}
-
-export function extractKeywords(diffFiles: string[]): string[] {
-  const keywords = new Set<string>();
-  for (const file of diffFiles) {
-    const withoutExt = file.replace(/\.[^/.]+$/, "");
-    for (const segment of withoutExt.split(/[/\-_.]/)) {
-      for (const word of segment.split(/(?=[A-Z])/)) {
-        const lower = word.toLowerCase();
-        if (lower.length >= 3) keywords.add(lower);
-      }
-    }
-  }
-  return [...keywords];
-}
-
-export function parseDescription(content: string): string | null {
-  const match = content.match(/^---\s*\n([\s\S]*?)\n---/);
-  if (!match) return null;
-  const descMatch = match[1].match(/^description:\s*(.+)$/m);
-  return descMatch ? descMatch[1].trim() : null;
-}
-
-export function isRelevant(description: string, filePath: string, keywords: string[]): boolean {
-  const haystack = `${description} ${filePath}`.toLowerCase();
-  return keywords.some(kw => haystack.includes(kw));
-}
-
-async function scanDocFiles(
-  cwd: string,
-  fs: Fs,
-  docDirs: string[],
-  gitRoot?: string,
-): Promise<Array<{ path: string; content: string; description: string }>> {
-  const results: Array<{ path: string; content: string; description: string }> = [];
-
-  async function scanDir(absDir: string, relDir: string, depth: number): Promise<void> {
-    let entries: string[];
-    try {
-      entries = await fs.list(absDir);
-    } catch {
-      return;
-    }
-    for (const entry of entries) {
-      if (entry.endsWith(".md")) {
-        const content = await fs.read(fs.join(absDir, entry));
-        if (!content) continue;
-        const description = parseDescription(content);
-        if (!description) continue;
-        results.push({ path: fs.join(relDir, entry), content, description });
-      } else if (depth < 1) {
-        await scanDir(fs.join(absDir, entry), fs.join(relDir, entry), depth + 1);
-      }
-    }
-  }
-
-  // Walk from cwd up to gitRoot (or just cwd when no gitRoot), root-first
-  const dirs: string[] = [];
-  let current = cwd;
-  while (true) {
-    dirs.unshift(current);
-    if (!gitRoot || current === gitRoot) break;
-    const parent = fs.dirname(current);
-    if (parent === current) break;
-    current = parent;
-  }
-
-  for (let i = 0; i < dirs.length; i++) {
-    const dir = dirs[i];
-    const levelsUp = dirs.length - 1 - i;
-    const upParts = Array.from<string>({ length: levelsUp }).fill("..");
-    for (const docDir of docDirs) {
-      const absDocDir = fs.join(dir, docDir);
-      const relDocDir = levelsUp > 0 ? fs.join(...upParts, docDir) : docDir;
-      await scanDir(absDocDir, relDocDir, 0);
-    }
-  }
-
-  return results;
+  return DEFAULT_DOC_DIRS;
 }
 
 export default function (pi: ExtensionAPI): void {
   pi.events.on(CONTEXT_PROVIDER_EVENT, (data: unknown) => {
     const { register } = data as ContextProviderEvent;
-    register("doc-context", async ({ cwd, diffFiles, fs, gitRoot }): Promise<ContextFile[]> => {
-      const keywords = extractKeywords(diffFiles);
-      if (keywords.length === 0) return [];
-      const docDirs = readDocDirs();
-      const docs = await scanDocFiles(cwd, fs, docDirs, gitRoot);
-      return docs
-        .filter(doc => isRelevant(doc.description, doc.path, keywords))
-        .map(doc => ({ path: doc.path, content: doc.content }));
-    });
+    register("doc-context", ({ cwd, diffFiles, fs, gitRoot }): Promise<ContextFile[]> =>
+      loadDocContext({ cwd, diffFiles, fs, gitRoot, docDirs: readDocDirs() }),
+    );
   });
 }
