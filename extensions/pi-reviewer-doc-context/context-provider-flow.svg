@@ -1,0 +1,82 @@
+<svg width="600" height="504" viewBox="0 0 600 504" xmlns="http://www.w3.org/2000/svg" font-family="'SF Mono','Fira Code',Consolas,monospace">
+  <defs>
+    <marker id="ag" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#484f58"/>
+    </marker>
+    <marker id="agn" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#238636"/>
+    </marker>
+    <marker id="ay" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#e3b341"/>
+    </marker>
+    <marker id="ab" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#58a6ff"/>
+    </marker>
+  </defs>
+
+  <!-- Background -->
+  <rect width="600" height="504" fill="#0d1117" rx="12"/>
+
+  <!-- /review -->
+  <rect x="210" y="28" width="180" height="36" rx="6" fill="#0c2d6b" stroke="#1f6feb" stroke-width="1.5"/>
+  <text x="300" y="51" text-anchor="middle" fill="#58a6ff" font-size="14" font-weight="bold">$ /review</text>
+
+  <!-- Arrow /review → event -->
+  <line x1="300" y1="64" x2="300" y2="95" stroke="#484f58" stroke-width="1.5" marker-end="url(#ag)"/>
+
+  <!-- Event emit box -->
+  <rect x="60" y="96" width="480" height="52" rx="6" fill="#161b22" stroke="#484f58" stroke-width="1.5"/>
+  <text x="300" y="116" text-anchor="middle" fill="#8b949e" font-size="9">pi.events.emit</text>
+  <text x="300" y="137" text-anchor="middle" fill="#e6edf3" font-size="11">"pi-reviewer:collect-context-providers"</text>
+
+  <!-- Arrow event → your ext -->
+  <line x1="300" y1="148" x2="300" y2="179" stroke="#238636" stroke-width="1.5" marker-end="url(#agn)"/>
+  <!-- on(event) label -->
+  <text x="312" y="167" fill="#484f58" font-size="9">on(event)</text>
+
+  <!-- Your extension box -->
+  <rect x="130" y="180" width="340" height="52" rx="6" fill="#0d2119" stroke="#238636" stroke-width="1.5"/>
+  <text x="300" y="200" text-anchor="middle" fill="#3fb950" font-size="10">your extension  —  index.ts</text>
+  <text x="300" y="220" text-anchor="middle" fill="#3fb950" font-size="12" font-weight="bold">register("name", fn)</text>
+
+  <!-- Arrow your ext → provider fn -->
+  <line x1="300" y1="232" x2="300" y2="263" stroke="#238636" stroke-width="1.5" marker-end="url(#agn)"/>
+
+  <!-- Provider fn box -->
+  <rect x="190" y="264" width="320" height="72" rx="6" fill="#0d2119" stroke="#238636" stroke-width="1.5"/>
+  <text x="350" y="285" text-anchor="middle" fill="#3fb950" font-size="12" font-weight="bold">ContextProvider fn</text>
+  <text x="350" y="304" text-anchor="middle" fill="#8b949e" font-size="10">{ cwd, diffFiles, fs, gitRoot }</text>
+  <text x="350" y="323" text-anchor="middle" fill="#8b949e" font-size="10">filter → read → return</text>
+
+  <!-- diffFiles input (left) -->
+  <rect x="20" y="278" width="148" height="36" rx="6" fill="#161b22" stroke="#e3b341" stroke-width="1.5" stroke-dasharray="4 3"/>
+  <text x="94" y="294" text-anchor="middle" fill="#e3b341" font-size="11" font-weight="bold">diffFiles</text>
+  <text x="94" y="309" text-anchor="middle" fill="#8b949e" font-size="9">changed file paths</text>
+
+  <!-- Arrow diffFiles → provider fn -->
+  <line x1="168" y1="296" x2="189" y2="296" stroke="#e3b341" stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#ay)"/>
+
+  <!-- fs.read docs input (left) -->
+  <rect x="20" y="326" width="148" height="36" rx="6" fill="#161b22" stroke="#58a6ff" stroke-width="1.5" stroke-dasharray="4 3"/>
+  <text x="94" y="342" text-anchor="middle" fill="#58a6ff" font-size="11" font-weight="bold">fs.read()</text>
+  <text x="94" y="357" text-anchor="middle" fill="#8b949e" font-size="9">docs/*.md</text>
+
+  <!-- Arrow fs.read → provider fn (diagonal) -->
+  <line x1="168" y1="344" x2="189" y2="320" stroke="#58a6ff" stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#ab)"/>
+
+  <!-- Arrow provider fn → ContextFile[] -->
+  <line x1="300" y1="336" x2="300" y2="367" stroke="#238636" stroke-width="1.5" marker-end="url(#agn)"/>
+
+  <!-- ContextFile[] box -->
+  <rect x="170" y="368" width="260" height="44" rx="6" fill="#0d2119" stroke="#238636" stroke-width="1.5"/>
+  <text x="300" y="388" text-anchor="middle" fill="#3fb950" font-size="12" font-weight="bold">ContextFile[]</text>
+  <text x="300" y="404" text-anchor="middle" fill="#8b949e" font-size="10">{ path: string, content: string }</text>
+
+  <!-- Arrow ContextFile[] → system prompt -->
+  <line x1="300" y1="412" x2="300" y2="446" stroke="#484f58" stroke-width="1.5" marker-end="url(#ag)"/>
+
+  <!-- System prompt box -->
+  <rect x="170" y="447" width="260" height="44" rx="6" fill="#0c2d6b" stroke="#1f6feb" stroke-width="1.5"/>
+  <text x="300" y="467" text-anchor="middle" fill="#58a6ff" font-size="12" font-weight="bold">system prompt</text>
+  <text x="300" y="483" text-anchor="middle" fill="#8b949e" font-size="10">injected into review agent</text>
+</svg>

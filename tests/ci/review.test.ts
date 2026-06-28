@@ -2,6 +2,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../../src/core/diff-resolver.js", () => ({
   resolveDiff: vi.fn(),
+  extractDiffFiles: vi.fn(() => []),
+}));
+
+vi.mock("../../src/core/doc-context.js", () => ({
+  loadDocContext: vi.fn().mockResolvedValue([]),
 }));
 
 vi.mock("../../src/core/context.js", () => ({
@@ -26,11 +31,13 @@ import { Agent } from "@earendil-works/pi-agent-core";
 import { createReadOnlyTools } from "@earendil-works/pi-coding-agent";
 import { loadContext } from "../../src/core/context.js";
 import { resolveDiff } from "../../src/core/diff-resolver.js";
+import { loadDocContext } from "../../src/core/doc-context.js";
 import { sendOutput } from "../../src/core/output.js";
-import { review } from "../../src/ci/review.js";
+import { review, parseDocDirs } from "../../src/ci/review.js";
 
 const resolveDiffMock = vi.mocked(resolveDiff);
 const loadContextMock = vi.mocked(loadContext);
+const loadDocContextMock = vi.mocked(loadDocContext);
 const sendOutputMock = vi.mocked(sendOutput);
 const AgentMock = vi.mocked(Agent);
 const createReadOnlyToolsMock = vi.mocked(createReadOnlyTools);
@@ -67,6 +74,9 @@ describe("review", () => {
     delete process.env.GITHUB_TOKEN;
     delete process.env.GITHUB_REPOSITORY;
     delete process.env.PI_API_KEY;
+    delete process.env.PI_REVIEWER_DOC_DIRS;
+    // model is mandatory — provide a default for tests that don't exercise it
+    process.env.PI_REVIEWER_MODEL = "anthropic/claude-opus-4-6";
   });
 
   it("dry-run logs source and prompt, without calling agent or output", async () => {
@@ -140,6 +150,88 @@ describe("review", () => {
 
     expect(AgentMock).toHaveBeenCalled();
     expect(sendOutputMock).toHaveBeenCalled();
+  });
+
+  it("does not scan doc dirs when none are configured (opt-in)", async () => {
+    await review({ cwd: "/repo" });
+
+    expect(loadDocContextMock).not.toHaveBeenCalled();
+  });
+
+  it("scans configured doc dirs and injects matching docs into the system prompt", async () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    loadDocContextMock.mockResolvedValueOnce([{ path: ".pi/notes/auth.md", content: "auth doc body" }]);
+
+    await review({ cwd: "/repo", dryRun: true, docDirs: [".pi/notes"] });
+
+    expect(loadDocContextMock).toHaveBeenCalledWith(
+      expect.objectContaining({ cwd: "/repo", docDirs: [".pi/notes"] })
+    );
+    expect(logSpy).toHaveBeenCalledWith(
+      expect.stringContaining("System prompt:")
+    );
+    expect(logSpy).toHaveBeenCalledWith(
+      expect.stringContaining("auth doc body")
+    );
+  });
+
+  it("reads doc dirs from PI_REVIEWER_DOC_DIRS env when option absent", async () => {
+    process.env.PI_REVIEWER_DOC_DIRS = ".pi/notes, docs/review";
+
+    await review({ cwd: "/repo" });
+
+    expect(loadDocContextMock).toHaveBeenCalledWith(
+      expect.objectContaining({ docDirs: [".pi/notes", "docs/review"] })
+    );
+  });
+
+  it("parseDocDirs splits on commas and newlines, trims, drops empties", () => {
+    expect(parseDocDirs(undefined)).toEqual([]);
+    expect(parseDocDirs("")).toEqual([]);
+    expect(parseDocDirs(".pi/notes, docs/review")).toEqual([".pi/notes", "docs/review"]);
+    expect(parseDocDirs(".pi/notes\n\ndocs/review,")).toEqual([".pi/notes", "docs/review"]);
+  });
+
+  it("resolves a provider/modelId with slashes (OpenRouter) for the agent", async () => {
+    await review({ cwd: "/repo", model: "openrouter/openai/gpt-5.4-mini" });
+
+    expect(AgentMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        initialState: expect.objectContaining({
+          model: expect.objectContaining({ provider: "openrouter", id: "openai/gpt-5.4-mini" }),
+        }),
+      })
+    );
+  });
+
+  it("throws on an invalid model format", async () => {
+    await expect(review({ cwd: "/repo", model: "gpt-5" })).rejects.toThrow(/Invalid model format/);
+  });
+
+  it("throws when no model is configured", async () => {
+    delete process.env.PI_REVIEWER_MODEL;
+    await expect(review({ cwd: "/repo" })).rejects.toThrow(/No model configured/);
+  });
+
+  it("surfaces a provider error attached to the last assistant message", async () => {
+    AgentMock.mockImplementation(function () {
+      return {
+        subscribe: vi.fn((cb: (event: unknown) => void) => {
+          cb({
+            type: "agent_end",
+            // agent_end has no top-level error; it lives on the message (e.g. 402)
+            messages: [
+              { role: "user", content: [{ type: "text", text: "diff" }] },
+              { role: "assistant", content: [], stopReason: "error", errorMessage: "402 This request requires more credits" },
+            ],
+          });
+          return vi.fn();
+        }),
+        prompt: vi.fn().mockResolvedValue(undefined),
+      } as any;
+    });
+
+    await expect(review({ cwd: "/repo" })).rejects.toThrow(/Agent failed: 402 This request requires more credits/);
   });
 
   it("passes final agent response to sendOutput", async () => {

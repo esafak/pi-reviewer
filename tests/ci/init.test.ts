@@ -54,6 +54,7 @@ jobs:
   review:
     runs-on: ubuntu-latest
     permissions:
+      contents: read
       pull-requests: write
 
     steps:
@@ -63,7 +64,11 @@ jobs:
         with:
           github-token: \${{ secrets.GITHUB_TOKEN }}
           pi-api-key: \${{ secrets.PI_API_KEY }}
+          model: openrouter/openai/gpt-5.4-mini
           min-severity: \${{ inputs.min-severity || 'info' }}
+          # Opt in to injecting matching project docs into the review.
+          # Comma-separated dirs scanned for .md files with a 'description' frontmatter.
+          # doc-dirs: '.pi/notes,docs/review'
 `);
   });
 

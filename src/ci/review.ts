@@ -1,9 +1,10 @@
 import { Agent } from "@earendil-works/pi-agent-core";
-import { getModel } from "@earendil-works/pi-ai";
+import { getModel, type Api, type Model } from "@earendil-works/pi-ai";
 import { createReadOnlyTools } from "@earendil-works/pi-coding-agent";
 
 import { loadContext, mergeContextFiles } from "../core/context.js";
-import { resolveDiff } from "../core/diff-resolver.js";
+import { resolveDiff, extractDiffFiles } from "../core/diff-resolver.js";
+import { loadDocContext } from "../core/doc-context.js";
 import { sendOutput, extractLastAssistantText, type OutputTarget, type Severity } from "../core/output.js";
 import { buildJSONSystemPrompt, buildUserPrompt, type MinSeverity } from "../core/prompt-builder.js";
 
@@ -20,8 +21,15 @@ export interface ReviewOptions {
   commitId?: string;
   model?: string; // format: "provider/modelId" e.g. "anthropic/claude-opus-4-6"
   minSeverity?: MinSeverity;
+  docDirs?: string[]; // dirs to scan for doc-context; empty = inject nothing (opt-in)
 }
 
+
+/** Parses a comma/newline-separated doc-dirs string into a trimmed, non-empty list. */
+export function parseDocDirs(raw: string | undefined): string[] {
+  if (!raw) return [];
+  return raw.split(/[,\n]/).map(d => d.trim()).filter(Boolean);
+}
 
 export async function review(options: ReviewOptions): Promise<void> {
   const cwd = options.cwd ?? process.cwd();
@@ -45,7 +53,15 @@ export async function review(options: ReviewOptions): Promise<void> {
     console.log("[pi-reviewer] context: no conventions found (AGENTS.md / CLAUDE.md / REVIEW.md)");
   }
 
-  const systemPrompt = buildJSONSystemPrompt(context, options.minSeverity);
+  const docDirs = options.docDirs ?? parseDocDirs(process.env.PI_REVIEWER_DOC_DIRS);
+  const docContextFiles = docDirs.length > 0
+    ? await loadDocContext({ cwd, diffFiles: extractDiffFiles(diff), docDirs })
+    : [];
+  if (docContextFiles.length > 0) {
+    console.log(`[pi-reviewer] doc-context loaded: ${docContextFiles.map(f => f.path).join(", ")}`);
+  }
+
+  const systemPrompt = buildJSONSystemPrompt(context, options.minSeverity, docContextFiles);
   const userPrompt = buildUserPrompt(diff, skippedFiles);
 
   const target: OutputTarget =
@@ -58,17 +74,26 @@ export async function review(options: ReviewOptions): Promise<void> {
     return;
   }
 
-  let model;
   const modelStr = options.model ?? process.env.PI_REVIEWER_MODEL;
-  if (modelStr) {
-    const [provider, modelId] = modelStr.split("/");
-    if (!provider || !modelId) {
-      throw new Error(`Invalid model format "${modelStr}". Expected "provider/modelId" e.g. "anthropic/claude-opus-4-6"`);
-    }
-    model = getModel(provider as any, modelId as any);
+  if (!modelStr) {
+    throw new Error(
+      `No model configured. Set the "model" action input (or PI_REVIEWER_MODEL) to a "provider/modelId" — e.g. "openrouter/openai/gpt-5.4-mini".`,
+    );
   }
-
-  const resolvedModel = model ?? getModel("anthropic", "claude-opus-4-6");
+  // Split on the FIRST slash so OpenRouter ids that contain slashes survive
+  // (e.g. "openrouter/openai/gpt-5.4-mini" → provider "openrouter", id "openai/gpt-5.4-mini").
+  const slash = modelStr.indexOf("/");
+  if (slash <= 0 || slash === modelStr.length - 1) {
+    throw new Error(
+      `Invalid model format "${modelStr}". Expected "provider/modelId" — e.g. "anthropic/claude-opus-4-6" or "openrouter/openai/gpt-5.4-mini"`,
+    );
+  }
+  const provider = modelStr.slice(0, slash);
+  const modelId = modelStr.slice(slash + 1);
+  const resolvedModel = getModel(provider as Parameters<typeof getModel>[0], modelId as never) as Model<Api> | undefined;
+  if (!resolvedModel) {
+    throw new Error(`Unknown model "${modelStr}" — not found in the pi model registry.`);
+  }
   console.log(`[pi-reviewer] running agent (model: ${resolvedModel.api})`);
 
   const agent = new Agent({
@@ -96,18 +121,37 @@ export async function review(options: ReviewOptions): Promise<void> {
         if ((event as { type?: string }).type !== "agent_end") return;
 
         const ev = event as { messages?: unknown; stopReason?: string; errorMessage?: string };
+        const msgs = Array.isArray(ev.messages) ? ev.messages : [];
+        const lastAssistant = [...msgs]
+          .reverse()
+          .find((m) => (m as { role?: string })?.role === "assistant") as
+          | { stopReason?: string; errorMessage?: string; content?: unknown }
+          | undefined;
 
-        if (ev.stopReason === "error") {
-          const msg = ev.errorMessage ?? "Agent ended with an error (no message)";
-          console.error(`[pi-reviewer] agent error: ${msg}`);
-          reject(new Error(`Agent failed: ${msg}`));
+        // The error may surface on the agent_end event OR on the last assistant
+        // message (e.g. provider 402/429/401 — pi-agent-core attaches it there).
+        const errorMessage =
+          (ev.stopReason === "error" ? ev.errorMessage : undefined) ??
+          (lastAssistant?.stopReason === "error" ? lastAssistant.errorMessage : undefined);
+        if (errorMessage) {
+          console.error(`[pi-reviewer] agent error: ${errorMessage}`);
+          reject(new Error(`Agent failed: ${errorMessage}`));
           return;
         }
 
         finalResponse = extractLastAssistantText(ev.messages);
 
         if (!finalResponse.trim()) {
-          console.error("[pi-reviewer] agent returned an empty response");
+          let shape: unknown = typeof lastAssistant?.content;
+          if (Array.isArray(lastAssistant?.content)) {
+            shape = (lastAssistant!.content as Array<Record<string, unknown>>).map((p) => ({
+              type: p?.type ?? typeof p,
+              len: typeof p?.text === "string" ? p.text.length : typeof p?.thinking === "string" ? p.thinking.length : 0,
+            }));
+          }
+          console.error(
+            `[pi-reviewer] agent returned an empty response — stopReason=${ev.stopReason ?? "unknown"}, assistantMessages=${msgs.filter((m) => (m as { role?: string })?.role === "assistant").length}, lastAssistantContent=${JSON.stringify(shape)}`,
+          );
           reject(new Error("Agent returned an empty response"));
           return;
         }

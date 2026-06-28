@@ -34,6 +34,7 @@ jobs:
   review:
     runs-on: ubuntu-latest
     permissions:
+      contents: read
       pull-requests: write
     steps:
       - uses: actions/checkout@v4
@@ -41,11 +42,15 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           pi-api-key: ${{ secrets.PI_API_KEY }}
+          model: openrouter/openai/gpt-5.4-mini
           min-severity: ${{ inputs.min-severity || 'info' }}
+          # Opt in to injecting matching project docs into the review.
+          # Comma-separated dirs scanned for .md files with a 'description' frontmatter.
+          # doc-dirs: '.pi/notes,docs/review'
 ```
 
 Commit it to your default branch, then add your API key to your repo secrets:
-- `PI_API_KEY` — your [pi](https://github.com/mariozechner/pi) API key
+- `PI_API_KEY` — the API key **for the provider in `model`**. The action forwards this key to that model's endpoint, so it must match the provider. For `openrouter/...` use an OpenRouter key (`sk-or-...`); for `anthropic/...` an Anthropic key; etc.
 
 ## Usage
 
@@ -56,14 +61,41 @@ Every pull request triggers an automatic review comment posted by `github-action
 | Input | Required | Description |
 |---|---|---|
 | `github-token` | yes | GitHub token to post PR comments |
-| `pi-api-key` | yes | pi API key |
-| `model` | no | Model to use in `provider/modelId` format (e.g. `anthropic/claude-opus-4-6`) |
+| `pi-api-key` | yes | API key for the model's provider (forwarded to the model endpoint; e.g. an OpenRouter `sk-or-...` key for `openrouter/...` models) |
+| `model` | yes | Model to use in `provider/modelId` format (e.g. `openrouter/openai/gpt-5.4-mini`) |
 | `post-comment` | no | Post review as a GitHub PR comment (default: `true`) |
 | `min-severity` | no | Minimum severity: `info`, `warn`, or `critical` (default: `info`) |
+| `doc-dirs` | no | Comma-separated dirs to scan for docs to inject into the review (default: empty — inject nothing) |
 | `setup-node` | no | Set up Node 24 via `actions/setup-node` (default: `true`). Disable if the runner image already provides Node. |
 | `cache` | no | Cache the pnpm store across runs (default: `true`). Disable on runners where the cache service is unavailable or unwanted. |
 
 The action runs on Node 24 (LTS). Deps are installed with [pnpm](https://pnpm.io); the pnpm store is cached by a standalone `actions/cache` step keyed on a hash of `pnpm-lock.yaml`, so warm runs skip the download. The cache step uses `continue-on-error`, so a cache failure degrades to an uncached install rather than aborting the review.
+
+## Doc context
+
+The reviewer can pull relevant project documentation into the review prompt based on which files changed in the diff. It is **opt-in** in CI: nothing is injected unless you set `doc-dirs`.
+
+```yaml
+      - uses: zeflq/pi-reviewer@main
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          pi-api-key: ${{ secrets.PI_API_KEY }}
+          doc-dirs: '.pi/notes,docs/review'
+```
+
+For each configured dir, any `.md` file with a `description` frontmatter field is a candidate:
+
+```markdown
+---
+description: Authentication flows, JWT tokens, session management
+---
+
+# Auth Guide
+
+...content injected into the review when auth-related files change...
+```
+
+At review time, the action extracts keywords from the changed file paths (e.g. `src/auth/login.ts` → `auth`, `login`), then injects any doc whose `description` or filename matches a keyword. Keep descriptions specific enough to avoid over-matching, but broad enough to cover the files they apply to.
 
 ## Bot identity
 
@@ -90,5 +122,6 @@ steps:
     with:
       github-token: ${{ steps.bot-token.outputs.token }}
       pi-api-key: ${{ secrets.PI_API_KEY }}
+      model: openrouter/openai/gpt-5.4-mini
       min-severity: ${{ inputs.min-severity || 'info' }}
 ```
