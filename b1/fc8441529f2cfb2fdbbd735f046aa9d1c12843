@@ -1,0 +1,20 @@
+.github/renovate.json5
+  s_86c18325832807::t_5af82189892e8c 16-18
+  s_86c18325832807::t_1fac9aef319b01 1-15,19
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "b1fc8441529f2cfb2fdbbd735f046aa9d1c12843",
+  "prompts": {},
+  "sessions": {
+    "s_86c18325832807": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_0c2c039e0ffexaG35KYvlCcEb7",
+        "model": "glm-5.1"
+      },
+      "human_author": "Emre Şafak <3928300+esafak@users.noreply.github.com>"
+    }
+  }
+}
