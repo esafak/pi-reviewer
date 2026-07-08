@@ -1,0 +1,20 @@
+action.yml
+  s_86c18325832807::t_decfd03b5848f0 54
+  s_86c18325832807::t_8fae1beda892d9 68
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "d6770e5c40d620b5d12448a1dee59ca3b15b94f3",
+  "prompts": {},
+  "sessions": {
+    "s_86c18325832807": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_0c2c039e0ffexaG35KYvlCcEb7",
+        "model": "glm-5.1"
+      },
+      "human_author": "Emre Şafak <3928300+esafak@users.noreply.github.com>"
+    }
+  }
+}
