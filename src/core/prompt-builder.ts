@@ -49,6 +49,7 @@ export function buildJSONSystemPrompt(
     ...buildSharedBase(minSeverity),
     "- Do not repeat what the project conventions already enforce",
     "",
+    "If a submit_review tool is available, prefer calling it to submit your review as structured data instead of emitting JSON text.",
     "Return only a JSON object matching this schema exactly (no markdown fences, no extra text, no extra fields — do not include the diff or any other field):",
     "<output_format>",
     "{",

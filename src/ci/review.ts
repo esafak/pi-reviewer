@@ -7,6 +7,7 @@ import { resolveDiff, extractDiffFiles } from "../core/diff-resolver.js";
 import { loadDocContext } from "../core/doc-context.js";
 import { sendOutput, extractLastAssistantText, type OutputTarget, type Severity } from "../core/output.js";
 import { buildJSONSystemPrompt, buildUserPrompt, type MinSeverity } from "../core/prompt-builder.js";
+import { createReviewTool } from "../core/review-tool.js";
 
 export interface ReviewOptions {
   cwd?: string;
@@ -96,11 +97,13 @@ export async function review(options: ReviewOptions): Promise<void> {
   }
   console.log(`[pi-reviewer] running agent (model: ${resolvedModel.api})`);
 
+  const { tool: reviewTool, getResult } = createReviewTool();
+
   const agent = new Agent({
     initialState: {
       systemPrompt,
       model: resolvedModel,
-      tools: createReadOnlyTools(cwd),
+      tools: [...createReadOnlyTools(cwd), reviewTool],
       thinkingLevel: "off",
     },
     getApiKey: async () => {
@@ -136,6 +139,19 @@ export async function review(options: ReviewOptions): Promise<void> {
         if (errorMessage) {
           console.error(`[pi-reviewer] agent error: ${errorMessage}`);
           reject(new Error(`Agent failed: ${errorMessage}`));
+          return;
+        }
+
+        // Prefer the submit_review tool result (schema-validated happy path).
+        // Fall back to text extraction + the fixed parser for models that don't
+        // call the tool.
+        const toolResult = getResult();
+        if (toolResult) {
+          finalResponse = JSON.stringify(toolResult);
+          console.log(
+            `[pi-reviewer] agent completed via submit_review tool — ${toolResult.comments.length} comment(s)`,
+          );
+          resolve();
           return;
         }
 

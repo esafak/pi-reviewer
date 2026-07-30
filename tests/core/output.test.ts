@@ -166,6 +166,142 @@ describe("parseAgentResponse", () => {
     expect(result.comments).toHaveLength(1);
     expect(result.comments[0].severity).toBe("CRITICAL");
   });
+
+  // The model emits chain-of-thought reasoning with inline braces (unquoted
+  // keys → not valid JSON), inner ```ts / ```json fences, then the final
+  // valid ```json review fence with 6 comments. The old greedy-fence regex
+  // spanned first-open → last-close, mashing everything into one invalid blob;
+  // the old first-brace extractor grabbed the unquoted `{ success: true, ... }`
+  // from reasoning prose. Last-valid-wins must pick the final review.
+
+  it("parses the production incident comment body (reasoning + inner fences + final valid review)", () => {
+    const body = [
+      "## Pi Reviewer",
+      "",
+      "Everything looks consistent. Summary of findings:",
+      "",
+      '1. Data nesting mismatch. The form action returns `{ success: true, data: result.data }`,',
+      "   which SvelteKit wraps as `{ type: \"success\", data: { success: true, data: MediaUploadResponse } }`.",
+      "",
+      "The test expects:",
+      "```ts",
+      'await expect(promise).resolves.toEqual({ resourceId: "123" });',
+      "```",
+      "",
+      "And the mock response is:",
+      "```json",
+      '{"type":"success","data":{"resourceId":"123"}}',
+      "```",
+      "",
+      "So the bug is real. Let me write the review.",
+      "",
+      "```json",
+      JSON.stringify({
+        summary: "Critical data-nesting bug in the upload flow. Attachments silently fail.",
+        comments: [
+          { file: "upload.ts", line: 30, side: "RIGHT", severity: "CRITICAL", body: "`resolve(body?.data as T)` extracts the wrong layer." },
+          { file: "upload.test.ts", line: 79, side: "RIGHT", severity: "CRITICAL", body: "Test mock doesn't match real protocol." },
+          { file: "attachments.test.ts", line: 72, side: "RIGHT", severity: "CRITICAL", body: "Mock skips the SvelteKit wrapper." },
+          { file: "+server.ts", line: 14, side: "RIGHT", severity: "WARN", body: "Only GET is exported." },
+          { file: "attachments.ts", line: 45, side: "RIGHT", severity: "INFO", body: "`INLINE_MAX_BYTES` mirrors backend." },
+          { file: "upload.ts", line: 798, side: "RIGHT", severity: "CRITICAL", body: "Root cause: form action nests return value." },
+        ],
+      }),
+      "```",
+      "",
+      "---",
+      "*Review by [pi-reviewer](https://github.com/zeflq/pi-reviewer)*",
+    ].join("\n");
+
+    const result = parseAgentResponse(body);
+
+    expect(result.summary).toBe("Critical data-nesting bug in the upload flow. Attachments silently fail.");
+    expect(result.comments).toHaveLength(6);
+    expect(result.comments.map((c) => c.severity)).toEqual([
+      "CRITICAL", "CRITICAL", "CRITICAL", "WARN", "INFO", "CRITICAL",
+    ]);
+    // Severity emoji prefix is applied
+    expect(result.comments[0].body).toMatch(/^🔴 /);
+    expect(result.comments[3].body).toMatch(/^🟡 /);
+    expect(result.comments[4].body).toMatch(/^🔵 /);
+  });
+
+  it("nested ```json fence inside a comment body is not treated as a block boundary", () => {
+    // The comment body itself contains a ```json snippet. The non-greedy fence
+    // extractor may truncate early, but the brace-aware extractor must still
+    // find and validate the complete object.
+    const innerFence = 'Example:\n```json\n{"resourceId": "123"}\n```';
+    const json = JSON.stringify({
+      summary: "review",
+      comments: [{ file: "a.ts", line: 1, side: "RIGHT", severity: "WARN", body: innerFence }],
+    });
+    const result = parseAgentResponse("```json\n" + json + "\n```");
+    expect(result.comments).toHaveLength(1);
+    expect(result.comments[0].body).toContain('"resourceId"');
+  });
+
+  it("chooses the last valid {summary, comments} when multiple exist (last-wins)", () => {
+    const first = JSON.stringify({ summary: "first draft", comments: [] });
+    const second = JSON.stringify({
+      summary: "final review",
+      comments: [{ file: "b.ts", line: 2, side: "LEFT", severity: "CRITICAL", body: "crash" }],
+    });
+    const result = parseAgentResponse(`Draft:\n${first}\n\nFinal:\n${second}`);
+    expect(result.summary).toBe("final review");
+    expect(result.comments).toHaveLength(1);
+    expect(result.comments[0].file).toBe("b.ts");
+  });
+
+  it("prefers a review with comments over an empty-comments example in trailing prose", () => {
+    // Real review in a fence, followed by a prose example with empty comments.
+    // Without the non-empty-preference guard, the trailing example would win
+    // (last-wins + comments.every() is vacuously true for []).
+    const real = JSON.stringify({
+      summary: "Real review",
+      comments: [{ file: "a.ts", line: 1, side: "RIGHT", severity: "WARN", body: "issue" }],
+    });
+    const example = JSON.stringify({ summary: "example shape", comments: [] });
+    const result = parseAgentResponse(`\`\`\`json\n${real}\n\`\`\`\nFor reference, the shape is: ${example}`);
+    expect(result.summary).toBe("Real review");
+    expect(result.comments).toHaveLength(1);
+  });
+
+  it("still returns summary-only review when it is the only valid candidate", () => {
+    // A genuine summary-only review (no comments) should still parse when
+    // there's no competing candidate with comments.
+    const result = parseAgentResponse(JSON.stringify({ summary: "LGTM", comments: [] }));
+    expect(result.summary).toBe("LGTM");
+    expect(result.comments).toEqual([]);
+  });
+
+  it("handles braces and quotes inside JSON string values (brace scanner edge case)", () => {
+    // The brace scanner must track inString state so braces/quotes inside
+    // string values don't confuse depth tracking.
+    const result = parseAgentResponse(
+      JSON.stringify({
+        summary: 'The config uses { "nested": true } and }{ patterns',
+        comments: [
+          { file: "a.ts", line: 1, side: "RIGHT", severity: "WARN", body: 'Check the `} catch(e) {}` block' },
+        ],
+      })
+    );
+    expect(result.summary).toBe('The config uses { "nested": true } and }{ patterns');
+    expect(result.comments).toHaveLength(1);
+    expect(result.comments[0].body).toContain("} catch(e) {}");
+  });
+
+  it("recovers via fenced block when reasoning has a stray unclosed brace", () => {
+    // If reasoning prose contains an unclosed `{`, the brace scanner gets
+    // stuck at depth 1 and can't find subsequent objects — but the fence
+    // extractor runs independently, so the review is still recoverable.
+    const real = JSON.stringify({
+      summary: "found it",
+      comments: [{ file: "a.ts", line: 1, side: "RIGHT", severity: "WARN", body: "fix" }],
+    });
+    const result = parseAgentResponse(`Consider this object { incomplete\n\n\`\`\`json\n${real}\n\`\`\``);
+    expect(result.summary).toBe("found it");
+    expect(result.comments).toHaveLength(1);
+  });
 });
 
 describe("sendOutput", () => {

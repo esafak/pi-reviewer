@@ -89,20 +89,65 @@ function isReviewComment(value: unknown): value is ReviewComment {
   );
 }
 
-function extractFirstJsonObject(text: string): string | null {
-  const start = text.indexOf("{");
-  if (start === -1) return null;
-  let depth = 0, inString = false, escape = false;
-  for (let i = start; i < text.length; i++) {
-    const c = text[i];
-    if (escape)                  { escape = false; continue; }
-    if (c === "\\" && inString)  { escape = true;  continue; }
-    if (c === '"')               { inString = !inString; continue; }
-    if (inString) continue;
-    if (c === "{") depth++;
-    else if (c === "}") { depth--; if (depth === 0) return text.slice(start, i + 1); }
+/** A candidate substring tagged with its start index in the original text. */
+interface Candidate {
+  content: string;
+  index: number;
+}
+
+/**
+ * Extract the inner content of **every** fenced code block in `text`.
+ * Uses a non-greedy global match so each ```...``` pair yields exactly one
+ * block — fixing the previous greedy regex that spanned first-open → last-close
+ * and swallowed everything (including inner fences) into one blob.
+ *
+ * Returns candidates tagged with the index of the opening fence so the caller
+ * can sort them by source position.
+ */
+function extractAllFencedBlocks(text: string): Candidate[] {
+  const blocks: Candidate[] = [];
+  const re = /```(?:json)?\s*([\s\S]*?)```/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    blocks.push({ content: m[1].trim(), index: m.index });
   }
-  return null;
+  return blocks;
+}
+
+/**
+ * String/escape-aware brace scanner that finds **every** top-level `{...}`
+ * object in `text` (not just the first). Handles braces inside JSON string
+ * values and escape sequences so they don't confuse depth tracking.
+ *
+ * Note: a stray unclosed `{` in reasoning prose will swallow every subsequent
+ * object until EOF — but fenced blocks are extracted independently, so the
+ * review is still recoverable when the model uses a code fence.
+ *
+ * Returns candidates tagged with the index of the opening `{`.
+ */
+function extractAllJsonObjects(text: string): Candidate[] {
+  const objects: Candidate[] = [];
+  let depth = 0, start = -1, inString = false, escape = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (escape) { escape = false; continue; }
+    if (c === "\\" && inString) { escape = true; continue; }
+    if (c === '"') { inString = !inString; continue; }
+    if (inString) continue;
+    if (c === "{") {
+      if (depth === 0) start = i;
+      depth++;
+    } else if (c === "}") {
+      if (depth > 0) {
+        depth--;
+        if (depth === 0 && start !== -1) {
+          objects.push({ content: text.slice(start, i + 1), index: start });
+          start = -1;
+        }
+      }
+    }
+  }
+  return objects;
 }
 
 function tryParseJSON(raw: string): Record<string, unknown> | null {
@@ -123,22 +168,28 @@ function tryParseJSON(raw: string): Record<string, unknown> | null {
 }
 
 export function parseAgentResponse(text: string, minSeverity: Severity = "INFO"): ReviewResult {
-  const candidates: string[] = [];
+  // Build candidates sorted by source position. We return the **last** valid
+  // candidate — this handles models that reason in prose before emitting the
+  // final review (the production incident pattern).
+  //
+  // As an additional guard, among valid candidates we prefer ones with
+  // non-empty comments over ones with empty comments. This prevents a trailing
+  // "here's the structure: {summary, comments:[]}" example in prose from
+  // stealing the win from the real review (comments.every() is vacuously true
+  // for []).
+  const candidates: Candidate[] = [
+    { content: text.trim(), index: 0 },
+    ...extractAllFencedBlocks(text),
+    ...extractAllJsonObjects(text),
+  ];
+  candidates.sort((a, b) => a.index - b.index);
 
-  // 1. raw text
-  candidates.push(text.trim());
+  // No early return: last-wins requires a full scan.
+  let resultWithComments: ReviewResult | null = null;
+  let resultAny: ReviewResult | null = null;
 
-  // 2. content inside the outermost ```json ... ``` or ``` ... ``` fence
-  // Use greedy match so inner fences (e.g. code blocks in comment bodies) don't truncate early.
-  const fenceMatch = text.match(/```(?:json)?\s*([\s\S]*)\s*```/i);
-  if (fenceMatch) candidates.push(fenceMatch[1].trim());
-
-  // 3. brace-balanced, string-aware extraction of the first complete JSON object
-  const extracted = extractFirstJsonObject(text);
-  if (extracted) candidates.push(extracted);
-
-  for (const candidate of candidates) {
-    const parsed = tryParseJSON(candidate);
+  for (const { content } of candidates) {
+    const parsed = tryParseJSON(content);
     if (
       parsed &&
       typeof parsed.summary === "string" &&
@@ -155,9 +206,15 @@ export function parseAgentResponse(text: string, minSeverity: Severity = "INFO")
           return { ...c, body: `${emoji} ${body}` };
         });
       const diff = typeof parsed.diff === "string" ? parsed.diff : undefined;
-      return { summary: parsed.summary, comments, ...(diff !== undefined ? { diff } : {}) };
+      const review = { summary: parsed.summary, comments, ...(diff !== undefined ? { diff } : {}) };
+      resultAny = review;
+      if (comments.length > 0) resultWithComments = review;
     }
   }
+
+  // Prefer the last review with comments; fall back to last review overall.
+  const result = resultWithComments ?? resultAny;
+  if (result) return result;
 
   return { summary: text, comments: [] };
 }
