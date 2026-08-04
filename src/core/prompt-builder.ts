@@ -64,7 +64,7 @@ export function buildJSONSystemPrompt(
     "- summary: overall review written in Markdown",
     "- comments: inline comments attached to specific diff lines (may be empty [])",
     "- file: relative path from repo root",
-    "- line: line number in the file (not the diff position)",
+    "- line: line number of a changed or context line within a diff hunk (only lines shown in the diff can receive comments — never pick an arbitrary line outside the diff)",
     '- side: "RIGHT" for added/context lines, "LEFT" for removed lines',
     '- severity: "CRITICAL" | "WARN" | "INFO"',
     "- body: inline comment text, may use Markdown",

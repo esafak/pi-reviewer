@@ -1,6 +1,8 @@
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
 
+import { parseDiffPositions, partitionComments } from "./diff-positions.js";
+
 export type OutputTarget = "terminal" | "comment" | "file";
 export type Severity = "CRITICAL" | "WARN" | "INFO";
 
@@ -42,6 +44,10 @@ export interface OutputOptions {
   repo?: string;
   commitId?: string;
   minSeverity?: Severity;
+  /** Raw diff the model was shown. When present, inline comments are validated
+   * against it and unpositionable ones are moved to the review body instead of
+   * being sent inline (GitHub rejects the whole review on one bad position). */
+  diff?: string;
 }
 
 export function extractAssistantText(message: unknown): string {
@@ -239,6 +245,25 @@ function formatForGitHub(result: ReviewResult): string {
   return lines.join("\n");
 }
 
+/**
+ * Build the review body: the summary plus a clearly-marked section listing
+ * comments that could not be attached to a diff line. GitHub shows the body as
+ * the review's main text, so moved comments stay visible to the author.
+ */
+function buildReviewBody(summary: string, moved: ReviewComment[]): string {
+  if (moved.length === 0) return summary;
+  const lines = [summary, "", "### Comments Not Attached to the Diff", ""];
+  lines.push("These comments could not be attached to a specific diff line, so the reported location is approximate — the line is not part of the diff:");
+  for (const comment of moved) {
+    lines.push(
+      "",
+      `> ${SEVERITY_EMOJI[comment.severity]} **\`${comment.file}:${comment.line}\`** · ${comment.side} — location could not be verified`,
+      comment.body
+    );
+  }
+  return lines.join("\n");
+}
+
 export function formatForTerminal(result: ReviewResult): string {
   const lines = ["== Review Summary ==", result.summary];
 
@@ -286,24 +311,44 @@ export async function sendOutput(options: OutputOptions): Promise<void> {
       "Content-Type": "application/json",
     };
 
-    const inlineComments = result.comments.map((comment) => ({
+    // Split comments into inline (positionable on the diff) and moved (kept in
+    // the review body). Without a diff we can't validate positions, so every
+    // comment is treated as inline (local/SSH callers, which never pass a diff).
+    let inline = result.comments;
+    let moved: ReviewComment[] = [];
+    if (options.diff) {
+      const positions = parseDiffPositions(options.diff);
+      ({ inline, moved } = partitionComments(result.comments, positions));
+      if (moved.length > 0) {
+        console.log(
+          `[pi-reviewer] ${moved.length} comment(s) not positionable on the diff — moved to review body`
+        );
+      }
+    }
+
+    const inlineComments = inline.map((comment) => ({
       path: comment.file,
       line: comment.line,
       side: comment.side,
       body: comment.body,
     }));
 
-    // Try PR Reviews API first (supports inline comments)
-    if (inlineComments.length > 0 && options.commitId) {
-      console.log(`[pi-reviewer] posting review with ${inlineComments.length} inline comment(s)`);
-      const reviewResponse = await fetch(
+    const body = buildReviewBody(result.summary, moved);
+
+    // Try PR Reviews API first (supports inline comments and a body).
+    if ((inlineComments.length > 0 || moved.length > 0) && options.commitId) {
+      console.log(
+        `[pi-reviewer] posting review with ${inlineComments.length} inline comment(s)` +
+          (moved.length > 0 ? ` and ${moved.length} comment(s) in body` : "")
+      );
+      let reviewResponse = await fetch(
         `https://api.github.com/repos/${options.repo}/pulls/${options.prNumber}/reviews`,
         {
           method: "POST",
           headers,
           body: JSON.stringify({
             commit_id: options.commitId,
-            body: result.summary,
+            body,
             event: "COMMENT",
             comments: inlineComments,
           }),
@@ -313,11 +358,42 @@ export async function sendOutput(options: OutputOptions): Promise<void> {
         console.log("[pi-reviewer] review posted with inline comments");
         return;
       }
-      const errBody = await reviewResponse.text().catch(() => "");
-      console.warn(`[pi-reviewer] inline comments rejected (${reviewResponse.status}) — posting summary only. Reason: ${errBody}`);
+      let errBody = await reviewResponse.text().catch(() => "");
+      console.warn(
+        `[pi-reviewer] inline comments rejected (${reviewResponse.status}) — ${errBody}`
+      );
+
+      // A 422 means GitHub couldn't resolve at least one position we thought was
+      // valid (e.g. a force-push changed the diff between resolution and post).
+      // Retry once as a body-only review, moving every comment into the body.
+      if (reviewResponse.status === 422) {
+        const allMovedBody = buildReviewBody(result.summary, result.comments);
+        reviewResponse = await fetch(
+          `https://api.github.com/repos/${options.repo}/pulls/${options.prNumber}/reviews`,
+          {
+            method: "POST",
+            headers,
+            body: JSON.stringify({
+              commit_id: options.commitId,
+              body: allMovedBody,
+              event: "COMMENT",
+              comments: [],
+            }),
+          }
+        );
+        if (reviewResponse.ok) {
+          console.log("[pi-reviewer] review posted as body-only (inline positions rejected)");
+          return;
+        }
+        errBody = await reviewResponse.text().catch(() => "");
+        console.warn(
+          `[pi-reviewer] body-only review rejected (${reviewResponse.status}) — ${errBody}`
+        );
+      }
     }
 
-    // Fallback: Issues Comments API (always works, no inline comments)
+    // Last-resort fallback: Issues Comments API (hard failures, no commitId, or
+    // an all-unpositionable summary-only review).
     const issueResponse = await fetch(
       `https://api.github.com/repos/${options.repo}/issues/${options.prNumber}/comments`,
       {

@@ -376,7 +376,7 @@ describe("sendOutput", () => {
     );
   });
 
-  it("falls back to Issues API when Reviews API returns 422", async () => {
+  it("retries once as body-only review when Reviews API returns 422", async () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     const fetchMock = vi.fn()
       .mockResolvedValueOnce({ ok: false, status: 422, statusText: "Unprocessable Entity", text: vi.fn().mockResolvedValue("") })
@@ -395,11 +395,162 @@ describe("sendOutput", () => {
       commitId: "abc123",
     });
 
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("posting summary only"));
+    // First call: inline review (rejected 422). Second call: body-only retry,
+    // NOT the Issues API — every comment moved to the body, comments: [].
     expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      "https://api.github.com/repos/owner/repo/pulls/42/reviews"
+    );
     expect(fetchMock.mock.calls[1][0]).toBe(
+      "https://api.github.com/repos/owner/repo/pulls/42/reviews"
+    );
+    const retryBody = JSON.parse((fetchMock.mock.calls[1][1] as { body: string }).body);
+    expect(retryBody.comments).toEqual([]);
+    expect(retryBody.body).toContain("Missing null check");
+    expect(retryBody.body).toContain("Comments Not Attached to the Diff");
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("422"));
+  });
+
+  it("falls back to Issues API when the body-only retry also fails", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: false, status: 422, statusText: "Unprocessable Entity", text: vi.fn().mockResolvedValue("") })
+      .mockResolvedValueOnce({ ok: false, status: 422, statusText: "Unprocessable Entity", text: vi.fn().mockResolvedValue("") })
+      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue("") });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await sendOutput({
+      target: "comment",
+      content: JSON.stringify({
+        summary: "Needs fixes",
+        comments: [{ file: "src/auth.ts", line: 42, side: "RIGHT", severity: "WARN", body: "Missing null check" }],
+      }),
+      githubToken: "token123",
+      prNumber: 42,
+      repo: "owner/repo",
+      commitId: "abc123",
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock.mock.calls[2][0]).toBe(
       "https://api.github.com/repos/owner/repo/issues/42/comments"
     );
+  });
+
+  it("posts only positionable comments inline and moves the rest to the review body", async () => {
+    const fetchMock = okFetch();
+    vi.stubGlobal("fetch", fetchMock);
+
+    // tag-input.svelte diff: hunk @@ -17,6 +17,7 @@ makes new line 20
+    // positionable; line 36 is outside every hunk.
+    const diff = `diff --git a/client/web/src/lib/components/core/tag-input/tag-input.svelte b/client/web/src/lib/components/core/tag-input/tag-input.svelte
+--- a/client/web/src/lib/components/core/tag-input/tag-input.svelte
++++ b/client/web/src/lib/components/core/tag-input/tag-input.svelte
+@@ -17,6 +17,7 @@
+         handleTagAdded?: (tag: string) => void;
+         handleTagRemoved?: (tagRemoved: string, currentTags: string[]) => void;
+         errorTags?: string[];
++        customValidation?: (tag: string) => boolean;
+     }
+ </script>
+
+@@ -27,6 +28,7 @@
+         handleTagAdded,
+         handleTagRemoved,
+         errorTags,
++        customValidation,
+     }: TagInputProps = $props();
+ 
+     $effect(() => {
+`;
+
+    await sendOutput({
+      target: "comment",
+      content: JSON.stringify({
+        summary: "Review",
+        comments: [
+          { file: "client/web/src/lib/components/core/tag-input/tag-input.svelte", line: 20, side: "RIGHT", severity: "INFO", body: "positionable" },
+          { file: "client/web/src/lib/components/core/tag-input/tag-input.svelte", line: 36, side: "RIGHT", severity: "INFO", body: "unpositionable" },
+        ],
+      }),
+      githubToken: "token123",
+      prNumber: 42,
+      repo: "owner/repo",
+      commitId: "abc123",
+      diff,
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      "https://api.github.com/repos/owner/repo/pulls/42/reviews"
+    );
+    const payload = JSON.parse((fetchMock.mock.calls[0][1] as { body: string }).body);
+    expect(payload.comments).toEqual([
+      { path: "client/web/src/lib/components/core/tag-input/tag-input.svelte", line: 20, side: "RIGHT", body: "🔵 positionable" },
+    ]);
+    expect(payload.body).toContain("Review");
+    expect(payload.body).toContain("Comments Not Attached to the Diff");
+    expect(payload.body).toContain("unpositionable");
+  });
+
+  it("posts a body-only review when every comment is unpositionable", async () => {
+    const fetchMock = okFetch();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const diff = `diff --git a/src/auth.ts b/src/auth.ts
+--- a/src/auth.ts
++++ b/src/auth.ts
+@@ -40,1 +40,1 @@
+-foo
++bar
+`;
+
+    await sendOutput({
+      target: "comment",
+      content: JSON.stringify({
+        summary: "Review",
+        comments: [
+          { file: "src/other.ts", line: 5, side: "RIGHT", severity: "WARN", body: "not in diff" },
+        ],
+      }),
+      githubToken: "token123",
+      prNumber: 42,
+      repo: "owner/repo",
+      commitId: "abc123",
+      diff,
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const payload = JSON.parse((fetchMock.mock.calls[0][1] as { body: string }).body);
+    expect(payload.comments).toEqual([]);
+    expect(payload.body).toContain("Comments Not Attached to the Diff");
+    expect(payload.body).toContain("not in diff");
+  });
+
+  it("posts to Reviews API with all comments inline when no diff is provided", async () => {
+    const fetchMock = okFetch();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await sendOutput({
+      target: "comment",
+      content: JSON.stringify({
+        summary: "Needs fixes",
+        comments: [
+          { file: "src/auth.ts", line: 42, side: "RIGHT", severity: "WARN", body: "Missing null check" },
+        ],
+      }),
+      githubToken: "token123",
+      prNumber: 42,
+      repo: "owner/repo",
+      commitId: "abc123",
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      "https://api.github.com/repos/owner/repo/pulls/42/reviews"
+    );
+    const payload = JSON.parse((fetchMock.mock.calls[0][1] as { body: string }).body);
+    expect(payload.comments).toHaveLength(1);
   });
 
   it("uses Issues API with summary only when content has no inline comments", async () => {

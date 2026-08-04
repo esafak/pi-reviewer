@@ -189,6 +189,7 @@ export async function review(options: ReviewOptions): Promise<void> {
       repo,
       commitId: options.commitId,
       minSeverity: options.minSeverity as Severity | undefined,
+      diff,
     });
   } finally {
     unsubscribe?.();

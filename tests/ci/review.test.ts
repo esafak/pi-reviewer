@@ -146,6 +146,19 @@ describe("review", () => {
     );
   });
 
+  it("passes the resolved diff to sendOutput for position validation", async () => {
+    const diff = "diff --git a/src/a.ts b/src/a.ts\n--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1,3 +1,3 @@\n";
+    resolveDiffMock.mockResolvedValue({ diff, source: "git diff origin/main...HEAD" });
+
+    await review({ cwd: "/repo" });
+
+    expect(sendOutputMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        diff,
+      })
+    );
+  });
+
   it("allows explicit output option to override auto-detect", async () => {
     process.env.GITHUB_ACTIONS = "true";
 

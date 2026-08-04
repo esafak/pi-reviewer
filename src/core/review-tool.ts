@@ -21,7 +21,10 @@ const reviewSchema = Type.Object(
       Type.Object(
         {
           file: Type.String({ description: "Relative path from repo root." }),
-          line: Type.Integer({ description: "Line number in the file (not the diff position)." }),
+          line: Type.Integer({
+            description:
+              'Line number of a changed or context line within a diff hunk. Only lines that appear in the diff can receive comments — do not comment on arbitrary lines outside the diff.',
+          }),
           side: Type.Union([Type.Literal("LEFT"), Type.Literal("RIGHT")], {
             description: '"RIGHT" for added/context lines, "LEFT" for removed lines.',
           }),
