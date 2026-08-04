@@ -1,0 +1,27 @@
+dist/src/ci/review.js
+  s_10f2cfb3fbb827::t_e596f9a5b79865 9,70,75,108-117,146
+dist/src/core/diff-positions.js
+  s_10f2cfb3fbb827::t_5281cc13ca42b2 1-83
+dist/src/core/output.js
+  s_10f2cfb3fbb827::t_57b2142572345f 3,52-84,100-102,104,106-112,115,139-158,173-176,179-182,197-211,245-257,263-268,273,282-305,307-308
+dist/src/core/prompt-builder.js
+  s_10f2cfb3fbb827::t_e78652e10bea44 39,54
+dist/src/core/review-tool.js
+  s_10f2cfb3fbb827::t_3068ab93b90402 1-60
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.20",
+  "base_commit_sha": "67aa3cf702e57f95426f4145b500d9e50ff77ab7",
+  "prompts": {},
+  "sessions": {
+    "s_10f2cfb3fbb827": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_034ffe6c5ffeOoxEmjr5FY2lw4",
+        "model": "deepseek-v4-flash"
+      },
+      "human_author": "Emre Şafak <3928300+esafak@users.noreply.github.com>"
+    }
+  }
+}
