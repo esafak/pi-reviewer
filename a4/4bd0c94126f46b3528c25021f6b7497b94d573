@@ -1,0 +1,29 @@
+dist/src/ci/review.js
+  s_b19b72b1dc2f12::t_0e2a26a1622308 131-141
+dist/src/core/output.js
+  s_b19b72b1dc2f12::t_c20e7725073856 138,182-186,229-230,245-247
+src/ci/review.ts
+  s_b19b72b1dc2f12::t_71bd7d67d87c80 175-185
+src/core/output.ts
+  s_b19b72b1dc2f12::t_9e0bde25778df9 38-43,182-185,232,234-238,302-303,323-328
+tests/ci/review.test.ts
+  s_b19b72b1dc2f12::t_2d02712035a973 320-337
+tests/core/output.test.ts
+  s_b19b72b1dc2f12::t_89c112ad9b7bf0 6,48-58,343,567,573,588-604,650
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.21",
+  "base_commit_sha": "a44bd0c94126f46b3528c25021f6b7497b94d573",
+  "prompts": {},
+  "sessions": {
+    "s_b19b72b1dc2f12": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_02c3e5f87fferJFLyvCNo8yx1V",
+        "model": "glm-5.2"
+      },
+      "human_author": "Emre Şafak <3928300+esafak@users.noreply.github.com>"
+    }
+  }
+}
