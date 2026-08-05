@@ -35,6 +35,12 @@ export interface ReviewResult {
   tokenUsage?: TokenUsage;
 }
 
+export interface ParsedAgentResponse {
+  result: ReviewResult;
+  /** True only when the response contained a valid review-shaped JSON object. */
+  parsed: boolean;
+}
+
 export interface OutputOptions {
   target: OutputTarget;
   content: string;
@@ -173,7 +179,10 @@ function tryParseJSON(raw: string): Record<string, unknown> | null {
   return null;
 }
 
-export function parseAgentResponse(text: string, minSeverity: Severity = "INFO"): ReviewResult {
+export function parseAgentResponseWithStatus(
+  text: string,
+  minSeverity: Severity = "INFO",
+): ParsedAgentResponse {
   // Build candidates sorted by source position. We return the **last** valid
   // candidate — this handles models that reason in prose before emitting the
   // final review (the production incident pattern).
@@ -220,9 +229,13 @@ export function parseAgentResponse(text: string, minSeverity: Severity = "INFO")
 
   // Prefer the last review with comments; fall back to last review overall.
   const result = resultWithComments ?? resultAny;
-  if (result) return result;
+  if (result) return { result, parsed: true };
 
-  return { summary: text, comments: [] };
+  return { result: { summary: text, comments: [] }, parsed: false };
+}
+
+export function parseAgentResponse(text: string, minSeverity: Severity = "INFO"): ReviewResult {
+  return parseAgentResponseWithStatus(text, minSeverity).result;
 }
 
 const ATTRIBUTION = "*Review by [pi-reviewer](https://github.com/zeflq/pi-reviewer)*";
@@ -286,7 +299,8 @@ export function formatForTerminal(result: ReviewResult): string {
 }
 
 export async function sendOutput(options: OutputOptions): Promise<void> {
-  const result = parseAgentResponse(options.content, options.minSeverity);
+  const parsedResponse = parseAgentResponseWithStatus(options.content, options.minSeverity);
+  const result = parsedResponse.result;
 
   if (options.target === "terminal") {
     console.log(formatForTerminal(result));
@@ -304,6 +318,12 @@ export async function sendOutput(options: OutputOptions): Promise<void> {
 
     if (!options.repo) {
       throw new Error("Repository (owner/repo) is required to post a comment");
+    }
+
+    if (!parsedResponse.parsed) {
+      throw new Error(
+        "Agent output was not a valid structured review; refusing to post raw model output",
+      );
     }
 
     const headers = {

@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { parseAgentResponse, sendOutput } from "../../src/core/output.js";
+import { parseAgentResponse, parseAgentResponseWithStatus, sendOutput } from "../../src/core/output.js";
 
 const createdDirs: string[] = [];
 
@@ -43,6 +43,17 @@ describe("parseAgentResponse", () => {
     const result = parseAgentResponse("not-json");
 
     expect(result).toEqual({ summary: "not-json", comments: [] });
+  });
+
+  it("marks invalid JSON as unparsed", () => {
+    expect(parseAgentResponseWithStatus("not-json")).toEqual({
+      result: { summary: "not-json", comments: [] },
+      parsed: false,
+    });
+    expect(parseAgentResponseWithStatus(JSON.stringify({ summary: "LGTM", comments: [] }))).toEqual({
+      result: { summary: "LGTM", comments: [] },
+      parsed: true,
+    });
   });
 
   it("parses JSON wrapped in markdown code fences", () => {
@@ -329,7 +340,7 @@ describe("sendOutput", () => {
 
     await sendOutput({
       target: "comment",
-      content: "LGTM",
+      content: JSON.stringify({ summary: "LGTM", comments: [] }),
       githubToken: "token123",
       prNumber: 42,
       repo: "owner/repo",
@@ -553,13 +564,13 @@ describe("sendOutput", () => {
     expect(payload.comments).toHaveLength(1);
   });
 
-  it("uses Issues API with summary only when content has no inline comments", async () => {
+  it("uses Issues API with a valid summary-only review", async () => {
     const fetchMock = okFetch();
     vi.stubGlobal("fetch", fetchMock);
 
     await sendOutput({
       target: "comment",
-      content: "Looks mostly good",
+      content: JSON.stringify({ summary: "Looks mostly good", comments: [] }),
       githubToken: "token123",
       prNumber: 42,
       repo: "owner/repo",
@@ -572,6 +583,23 @@ describe("sendOutput", () => {
         body: expect.stringContaining("Looks mostly good"),
       })
     );
+  });
+
+  it("refuses to post unparseable model output", async () => {
+    const fetchMock = okFetch();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      sendOutput({
+        target: "comment",
+        content: "Looks mostly good",
+        githubToken: "token123",
+        prNumber: 42,
+        repo: "owner/repo",
+        commitId: "abc123",
+      })
+    ).rejects.toThrow("refusing to post raw model output");
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("throws when githubToken is missing", async () => {
@@ -619,7 +647,7 @@ describe("sendOutput", () => {
     await expect(
       sendOutput({
         target: "comment",
-        content: "text",
+        content: JSON.stringify({ summary: "text", comments: [] }),
         githubToken: "token",
         prNumber: 1,
         repo: "owner/repo",

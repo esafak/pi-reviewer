@@ -135,7 +135,7 @@ function tryParseJSON(raw) {
     }
     return null;
 }
-export function parseAgentResponse(text, minSeverity = "INFO") {
+export function parseAgentResponseWithStatus(text, minSeverity = "INFO") {
     // Build candidates sorted by source position. We return the **last** valid
     // candidate — this handles models that reason in prose before emitting the
     // final review (the production incident pattern).
@@ -179,8 +179,11 @@ export function parseAgentResponse(text, minSeverity = "INFO") {
     // Prefer the last review with comments; fall back to last review overall.
     const result = resultWithComments ?? resultAny;
     if (result)
-        return result;
-    return { summary: text, comments: [] };
+        return { result, parsed: true };
+    return { result: { summary: text, comments: [] }, parsed: false };
+}
+export function parseAgentResponse(text, minSeverity = "INFO") {
+    return parseAgentResponseWithStatus(text, minSeverity).result;
 }
 const ATTRIBUTION = "*Review by [pi-reviewer](https://github.com/zeflq/pi-reviewer)*";
 function formatForGitHub(result) {
@@ -223,7 +226,8 @@ export function formatForTerminal(result) {
     return lines.join("\n");
 }
 export async function sendOutput(options) {
-    const result = parseAgentResponse(options.content, options.minSeverity);
+    const parsedResponse = parseAgentResponseWithStatus(options.content, options.minSeverity);
+    const result = parsedResponse.result;
     if (options.target === "terminal") {
         console.log(formatForTerminal(result));
         return;
@@ -237,6 +241,9 @@ export async function sendOutput(options) {
         }
         if (!options.repo) {
             throw new Error("Repository (owner/repo) is required to post a comment");
+        }
+        if (!parsedResponse.parsed) {
+            throw new Error("Agent output was not a valid structured review; refusing to post raw model output");
         }
         const headers = {
             Authorization: `Bearer ${options.githubToken}`,

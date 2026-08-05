@@ -317,4 +317,22 @@ describe("review", () => {
       })
     );
   });
+
+  it("logs the raw text fallback in CI-safe lines", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    createReviewToolMock.mockReturnValue({
+      tool: { name: "submit_review", label: "submit_review", description: "test", parameters: {}, execute: vi.fn() },
+      getResult: () => undefined,
+    });
+    AgentMock.mockImplementation(function () {
+      return makeFakeAgent("first line\n::warning::not-a-command") as any;
+    });
+
+    await review({ cwd: "/repo" });
+
+    expect(log).toHaveBeenCalledWith("::group::Pi Reviewer raw assistant response (text fallback)");
+    expect(log).toHaveBeenCalledWith("| first line");
+    expect(log).toHaveBeenCalledWith("| ::warning::not-a-command");
+    expect(log).toHaveBeenCalledWith("::endgroup::");
+  });
 });

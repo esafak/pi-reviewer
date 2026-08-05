@@ -172,6 +172,17 @@ export async function review(options: ReviewOptions): Promise<void> {
           return;
         }
 
+        // Preserve the exact text fallback in CI logs. Prefix every line so
+        // model-generated `::command` text cannot be interpreted as a GitHub
+        // Actions command. This is the only artifact available when a model
+        // emits a textual/tool-protocol response instead of calling
+        // submit_review.
+        console.warn("[pi-reviewer] submit_review was not called; using text fallback");
+        console.log("::group::Pi Reviewer raw assistant response (text fallback)");
+        for (const line of finalResponse.split(/\r?\n/)) {
+          console.log(`| ${line}`);
+        }
+        console.log("::endgroup::");
         console.log(`[pi-reviewer] agent completed — response: ${finalResponse.length} chars`);
         resolve();
       });
