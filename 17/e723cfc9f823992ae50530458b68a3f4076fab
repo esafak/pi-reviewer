@@ -1,0 +1,16 @@
+.github/renovate.json5
+  h_ea91e2db23540f 21,23-27
+mise.toml
+  h_ea91e2db23540f 1-2
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "17e723cfc9f823992ae50530458b68a3f4076fab",
+  "prompts": {},
+  "humans": {
+    "h_ea91e2db23540f": {
+      "author": "Emre Şafak <3928300+esafak@users.noreply.github.com>"
+    }
+  }
+}
