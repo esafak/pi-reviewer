@@ -172,7 +172,10 @@ export function parseAgentResponseWithStatus(text, minSeverity = "INFO") {
             const diff = typeof parsed.diff === "string" ? parsed.diff : undefined;
             const review = { summary: parsed.summary, comments, ...(diff !== undefined ? { diff } : {}) };
             resultAny = review;
-            if (comments.length > 0)
+            // Base the preference on what the model emitted, not on what remains
+            // after minSeverity filtering. A genuine review whose findings are all
+            // below the configured threshold must still beat an earlier draft.
+            if (parsed.comments.length > 0)
                 resultWithComments = review;
         }
     }

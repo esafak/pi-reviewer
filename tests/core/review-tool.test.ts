@@ -93,16 +93,12 @@ describe("createReviewTool", () => {
     expect(() => validateToolArguments(tool, toolCall(args))).toThrow(/Validation failed/);
   });
 
-  it("TypeBox Value.Convert silently truncates float line numbers to integers", () => {
-    // Documents framework behavior: Type.Integer() with Value.Convert coerces
-    // 10.5 → 10 via Math.trunc. This is not a bug in our tool — it's the
-    // validation layer's choice. The test locks in the behavior so a future
-    // reader knows floats are accepted (and truncated), not rejected.
+  it("schema rejects fractional line numbers", () => {
     const { tool } = createReviewTool();
     const args = validArgs();
     (args.comments[0] as Record<string, unknown>).line = 10.5;
 
-    expect(() => validateToolArguments(tool, toolCall(args))).not.toThrow();
+    expect(() => validateToolArguments(tool, toolCall(args))).toThrow(/Validation failed/);
   });
 
   it("schema rejects a missing summary", () => {

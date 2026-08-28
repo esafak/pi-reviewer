@@ -142,6 +142,22 @@ describe("parseAgentResponse", () => {
     expect(result.comments.map((c) => c.severity)).toEqual(["WARN", "CRITICAL"]);
   });
 
+  it("keeps the latest review when its comments are all filtered by minSeverity", () => {
+    const draft = JSON.stringify({
+      summary: "Earlier draft",
+      comments: [{ file: "src/draft.ts", line: 1, side: "RIGHT", severity: "WARN", body: "draft issue" }],
+    });
+    const final = JSON.stringify({
+      summary: "Final review",
+      comments: [{ file: "src/final.ts", line: 2, side: "RIGHT", severity: "INFO", body: "style issue" }],
+    });
+
+    const result = parseAgentResponse(`${draft}\n${final}`, "WARN");
+
+    expect(result.summary).toBe("Final review");
+    expect(result.comments).toEqual([]);
+  });
+
   it("extracts diff field when present in JSON", () => {
     const result = parseAgentResponse(
       JSON.stringify({ summary: "looks good", comments: [], diff: "diff --git a/src/a.ts..." })
