@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { parseAgentResponse, sendOutput } from "../../src/core/output.js";
+import { parseAgentResponse, parseAgentResponseWithStatus, sendOutput } from "../../src/core/output.js";
 
 const createdDirs: string[] = [];
 
@@ -43,6 +43,17 @@ describe("parseAgentResponse", () => {
     const result = parseAgentResponse("not-json");
 
     expect(result).toEqual({ summary: "not-json", comments: [] });
+  });
+
+  it("marks invalid JSON as unparsed", () => {
+    expect(parseAgentResponseWithStatus("not-json")).toEqual({
+      result: { summary: "not-json", comments: [] },
+      parsed: false,
+    });
+    expect(parseAgentResponseWithStatus(JSON.stringify({ summary: "LGTM", comments: [] }))).toEqual({
+      result: { summary: "LGTM", comments: [] },
+      parsed: true,
+    });
   });
 
   it("parses JSON wrapped in markdown code fences", () => {
@@ -131,6 +142,22 @@ describe("parseAgentResponse", () => {
     expect(result.comments.map((c) => c.severity)).toEqual(["WARN", "CRITICAL"]);
   });
 
+  it("keeps the latest review when its comments are all filtered by minSeverity", () => {
+    const draft = JSON.stringify({
+      summary: "Earlier draft",
+      comments: [{ file: "src/draft.ts", line: 1, side: "RIGHT", severity: "WARN", body: "draft issue" }],
+    });
+    const final = JSON.stringify({
+      summary: "Final review",
+      comments: [{ file: "src/final.ts", line: 2, side: "RIGHT", severity: "INFO", body: "style issue" }],
+    });
+
+    const result = parseAgentResponse(`${draft}\n${final}`, "WARN");
+
+    expect(result.summary).toBe("Final review");
+    expect(result.comments).toEqual([]);
+  });
+
   it("extracts diff field when present in JSON", () => {
     const result = parseAgentResponse(
       JSON.stringify({ summary: "looks good", comments: [], diff: "diff --git a/src/a.ts..." })
@@ -166,6 +193,142 @@ describe("parseAgentResponse", () => {
     expect(result.comments).toHaveLength(1);
     expect(result.comments[0].severity).toBe("CRITICAL");
   });
+
+  // The model emits chain-of-thought reasoning with inline braces (unquoted
+  // keys → not valid JSON), inner ```ts / ```json fences, then the final
+  // valid ```json review fence with 6 comments. The old greedy-fence regex
+  // spanned first-open → last-close, mashing everything into one invalid blob;
+  // the old first-brace extractor grabbed the unquoted `{ success: true, ... }`
+  // from reasoning prose. Last-valid-wins must pick the final review.
+
+  it("parses the production incident comment body (reasoning + inner fences + final valid review)", () => {
+    const body = [
+      "## Pi Reviewer",
+      "",
+      "Everything looks consistent. Summary of findings:",
+      "",
+      '1. Data nesting mismatch. The form action returns `{ success: true, data: result.data }`,',
+      "   which SvelteKit wraps as `{ type: \"success\", data: { success: true, data: MediaUploadResponse } }`.",
+      "",
+      "The test expects:",
+      "```ts",
+      'await expect(promise).resolves.toEqual({ resourceId: "123" });',
+      "```",
+      "",
+      "And the mock response is:",
+      "```json",
+      '{"type":"success","data":{"resourceId":"123"}}',
+      "```",
+      "",
+      "So the bug is real. Let me write the review.",
+      "",
+      "```json",
+      JSON.stringify({
+        summary: "Critical data-nesting bug in the upload flow. Attachments silently fail.",
+        comments: [
+          { file: "upload.ts", line: 30, side: "RIGHT", severity: "CRITICAL", body: "`resolve(body?.data as T)` extracts the wrong layer." },
+          { file: "upload.test.ts", line: 79, side: "RIGHT", severity: "CRITICAL", body: "Test mock doesn't match real protocol." },
+          { file: "attachments.test.ts", line: 72, side: "RIGHT", severity: "CRITICAL", body: "Mock skips the SvelteKit wrapper." },
+          { file: "+server.ts", line: 14, side: "RIGHT", severity: "WARN", body: "Only GET is exported." },
+          { file: "attachments.ts", line: 45, side: "RIGHT", severity: "INFO", body: "`INLINE_MAX_BYTES` mirrors backend." },
+          { file: "upload.ts", line: 798, side: "RIGHT", severity: "CRITICAL", body: "Root cause: form action nests return value." },
+        ],
+      }),
+      "```",
+      "",
+      "---",
+      "*Review by [pi-reviewer](https://github.com/zeflq/pi-reviewer)*",
+    ].join("\n");
+
+    const result = parseAgentResponse(body);
+
+    expect(result.summary).toBe("Critical data-nesting bug in the upload flow. Attachments silently fail.");
+    expect(result.comments).toHaveLength(6);
+    expect(result.comments.map((c) => c.severity)).toEqual([
+      "CRITICAL", "CRITICAL", "CRITICAL", "WARN", "INFO", "CRITICAL",
+    ]);
+    // Severity emoji prefix is applied
+    expect(result.comments[0].body).toMatch(/^🔴 /);
+    expect(result.comments[3].body).toMatch(/^🟡 /);
+    expect(result.comments[4].body).toMatch(/^🔵 /);
+  });
+
+  it("nested ```json fence inside a comment body is not treated as a block boundary", () => {
+    // The comment body itself contains a ```json snippet. The non-greedy fence
+    // extractor may truncate early, but the brace-aware extractor must still
+    // find and validate the complete object.
+    const innerFence = 'Example:\n```json\n{"resourceId": "123"}\n```';
+    const json = JSON.stringify({
+      summary: "review",
+      comments: [{ file: "a.ts", line: 1, side: "RIGHT", severity: "WARN", body: innerFence }],
+    });
+    const result = parseAgentResponse("```json\n" + json + "\n```");
+    expect(result.comments).toHaveLength(1);
+    expect(result.comments[0].body).toContain('"resourceId"');
+  });
+
+  it("chooses the last valid {summary, comments} when multiple exist (last-wins)", () => {
+    const first = JSON.stringify({ summary: "first draft", comments: [] });
+    const second = JSON.stringify({
+      summary: "final review",
+      comments: [{ file: "b.ts", line: 2, side: "LEFT", severity: "CRITICAL", body: "crash" }],
+    });
+    const result = parseAgentResponse(`Draft:\n${first}\n\nFinal:\n${second}`);
+    expect(result.summary).toBe("final review");
+    expect(result.comments).toHaveLength(1);
+    expect(result.comments[0].file).toBe("b.ts");
+  });
+
+  it("prefers a review with comments over an empty-comments example in trailing prose", () => {
+    // Real review in a fence, followed by a prose example with empty comments.
+    // Without the non-empty-preference guard, the trailing example would win
+    // (last-wins + comments.every() is vacuously true for []).
+    const real = JSON.stringify({
+      summary: "Real review",
+      comments: [{ file: "a.ts", line: 1, side: "RIGHT", severity: "WARN", body: "issue" }],
+    });
+    const example = JSON.stringify({ summary: "example shape", comments: [] });
+    const result = parseAgentResponse(`\`\`\`json\n${real}\n\`\`\`\nFor reference, the shape is: ${example}`);
+    expect(result.summary).toBe("Real review");
+    expect(result.comments).toHaveLength(1);
+  });
+
+  it("still returns summary-only review when it is the only valid candidate", () => {
+    // A genuine summary-only review (no comments) should still parse when
+    // there's no competing candidate with comments.
+    const result = parseAgentResponse(JSON.stringify({ summary: "LGTM", comments: [] }));
+    expect(result.summary).toBe("LGTM");
+    expect(result.comments).toEqual([]);
+  });
+
+  it("handles braces and quotes inside JSON string values (brace scanner edge case)", () => {
+    // The brace scanner must track inString state so braces/quotes inside
+    // string values don't confuse depth tracking.
+    const result = parseAgentResponse(
+      JSON.stringify({
+        summary: 'The config uses { "nested": true } and }{ patterns',
+        comments: [
+          { file: "a.ts", line: 1, side: "RIGHT", severity: "WARN", body: 'Check the `} catch(e) {}` block' },
+        ],
+      })
+    );
+    expect(result.summary).toBe('The config uses { "nested": true } and }{ patterns');
+    expect(result.comments).toHaveLength(1);
+    expect(result.comments[0].body).toContain("} catch(e) {}");
+  });
+
+  it("recovers via fenced block when reasoning has a stray unclosed brace", () => {
+    // If reasoning prose contains an unclosed `{`, the brace scanner gets
+    // stuck at depth 1 and can't find subsequent objects — but the fence
+    // extractor runs independently, so the review is still recoverable.
+    const real = JSON.stringify({
+      summary: "found it",
+      comments: [{ file: "a.ts", line: 1, side: "RIGHT", severity: "WARN", body: "fix" }],
+    });
+    const result = parseAgentResponse(`Consider this object { incomplete\n\n\`\`\`json\n${real}\n\`\`\``);
+    expect(result.summary).toBe("found it");
+    expect(result.comments).toHaveLength(1);
+  });
 });
 
 describe("sendOutput", () => {
@@ -193,7 +356,7 @@ describe("sendOutput", () => {
 
     await sendOutput({
       target: "comment",
-      content: "LGTM",
+      content: JSON.stringify({ summary: "LGTM", comments: [] }),
       githubToken: "token123",
       prNumber: 42,
       repo: "owner/repo",
@@ -240,7 +403,7 @@ describe("sendOutput", () => {
     );
   });
 
-  it("falls back to Issues API when Reviews API returns 422", async () => {
+  it("retries once as body-only review when Reviews API returns 422", async () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     const fetchMock = vi.fn()
       .mockResolvedValueOnce({ ok: false, status: 422, statusText: "Unprocessable Entity", text: vi.fn().mockResolvedValue("") })
@@ -259,20 +422,171 @@ describe("sendOutput", () => {
       commitId: "abc123",
     });
 
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("posting summary only"));
+    // First call: inline review (rejected 422). Second call: body-only retry,
+    // NOT the Issues API — every comment moved to the body, comments: [].
     expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      "https://api.github.com/repos/owner/repo/pulls/42/reviews"
+    );
     expect(fetchMock.mock.calls[1][0]).toBe(
+      "https://api.github.com/repos/owner/repo/pulls/42/reviews"
+    );
+    const retryBody = JSON.parse((fetchMock.mock.calls[1][1] as { body: string }).body);
+    expect(retryBody.comments).toEqual([]);
+    expect(retryBody.body).toContain("Missing null check");
+    expect(retryBody.body).toContain("Comments Not Attached to the Diff");
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("422"));
+  });
+
+  it("falls back to Issues API when the body-only retry also fails", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: false, status: 422, statusText: "Unprocessable Entity", text: vi.fn().mockResolvedValue("") })
+      .mockResolvedValueOnce({ ok: false, status: 422, statusText: "Unprocessable Entity", text: vi.fn().mockResolvedValue("") })
+      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue("") });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await sendOutput({
+      target: "comment",
+      content: JSON.stringify({
+        summary: "Needs fixes",
+        comments: [{ file: "src/auth.ts", line: 42, side: "RIGHT", severity: "WARN", body: "Missing null check" }],
+      }),
+      githubToken: "token123",
+      prNumber: 42,
+      repo: "owner/repo",
+      commitId: "abc123",
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock.mock.calls[2][0]).toBe(
       "https://api.github.com/repos/owner/repo/issues/42/comments"
     );
   });
 
-  it("uses Issues API with summary only when content has no inline comments", async () => {
+  it("posts only positionable comments inline and moves the rest to the review body", async () => {
+    const fetchMock = okFetch();
+    vi.stubGlobal("fetch", fetchMock);
+
+    // tag-input.svelte diff: hunk @@ -17,6 +17,7 @@ makes new line 20
+    // positionable; line 36 is outside every hunk.
+    const diff = `diff --git a/client/web/src/lib/components/core/tag-input/tag-input.svelte b/client/web/src/lib/components/core/tag-input/tag-input.svelte
+--- a/client/web/src/lib/components/core/tag-input/tag-input.svelte
++++ b/client/web/src/lib/components/core/tag-input/tag-input.svelte
+@@ -17,6 +17,7 @@
+         handleTagAdded?: (tag: string) => void;
+         handleTagRemoved?: (tagRemoved: string, currentTags: string[]) => void;
+         errorTags?: string[];
++        customValidation?: (tag: string) => boolean;
+     }
+ </script>
+
+@@ -27,6 +28,7 @@
+         handleTagAdded,
+         handleTagRemoved,
+         errorTags,
++        customValidation,
+     }: TagInputProps = $props();
+ 
+     $effect(() => {
+`;
+
+    await sendOutput({
+      target: "comment",
+      content: JSON.stringify({
+        summary: "Review",
+        comments: [
+          { file: "client/web/src/lib/components/core/tag-input/tag-input.svelte", line: 20, side: "RIGHT", severity: "INFO", body: "positionable" },
+          { file: "client/web/src/lib/components/core/tag-input/tag-input.svelte", line: 36, side: "RIGHT", severity: "INFO", body: "unpositionable" },
+        ],
+      }),
+      githubToken: "token123",
+      prNumber: 42,
+      repo: "owner/repo",
+      commitId: "abc123",
+      diff,
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      "https://api.github.com/repos/owner/repo/pulls/42/reviews"
+    );
+    const payload = JSON.parse((fetchMock.mock.calls[0][1] as { body: string }).body);
+    expect(payload.comments).toEqual([
+      { path: "client/web/src/lib/components/core/tag-input/tag-input.svelte", line: 20, side: "RIGHT", body: "🔵 positionable" },
+    ]);
+    expect(payload.body).toContain("Review");
+    expect(payload.body).toContain("Comments Not Attached to the Diff");
+    expect(payload.body).toContain("unpositionable");
+  });
+
+  it("posts a body-only review when every comment is unpositionable", async () => {
+    const fetchMock = okFetch();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const diff = `diff --git a/src/auth.ts b/src/auth.ts
+--- a/src/auth.ts
++++ b/src/auth.ts
+@@ -40,1 +40,1 @@
+-foo
++bar
+`;
+
+    await sendOutput({
+      target: "comment",
+      content: JSON.stringify({
+        summary: "Review",
+        comments: [
+          { file: "src/other.ts", line: 5, side: "RIGHT", severity: "WARN", body: "not in diff" },
+        ],
+      }),
+      githubToken: "token123",
+      prNumber: 42,
+      repo: "owner/repo",
+      commitId: "abc123",
+      diff,
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const payload = JSON.parse((fetchMock.mock.calls[0][1] as { body: string }).body);
+    expect(payload.comments).toEqual([]);
+    expect(payload.body).toContain("Comments Not Attached to the Diff");
+    expect(payload.body).toContain("not in diff");
+  });
+
+  it("posts to Reviews API with all comments inline when no diff is provided", async () => {
     const fetchMock = okFetch();
     vi.stubGlobal("fetch", fetchMock);
 
     await sendOutput({
       target: "comment",
-      content: "Looks mostly good",
+      content: JSON.stringify({
+        summary: "Needs fixes",
+        comments: [
+          { file: "src/auth.ts", line: 42, side: "RIGHT", severity: "WARN", body: "Missing null check" },
+        ],
+      }),
+      githubToken: "token123",
+      prNumber: 42,
+      repo: "owner/repo",
+      commitId: "abc123",
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      "https://api.github.com/repos/owner/repo/pulls/42/reviews"
+    );
+    const payload = JSON.parse((fetchMock.mock.calls[0][1] as { body: string }).body);
+    expect(payload.comments).toHaveLength(1);
+  });
+
+  it("uses Issues API with a valid summary-only review", async () => {
+    const fetchMock = okFetch();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await sendOutput({
+      target: "comment",
+      content: JSON.stringify({ summary: "Looks mostly good", comments: [] }),
       githubToken: "token123",
       prNumber: 42,
       repo: "owner/repo",
@@ -285,6 +599,23 @@ describe("sendOutput", () => {
         body: expect.stringContaining("Looks mostly good"),
       })
     );
+  });
+
+  it("refuses to post unparseable model output", async () => {
+    const fetchMock = okFetch();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      sendOutput({
+        target: "comment",
+        content: "Looks mostly good",
+        githubToken: "token123",
+        prNumber: 42,
+        repo: "owner/repo",
+        commitId: "abc123",
+      })
+    ).rejects.toThrow("refusing to post raw model output");
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("throws when githubToken is missing", async () => {
@@ -332,7 +663,7 @@ describe("sendOutput", () => {
     await expect(
       sendOutput({
         target: "comment",
-        content: "text",
+        content: JSON.stringify({ summary: "text", comments: [] }),
         githubToken: "token",
         prNumber: 1,
         repo: "owner/repo",

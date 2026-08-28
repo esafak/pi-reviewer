@@ -6,6 +6,7 @@ import { resolveDiff, extractDiffFiles } from "../core/diff-resolver.js";
 import { loadDocContext } from "../core/doc-context.js";
 import { sendOutput, extractLastAssistantText } from "../core/output.js";
 import { buildJSONSystemPrompt, buildUserPrompt } from "../core/prompt-builder.js";
+import { createReviewTool } from "../core/review-tool.js";
 /** Parses a comma/newline-separated doc-dirs string into a trimmed, non-empty list. */
 export function parseDocDirs(raw) {
     if (!raw)
@@ -66,11 +67,12 @@ export async function review(options) {
         throw new Error(`Unknown model "${modelStr}" — not found in the pi model registry.`);
     }
     console.log(`[pi-reviewer] running agent (model: ${resolvedModel.api})`);
+    const { tool: reviewTool, getResult } = createReviewTool();
     const agent = new Agent({
         initialState: {
             systemPrompt,
             model: resolvedModel,
-            tools: createReadOnlyTools(cwd),
+            tools: [...createReadOnlyTools(cwd), reviewTool],
             thinkingLevel: "off",
         },
         getApiKey: async () => {
@@ -103,6 +105,16 @@ export async function review(options) {
                     reject(new Error(`Agent failed: ${errorMessage}`));
                     return;
                 }
+                // Prefer the submit_review tool result (schema-validated happy path).
+                // Fall back to text extraction + the fixed parser for models that don't
+                // call the tool.
+                const toolResult = getResult();
+                if (toolResult) {
+                    finalResponse = JSON.stringify(toolResult);
+                    console.log(`[pi-reviewer] agent completed via submit_review tool — ${toolResult.comments.length} comment(s)`);
+                    resolve();
+                    return;
+                }
                 finalResponse = extractLastAssistantText(ev.messages);
                 if (!finalResponse.trim()) {
                     let shape = typeof lastAssistant?.content;
@@ -116,6 +128,17 @@ export async function review(options) {
                     reject(new Error("Agent returned an empty response"));
                     return;
                 }
+                // Preserve the exact text fallback in CI logs. Prefix every line so
+                // model-generated `::command` text cannot be interpreted as a GitHub
+                // Actions command. This is the only artifact available when a model
+                // emits a textual/tool-protocol response instead of calling
+                // submit_review.
+                console.warn("[pi-reviewer] submit_review was not called; using text fallback");
+                console.log("::group::Pi Reviewer raw assistant response (text fallback)");
+                for (const line of finalResponse.split(/\r?\n/)) {
+                    console.log(`| ${line}`);
+                }
+                console.log("::endgroup::");
                 console.log(`[pi-reviewer] agent completed — response: ${finalResponse.length} chars`);
                 resolve();
             });
@@ -131,6 +154,7 @@ export async function review(options) {
             repo,
             commitId: options.commitId,
             minSeverity: options.minSeverity,
+            diff,
         });
     }
     finally {

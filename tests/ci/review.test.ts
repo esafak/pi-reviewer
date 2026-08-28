@@ -27,12 +27,20 @@ vi.mock("@earendil-works/pi-coding-agent", () => ({
   createReadOnlyTools: vi.fn().mockReturnValue([]),
 }));
 
+vi.mock("../../src/core/review-tool.js", () => ({
+  createReviewTool: vi.fn(() => ({
+    tool: { name: "submit_review", label: "submit_review", description: "test", parameters: {}, execute: vi.fn() },
+    getResult: () => undefined,
+  })),
+}));
+
 import { Agent } from "@earendil-works/pi-agent-core";
 import { createReadOnlyTools } from "@earendil-works/pi-coding-agent";
 import { loadContext } from "../../src/core/context.js";
 import { resolveDiff } from "../../src/core/diff-resolver.js";
 import { loadDocContext } from "../../src/core/doc-context.js";
 import { sendOutput } from "../../src/core/output.js";
+import { createReviewTool } from "../../src/core/review-tool.js";
 import { review, parseDocDirs } from "../../src/ci/review.js";
 
 const resolveDiffMock = vi.mocked(resolveDiff);
@@ -41,6 +49,7 @@ const loadDocContextMock = vi.mocked(loadDocContext);
 const sendOutputMock = vi.mocked(sendOutput);
 const AgentMock = vi.mocked(Agent);
 const createReadOnlyToolsMock = vi.mocked(createReadOnlyTools);
+const createReviewToolMock = vi.mocked(createReviewTool);
 
 function makeFakeAgent(text = "LGTM") {
   return {
@@ -66,6 +75,10 @@ describe("review", () => {
     loadContextMock.mockResolvedValue({ conventions: [{ path: "AGENTS.md", content: "- Use strict typing" }], reviewRules: [] });
     sendOutputMock.mockResolvedValue(undefined);
     createReadOnlyToolsMock.mockReturnValue([]);
+    createReviewToolMock.mockReturnValue({
+      tool: { name: "submit_review", label: "submit_review", description: "test", parameters: {}, execute: vi.fn() },
+      getResult: () => undefined,
+    });
     AgentMock.mockImplementation(function () {
       return makeFakeAgent() as any;
     });
@@ -102,7 +115,9 @@ describe("review", () => {
     expect(AgentMock).toHaveBeenCalledWith(
       expect.objectContaining({
         initialState: expect.objectContaining({
-          tools: [],
+          tools: expect.arrayContaining([
+            expect.objectContaining({ name: "submit_review" }),
+          ]),
           thinkingLevel: "off",
         }),
       })
@@ -127,6 +142,19 @@ describe("review", () => {
         prNumber: 42,
         githubToken: "token",
         repo: "owner/repo",
+      })
+    );
+  });
+
+  it("passes the resolved diff to sendOutput for position validation", async () => {
+    const diff = "diff --git a/src/a.ts b/src/a.ts\n--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1,3 +1,3 @@\n";
+    resolveDiffMock.mockResolvedValue({ diff, source: "git diff origin/main...HEAD" });
+
+    await review({ cwd: "/repo" });
+
+    expect(sendOutputMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        diff,
       })
     );
   });
@@ -246,5 +274,65 @@ describe("review", () => {
         content: "Please fix null checks in src/a.ts",
       })
     );
+  });
+
+  it("uses submit_review tool result when the model called the tool", async () => {
+    const toolReview = {
+      summary: "Tool-based review",
+      comments: [
+        { file: "src/a.ts", line: 7, side: "RIGHT", severity: "WARN", body: "Handle undefined" },
+      ],
+    };
+    createReviewToolMock.mockReturnValue({
+      tool: { name: "submit_review", label: "submit_review", description: "test", parameters: {}, execute: vi.fn() },
+      getResult: () => toolReview,
+    });
+    AgentMock.mockImplementation(function () {
+      return makeFakeAgent("") as any;
+    });
+
+    await review({ cwd: "/repo" });
+
+    expect(sendOutputMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: JSON.stringify(toolReview),
+      })
+    );
+  });
+
+  it("falls back to text extraction when the model did not call submit_review", async () => {
+    createReviewToolMock.mockReturnValue({
+      tool: { name: "submit_review", label: "submit_review", description: "test", parameters: {}, execute: vi.fn() },
+      getResult: () => undefined,
+    });
+    AgentMock.mockImplementation(function () {
+      return makeFakeAgent("Text-based review without tool") as any;
+    });
+
+    await review({ cwd: "/repo" });
+
+    expect(sendOutputMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: "Text-based review without tool",
+      })
+    );
+  });
+
+  it("logs the raw text fallback in CI-safe lines", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    createReviewToolMock.mockReturnValue({
+      tool: { name: "submit_review", label: "submit_review", description: "test", parameters: {}, execute: vi.fn() },
+      getResult: () => undefined,
+    });
+    AgentMock.mockImplementation(function () {
+      return makeFakeAgent("first line\n::warning::not-a-command") as any;
+    });
+
+    await review({ cwd: "/repo" });
+
+    expect(log).toHaveBeenCalledWith("::group::Pi Reviewer raw assistant response (text fallback)");
+    expect(log).toHaveBeenCalledWith("| first line");
+    expect(log).toHaveBeenCalledWith("| ::warning::not-a-command");
+    expect(log).toHaveBeenCalledWith("::endgroup::");
   });
 });

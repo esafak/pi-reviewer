@@ -13,7 +13,6 @@ export const NOISE_PATTERNS = [
     /^node_modules\//,
     /\.min\.(js|css)$/,
     /\.generated\.(ts|js)$/,
-    /\.d\.ts$/,
 ];
 export const DEFAULT_MAX_CHARS = 100_000;
 function isNoise(filePath) {
