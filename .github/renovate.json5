@@ -18,8 +18,13 @@
   // comments map each digest back to a version so Renovate can bump SHAs.
   // config:recommended also pins via helpers:pinGitHubActionDigests; the
   // packageRule below makes it explicit so it survives preset changes.
-  "enabledManagers": ["npm", "github-actions"],
+  "enabledManagers": ["npm", "mise", "github-actions"],
   "packageRules": [
+    {
+      "matchManagers": ["npm", "mise"],
+      "matchPackageNames": ["pnpm"],
+      "groupName": "pnpm"
+    },
     {
       "matchManagers": ["github-actions"],
       "description": "Keep GitHub Actions pinned to commit SHAs.",
