@@ -1,0 +1,14 @@
+tests/core/output.test.ts
+  h_ea91e2db23540f 371-373
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "17c8673ec8df5fb11f40c97965c86b092bf470f8",
+  "prompts": {},
+  "humans": {
+    "h_ea91e2db23540f": {
+      "author": "Emre Şafak <3928300+esafak@users.noreply.github.com>"
+    }
+  }
+}
