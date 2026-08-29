@@ -18,6 +18,8 @@ async function responseJson(response) {
 export async function reconcileFindingUpdates(options) {
     const client = new GitHubClient(options.token);
     const known = new Map(options.findings.map(f => [f.commentId, f]));
+    const hasMutations = options.updates.some(update => update.status !== "STILL_OPEN");
+    const identity = hasMutations ? await client.getUser() : undefined;
     const priorReplies = await client.listComments(options.repo, options.prNumber).catch(() => []);
     for (const update of options.updates) {
         const finding = known.get(update.comment_id);
@@ -26,7 +28,7 @@ export async function reconcileFindingUpdates(options) {
         if (update.status === "STILL_OPEN")
             continue;
         const body = `<!-- pi-reviewer:status:v1 ${JSON.stringify({ findingId: update.comment_id, targetSha: options.targetSha, status: update.status })} -->\n${update.status === "RESOLVED" ? `Resolved in ${options.targetSha.slice(0, 7)}` : "Partially addressed"}: ${update.explanation}`;
-        const alreadyReplied = priorReplies.some(reply => reply.in_reply_to_id === finding.commentId && reply.body.includes(`"targetSha":"${options.targetSha}"`));
+        const alreadyReplied = priorReplies.some(reply => reply.user?.login === identity?.login && reply.in_reply_to_id === finding.commentId && reply.body.includes(`"targetSha":"${options.targetSha}"`));
         try {
             if (!alreadyReplied)
                 await client.reply(options.repo, options.prNumber, finding.commentId, body);
