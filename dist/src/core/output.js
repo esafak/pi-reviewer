@@ -28,6 +28,15 @@ export async function reconcileFindingUpdates(options) {
         }
     }
     const priorReplies = await client.listComments(options.repo, options.prNumber).catch(() => []);
+    const isTargetHeadCurrent = async () => {
+        try {
+            const current = await client.getPullRequest(options.repo, options.prNumber);
+            return current.head.sha === options.targetSha;
+        }
+        catch {
+            return false;
+        }
+    };
     for (const update of options.updates) {
         const finding = known.get(update.comment_id);
         if (!finding)
@@ -37,8 +46,16 @@ export async function reconcileFindingUpdates(options) {
         const body = `<!-- pi-reviewer:status:v1 ${JSON.stringify({ findingId: update.comment_id, targetSha: options.targetSha, status: update.status })} -->\n${update.status === "RESOLVED" ? `Resolved in ${options.targetSha.slice(0, 7)}` : "Partially addressed"}: ${update.explanation}`;
         const alreadyReplied = priorReplies.some(reply => reply.user?.login === identity?.login && reply.in_reply_to_id === finding.commentId && reply.body.includes(`"targetSha":"${options.targetSha}"`) && reply.body.includes(`"status":"${update.status}"`));
         try {
-            if (!alreadyReplied)
+            if (!alreadyReplied) {
+                // Recheck after loading all replies and immediately before persisting
+                // lifecycle state; the initial guard can be separated from this point
+                // by a slow paginated API response.
+                if (!await isTargetHeadCurrent()) {
+                    console.warn(`[pi-reviewer] PR head changed before replying to finding ${finding.commentId}; leaving lifecycle state unchanged`);
+                    continue;
+                }
                 await client.reply(options.repo, options.prNumber, finding.commentId, body);
+            }
         }
         catch (error) {
             console.warn(`[pi-reviewer] could not reply to finding ${finding.commentId}: ${error instanceof Error ? error.message : String(error)}`);
@@ -49,8 +66,7 @@ export async function reconcileFindingUpdates(options) {
                 // Revalidate immediately before the destructive mutation. The review
                 // may have taken long enough for the PR head to advance since the
                 // initial post-time guard.
-                const current = await client.getPullRequest(options.repo, options.prNumber);
-                if (current.head.sha !== options.targetSha) {
+                if (!await isTargetHeadCurrent()) {
                     console.warn(`[pi-reviewer] PR head changed before resolving finding ${finding.commentId}; leaving thread open`);
                     continue;
                 }
