@@ -163,12 +163,17 @@ function extractAllJsonObjects(text: string): Candidate[] {
 }
 
 function tryParseJSON(raw: string): Record<string, unknown> | null {
-  for (const candidate of [raw, raw.replace(/[\u0000-\u001F]/g, (c) => {
-    if (c === "\n") return "\\n";
-    if (c === "\r") return "\\r";
-    if (c === "\t") return "\\t";
-    return "";
-  })]) {
+  let escaped = "";
+  for (const c of raw) {
+    const code = c.charCodeAt(0);
+    if (c === "\n") escaped += "\\n";
+    else if (c === "\r") escaped += "\\r";
+    else if (c === "\t") escaped += "\\t";
+    else if (code >= 0 && code <= 0x1f) continue;
+    else escaped += c;
+  }
+
+  for (const candidate of [raw, escaped]) {
     try {
       const parsed = JSON.parse(candidate);
       if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed as Record<string, unknown>;
@@ -217,7 +222,8 @@ export function parseAgentResponseWithStatus(
         .filter((c) => SEVERITY_RANK[c.severity] >= minRank)
         .map((c) => {
           const emoji = SEVERITY_EMOJI[c.severity];
-          const body = c.body.replace(/^[🔴🟡🔵]\s*/, "");
+          const prefix = ["🔴 ", "🟡 ", "🔵 "].find((value) => c.body.startsWith(value));
+          const body = prefix ? c.body.slice(prefix.length) : c.body;
           return { ...c, body: `${emoji} ${body}` };
         });
       const diff = typeof parsed.diff === "string" ? parsed.diff : undefined;

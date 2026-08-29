@@ -64,7 +64,7 @@ export interface RunSSHWaitOptions {
 }
 
 export function runSSHReviewAndWait(opts: RunSSHWaitOptions): Promise<ReviewResult> {
-  const { systemPrompt, userPrompt, diff, pi, minSeverity, stopLoader, notify } = opts;
+  const { systemPrompt, userPrompt, diff, pi, minSeverity, stopLoader } = opts;
   let done = false;
 
   return new Promise<ReviewResult>((resolve, reject) => {

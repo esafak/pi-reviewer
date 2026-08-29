@@ -535,7 +535,6 @@ describe("sendOutput", () => {
   });
 
   it("falls back to Issues API when the body-only retry also fails", async () => {
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce({
