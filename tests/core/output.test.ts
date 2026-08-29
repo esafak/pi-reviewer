@@ -905,10 +905,11 @@ describe("reconcileFindingUpdates", () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue("[]") })
       .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue("{}") })
+      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue(JSON.stringify({ head: { sha: "head" } })) })
       .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue(JSON.stringify({ data: { resolveReviewThread: { thread: { id: "thread", isResolved: true } } } })) });
     vi.stubGlobal("fetch", fetchMock);
     await reconcileFindingUpdates({ token: "t", repo: "o/r", prNumber: 1, targetSha: "head", updates: [{ comment_id: 3, status: "RESOLVED", explanation: "fixed" }], findings: [{ commentId: 3, threadId: "thread" }] });
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
   });
   it("continues after reply or resolve failures", async () => {
     const replyFailure = vi.fn()
@@ -921,10 +922,21 @@ describe("reconcileFindingUpdates", () => {
     const resolveFailure = vi.fn()
       .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue("[]") })
       .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue("{}") })
+      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue(JSON.stringify({ head: { sha: "head" } })) })
       .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue(JSON.stringify({ errors: [{ message: "failed" }] })) });
     vi.stubGlobal("fetch", resolveFailure);
     await expect(reconcileFindingUpdates({ token: "t", repo: "o/r", prNumber: 1, targetSha: "head", updates: [{ comment_id: 3, status: "RESOLVED", explanation: "fixed" }], findings: [{ commentId: 3, threadId: "thread" }] })).resolves.toBeUndefined();
-    expect(resolveFailure).toHaveBeenCalledTimes(3);
+    expect(resolveFailure).toHaveBeenCalledTimes(4);
+  });
+  it("does not resolve a finding when the head changes during reconciliation", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue("[]") })
+      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue("{}") })
+      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue(JSON.stringify({ head: { sha: "new-head" } })) });
+    vi.stubGlobal("fetch", fetchMock);
+    await reconcileFindingUpdates({ token: "t", repo: "o/r", prNumber: 1, targetSha: "old-head", updates: [{ comment_id: 3, status: "RESOLVED", explanation: "fixed" }], findings: [{ commentId: 3, threadId: "thread" }] });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock.mock.calls[2][0]).toContain("/pulls/1");
   });
   it("persists the reconciliation status in the status marker", async () => {
     const fetchMock = okFetch(); vi.stubGlobal("fetch", fetchMock);

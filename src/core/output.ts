@@ -93,7 +93,17 @@ export async function reconcileFindingUpdates(options: { token: string; repo: st
       continue;
     }
     if (update.status === "RESOLVED" && finding.threadId) {
-      try { await client.resolveThread(finding.threadId); }
+      try {
+        // Revalidate immediately before the destructive mutation. The review
+        // may have taken long enough for the PR head to advance since the
+        // initial post-time guard.
+        const current = await client.getPullRequest(options.repo, options.prNumber);
+        if (current.head.sha !== options.targetSha) {
+          console.warn(`[pi-reviewer] PR head changed before resolving finding ${finding.commentId}; leaving thread open`);
+          continue;
+        }
+        await client.resolveThread(finding.threadId);
+      }
       catch (error) { console.warn(`[pi-reviewer] could not resolve finding ${finding.commentId}; will retry resolution: ${error instanceof Error ? error.message : String(error)}`); }
     }
   }
