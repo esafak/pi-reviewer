@@ -1,0 +1,21 @@
+dist/src/ci/review.js
+  s_77915abd90de98::t_09973d2d7a29d2 2,65-68,74,82
+pnpm-lock.yaml
+  s_77915abd90de98::t_31a0bc63e023be 904-905,3211-3212
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "3a71971ab6019f8662ceae3205c10fa4c8f40288",
+  "prompts": {},
+  "sessions": {
+    "s_77915abd90de98": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fb533716effexv44ilDDbQkv2c",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "Emre Şafak <3928300+esafak@users.noreply.github.com>"
+    }
+  }
+}
