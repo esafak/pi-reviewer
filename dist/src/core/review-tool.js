@@ -25,6 +25,11 @@ const reviewSchema = Type.Object({
         severity: Type.Union([Type.Literal("CRITICAL"), Type.Literal("WARN"), Type.Literal("INFO")], { description: "Issue severity tier." }),
         body: Type.String({ description: "Inline comment text, may use Markdown." }),
     }, { additionalProperties: false }), { description: "Inline comments attached to specific diff lines. May be empty." }),
+    finding_updates: Type.Optional(Type.Array(Type.Object({
+        comment_id: Type.Integer({ minimum: 1, description: "ID of an existing finding supplied in the prompt." }),
+        status: Type.Union([Type.Literal("RESOLVED"), Type.Literal("PARTIALLY_RESOLVED"), Type.Literal("STILL_OPEN")]),
+        explanation: Type.String({ maxLength: 2000 }),
+    }, { additionalProperties: false }))),
 }, { additionalProperties: false });
 /**
  * Create a `submit_review` tool that lets compliant models return the review as

@@ -1,8 +1,83 @@
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import { parseDiffPositions, partitionComments } from "./diff-positions.js";
+import { GitHubClient } from "../ci/github.js";
 const SEVERITY_RANK = { INFO: 0, WARN: 1, CRITICAL: 2 };
 const SEVERITY_EMOJI = { CRITICAL: "🔴", WARN: "🟡", INFO: "🔵" };
+async function responseJson(response) {
+    if (typeof response.json !== "function")
+        return undefined;
+    try {
+        return await response.json();
+    }
+    catch {
+        return undefined;
+    }
+}
+/** Applies model-approved transitions independently so a failed mutation can be retried safely. */
+export async function reconcileFindingUpdates(options) {
+    const client = new GitHubClient(options.token);
+    const known = new Map(options.findings.map(f => [f.commentId, f]));
+    const hasMutations = options.updates.some(update => update.status !== "STILL_OPEN");
+    const identity = hasMutations ? await client.getUser() : undefined;
+    if (identity) {
+        const current = await client.getPullRequest(options.repo, options.prNumber);
+        if (current.head.sha !== options.targetSha) {
+            console.warn("[pi-reviewer] PR head changed before reconciliation; leaving lifecycle state unchanged");
+            return;
+        }
+    }
+    const priorReplies = await client.listComments(options.repo, options.prNumber).catch(() => []);
+    const isTargetHeadCurrent = async () => {
+        try {
+            const current = await client.getPullRequest(options.repo, options.prNumber);
+            return current.head.sha === options.targetSha;
+        }
+        catch {
+            return false;
+        }
+    };
+    for (const update of options.updates) {
+        const finding = known.get(update.comment_id);
+        if (!finding)
+            continue;
+        if (update.status === "STILL_OPEN")
+            continue;
+        const body = `<!-- pi-reviewer:status:v1 ${JSON.stringify({ findingId: update.comment_id, targetSha: options.targetSha, status: update.status })} -->\n${update.status === "RESOLVED" ? `Resolved in ${options.targetSha.slice(0, 7)}` : "Partially addressed"}: ${update.explanation}`;
+        const alreadyReplied = priorReplies.some(reply => reply.user?.login === identity?.login && reply.in_reply_to_id === finding.commentId && reply.body.includes(`"targetSha":"${options.targetSha}"`) && reply.body.includes(`"status":"${update.status}"`));
+        try {
+            if (!alreadyReplied) {
+                // Recheck after loading all replies and immediately before persisting
+                // lifecycle state; the initial guard can be separated from this point
+                // by a slow paginated API response.
+                if (!await isTargetHeadCurrent()) {
+                    console.warn(`[pi-reviewer] PR head changed before replying to finding ${finding.commentId}; leaving lifecycle state unchanged`);
+                    continue;
+                }
+                await client.reply(options.repo, options.prNumber, finding.commentId, body);
+            }
+        }
+        catch (error) {
+            console.warn(`[pi-reviewer] could not reply to finding ${finding.commentId}: ${error instanceof Error ? error.message : String(error)}`);
+            continue;
+        }
+        if (update.status === "RESOLVED" && finding.threadId) {
+            try {
+                // Revalidate immediately before the destructive mutation. The review
+                // may have taken long enough for the PR head to advance since the
+                // initial post-time guard.
+                if (!await isTargetHeadCurrent()) {
+                    console.warn(`[pi-reviewer] PR head changed before resolving finding ${finding.commentId}; leaving thread open`);
+                    continue;
+                }
+                await client.resolveThread(finding.threadId);
+            }
+            catch (error) {
+                console.warn(`[pi-reviewer] could not resolve finding ${finding.commentId}; will retry resolution: ${error instanceof Error ? error.message : String(error)}`);
+            }
+        }
+    }
+}
 export function extractAssistantText(message) {
     const msg = message;
     if (msg?.role !== "assistant")
@@ -155,7 +230,7 @@ function tryParseJSON(raw) {
     }
     return null;
 }
-export function parseAgentResponseWithStatus(text, minSeverity = "INFO") {
+export function parseAgentResponseWithStatus(text, minSeverity = "INFO", allowedFindingIds, existingFindingKeys) {
     // Build candidates sorted by source position. We return the **last** valid
     // candidate — this handles models that reason in prose before emitting the
     // final review (the production incident pattern).
@@ -176,14 +251,22 @@ export function parseAgentResponseWithStatus(text, minSeverity = "INFO") {
     let resultAny = null;
     for (const { content } of candidates) {
         const parsed = tryParseJSON(content);
+        const rawUpdates = parsed && Array.isArray(parsed.finding_updates) ? parsed.finding_updates : [];
+        const updatesValid = rawUpdates.every((u) => {
+            if (!u || typeof u !== "object")
+                return false;
+            const value = u;
+            return Number.isInteger(value.comment_id) && (!allowedFindingIds || allowedFindingIds.has(value.comment_id)) && ["RESOLVED", "PARTIALLY_RESOLVED", "STILL_OPEN"].includes(value.status) && typeof value.explanation === "string" && value.explanation.length <= 2000;
+        });
         if (parsed &&
             typeof parsed.summary === "string" &&
             Array.isArray(parsed.comments) &&
-            parsed.comments.every(isReviewComment)) {
+            parsed.comments.every(isReviewComment) && updatesValid) {
             const minRank = SEVERITY_RANK[minSeverity];
             const comments = parsed.comments
                 .map((c) => ({ ...c, severity: normalizeSeverity(c.severity) }))
                 .filter((c) => SEVERITY_RANK[c.severity] >= minRank)
+                .filter((c) => !existingFindingKeys?.has(normalizeFinding(c)))
                 .map((c) => {
                 const emoji = SEVERITY_EMOJI[c.severity];
                 const prefix = ["🔴 ", "🟡 ", "🔵 "].find((value) => c.body.startsWith(value));
@@ -191,7 +274,18 @@ export function parseAgentResponseWithStatus(text, minSeverity = "INFO") {
                 return { ...c, body: `${emoji} ${body}` };
             });
             const diff = typeof parsed.diff === "string" ? parsed.diff : undefined;
-            const review = { summary: parsed.summary, comments, ...(diff !== undefined ? { diff } : {}) };
+            const updates = Array.isArray(parsed.finding_updates)
+                ? parsed.finding_updates.filter((u) => {
+                    if (!u || typeof u !== "object")
+                        return false;
+                    const value = u;
+                    return Number.isInteger(value.comment_id) &&
+                        (!allowedFindingIds || allowedFindingIds.has(value.comment_id)) &&
+                        ["RESOLVED", "PARTIALLY_RESOLVED", "STILL_OPEN"].includes(value.status) &&
+                        typeof value.explanation === "string" && value.explanation.length <= 2000;
+                })
+                : [];
+            const review = { summary: parsed.summary, comments, ...(updates.length ? { finding_updates: updates } : {}), ...(diff !== undefined ? { diff } : {}) };
             resultAny = review;
             // Base the preference on what the model emitted, not on what remains
             // after minSeverity filtering. A genuine review whose findings are all
@@ -205,6 +299,10 @@ export function parseAgentResponseWithStatus(text, minSeverity = "INFO") {
     if (result)
         return { result, parsed: true };
     return { result: { summary: text, comments: [] }, parsed: false };
+}
+/** Stable identity used to avoid reposting the same finding in a batch. */
+export function normalizeFinding(comment) {
+    return [comment.file, comment.line, comment.side, comment.body.replace(/^[🔴🟡🔵]\s*/u, "").trim().replace(/\n\s*\n+/g, "\n")].join("\0");
 }
 export function parseAgentResponse(text, minSeverity = "INFO") {
     return parseAgentResponseWithStatus(text, minSeverity).result;
@@ -248,11 +346,11 @@ export function formatForTerminal(result) {
     return lines.join("\n");
 }
 export async function sendOutput(options) {
-    const parsedResponse = parseAgentResponseWithStatus(options.content, options.minSeverity);
+    const parsedResponse = parseAgentResponseWithStatus(options.content, options.minSeverity, options.allowedFindingIds, options.existingFindingKeys);
     const result = parsedResponse.result;
     if (options.target === "terminal") {
         console.log(formatForTerminal(result));
-        return;
+        return { commentIds: [], fallback: false };
     }
     if (options.target === "comment") {
         if (!options.githubToken) {
@@ -274,11 +372,15 @@ export async function sendOutput(options) {
         // Split comments into inline (positionable on the diff) and moved (kept in
         // the review body). Without a diff we can't validate positions, so every
         // comment is treated as inline (local/SSH callers, which never pass a diff).
-        let inline = result.comments;
+        const unique = new Map();
+        for (const comment of result.comments)
+            unique.set(normalizeFinding(comment), comment);
+        const comments = [...unique.values()];
+        let inline = comments;
         let moved = [];
         if (options.diff) {
             const positions = parseDiffPositions(options.diff);
-            ({ inline, moved } = partitionComments(result.comments, positions));
+            ({ inline, moved } = partitionComments(comments, positions));
             if (moved.length > 0) {
                 console.log(`[pi-reviewer] ${moved.length} comment(s) not positionable on the diff — moved to review body`);
             }
@@ -287,11 +389,16 @@ export async function sendOutput(options) {
             path: comment.file,
             line: comment.line,
             side: comment.side,
-            body: comment.body,
+            body: `<!-- pi-reviewer:finding:v1 -->\n${comment.body}`,
         }));
-        const body = buildReviewBody(result.summary, moved);
+        const body = [options.batchMarker, buildReviewBody(result.summary, moved)].filter(Boolean).join("\n\n");
+        if (options.batchMarker && options.githubToken && options.repo && options.prNumber && options.commitId) {
+            const current = await new GitHubClient(options.githubToken).getPullRequest(options.repo, options.prNumber);
+            if (current.head.sha !== options.commitId)
+                throw new Error("PR head changed while the review was running; refusing to post a stale batch");
+        }
         // Try PR Reviews API first (supports inline comments and a body).
-        if ((inlineComments.length > 0 || moved.length > 0) && options.commitId) {
+        if (options.commitId) {
             console.log(`[pi-reviewer] posting review with ${inlineComments.length} inline comment(s)` +
                 (moved.length > 0 ? ` and ${moved.length} comment(s) in body` : ""));
             let reviewResponse = await fetch(`https://api.github.com/repos/${options.repo}/pulls/${options.prNumber}/reviews`, {
@@ -306,7 +413,19 @@ export async function sendOutput(options) {
             });
             if (reviewResponse.ok) {
                 console.log("[pi-reviewer] review posted with inline comments");
-                return;
+                if (options.batchMarker && options.githubToken && options.repo && options.prNumber) {
+                    const posted = await reviewResponse.clone().json().catch(() => undefined);
+                    if (posted?.id) {
+                        const finalized = options.batchMarker.replace(/("reviewId"\s*:\s*)0/, `$1${posted.id}`);
+                        if (finalized !== options.batchMarker)
+                            await new GitHubClient(options.githubToken).updateReview(options.repo, options.prNumber, posted.id, [finalized, buildReviewBody(result.summary, moved)].join("\n\n")).catch(error => console.warn(`[pi-reviewer] could not finalize batch marker: ${error instanceof Error ? error.message : String(error)}`));
+                    }
+                }
+                if (result.finding_updates?.length && options.existingFindings && options.githubToken && options.repo && options.prNumber && options.commitId) {
+                    await reconcileFindingUpdates({ token: options.githubToken, repo: options.repo, prNumber: options.prNumber, targetSha: options.commitId, updates: result.finding_updates, findings: options.existingFindings });
+                }
+                const posted = await responseJson(reviewResponse);
+                return { reviewId: posted?.id, commentIds: posted?.comments?.flatMap(c => c.id ? [c.id] : []) ?? [], fallback: false };
             }
             let errBody = await reviewResponse.text().catch(() => "");
             console.warn(`[pi-reviewer] inline comments rejected (${reviewResponse.status}) — ${errBody}`);
@@ -314,7 +433,7 @@ export async function sendOutput(options) {
             // valid (e.g. a force-push changed the diff between resolution and post).
             // Retry once as a body-only review, moving every comment into the body.
             if (reviewResponse.status === 422) {
-                const allMovedBody = buildReviewBody(result.summary, result.comments);
+                const allMovedBody = [options.batchMarker, buildReviewBody(result.summary, comments)].filter(Boolean).join("\n\n");
                 reviewResponse = await fetch(`https://api.github.com/repos/${options.repo}/pulls/${options.prNumber}/reviews`, {
                     method: "POST",
                     headers,
@@ -327,7 +446,18 @@ export async function sendOutput(options) {
                 });
                 if (reviewResponse.ok) {
                     console.log("[pi-reviewer] review posted as body-only (inline positions rejected)");
-                    return;
+                    if (options.batchMarker && options.githubToken && options.repo && options.prNumber) {
+                        const posted = await reviewResponse.clone().json().catch(() => undefined);
+                        if (posted?.id) {
+                            const finalized = options.batchMarker.replace(/("reviewId"\s*:\s*)0/, `$1${posted.id}`);
+                            if (finalized !== options.batchMarker)
+                                await new GitHubClient(options.githubToken).updateReview(options.repo, options.prNumber, posted.id, [finalized, allMovedBody].join("\n\n")).catch(error => console.warn(`[pi-reviewer] could not finalize batch marker: ${error instanceof Error ? error.message : String(error)}`));
+                        }
+                    }
+                    if (result.finding_updates?.length && options.existingFindings && options.githubToken && options.repo && options.prNumber && options.commitId)
+                        await reconcileFindingUpdates({ token: options.githubToken, repo: options.repo, prNumber: options.prNumber, targetSha: options.commitId, updates: result.finding_updates, findings: options.existingFindings });
+                    const posted = await responseJson(reviewResponse);
+                    return { reviewId: posted?.id, commentIds: posted?.comments?.flatMap(c => c.id ? [c.id] : []) ?? [], fallback: true };
                 }
                 errBody = await reviewResponse.text().catch(() => "");
                 console.warn(`[pi-reviewer] body-only review rejected (${reviewResponse.status}) — ${errBody}`);
@@ -338,17 +468,19 @@ export async function sendOutput(options) {
         const issueResponse = await fetch(`https://api.github.com/repos/${options.repo}/issues/${options.prNumber}/comments`, {
             method: "POST",
             headers,
-            body: JSON.stringify({ body: formatForGitHub(result) }),
+            body: JSON.stringify({ body: [options.batchMarker, formatForGitHub(result)].filter(Boolean).join("\n\n") }),
         });
         if (!issueResponse.ok) {
             const body = await issueResponse.text().catch(() => "(unreadable)");
             throw new Error(`Failed to post GitHub comment: ${issueResponse.status} ${issueResponse.statusText}\n${body}`);
         }
         console.log("[pi-reviewer] review comment posted");
-        return;
+        const posted = await responseJson(issueResponse);
+        return { commentIds: posted?.id ? [posted.id] : [], fallback: true };
     }
     const cwd = options.cwd ?? process.cwd();
     const filePath = path.join(cwd, "pi-review.md");
     await writeFile(filePath, formatForTerminal(result), "utf-8");
     console.log(`[pi-reviewer] review saved to ${filePath}`);
+    return { commentIds: [], fallback: false };
 }

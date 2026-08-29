@@ -119,4 +119,14 @@ describe("createReviewTool", () => {
 
     expect(() => validateToolArguments(tool, toolCall(args))).toThrow(/Validation failed/);
   });
+
+  it("schema validates finding updates", () => {
+    const { tool } = createReviewTool();
+    const args = { ...validArgs(), finding_updates: [{ comment_id: 7, status: "PARTIALLY_RESOLVED", explanation: "Changed validation; logging remains." }] };
+    expect(() => validateToolArguments(tool, toolCall(args))).not.toThrow();
+    args.finding_updates[0].status = "UNKNOWN";
+    expect(() => validateToolArguments(tool, toolCall(args))).toThrow(/Validation failed/);
+    const tooLong = { ...validArgs(), finding_updates: [{ comment_id: 7, status: "RESOLVED", explanation: "x".repeat(2001) }] };
+    expect(() => validateToolArguments(tool, toolCall(tooLong))).toThrow(/Validation failed/);
+  });
 });

@@ -6,6 +6,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test"
 import {
   parseAgentResponse,
   parseAgentResponseWithStatus,
+  normalizeFinding,
+  reconcileFindingUpdates,
   sendOutput,
 } from "../../src/core/output.js";
 
@@ -489,11 +491,31 @@ describe("sendOutput", () => {
           body: "Needs fixes",
           event: "COMMENT",
           comments: [
-            { path: "src/auth.ts", line: 42, side: "RIGHT", body: "🔴 Missing null check" },
+            { path: "src/auth.ts", line: 42, side: "RIGHT", body: "<!-- pi-reviewer:finding:v1 -->\n🔴 Missing null check" },
           ],
         }),
       }),
     );
+  });
+
+  it("refuses to post when the PR head changed during review", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      text: vi.fn().mockResolvedValue(JSON.stringify({ head: { sha: "new-head" } })),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(sendOutput({
+      target: "comment",
+      content: JSON.stringify({ summary: "stale", comments: [] }),
+      githubToken: "token123",
+      prNumber: 42,
+      repo: "owner/repo",
+      commitId: "reviewed-head",
+      batchMarker: "<!-- marker -->",
+    })).rejects.toThrow("PR head changed while the review was running");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toBe("https://api.github.com/repos/owner/repo/pulls/42");
   });
 
   it("retries once as body-only review when Reviews API returns 422", async () => {
@@ -654,7 +676,7 @@ describe("sendOutput", () => {
         path: "client/web/src/lib/components/core/tag-input/tag-input.svelte",
         line: 20,
         side: "RIGHT",
-        body: "🔵 positionable",
+        body: "<!-- pi-reviewer:finding:v1 -->\n🔵 positionable",
       },
     ]);
     expect(payload.body).toContain("Review");
@@ -728,7 +750,7 @@ describe("sendOutput", () => {
     expect(payload.comments).toHaveLength(1);
   });
 
-  it("uses Issues API with a valid summary-only review", async () => {
+  it("uses the Reviews API with a valid summary-only review", async () => {
     const fetchMock = okFetch();
     vi.stubGlobal("fetch", fetchMock);
 
@@ -741,12 +763,7 @@ describe("sendOutput", () => {
       commitId: "abc123",
     });
 
-    expect(fetchMock).toHaveBeenCalledWith(
-      "https://api.github.com/repos/owner/repo/issues/42/comments",
-      expect.objectContaining({
-        body: expect.stringContaining("Looks mostly good"),
-      }),
-    );
+    expect(fetchMock).toHaveBeenCalledWith("https://api.github.com/repos/owner/repo/pulls/42/reviews", expect.anything());
   });
 
   it("refuses to post unparseable model output", async () => {
@@ -863,5 +880,137 @@ describe("sendOutput", () => {
     const body = JSON.parse((fetchMock.mock.calls[0][1] as { body: string }).body);
     expect(body.comments).toHaveLength(1);
     expect(body.comments[0].path).toBe("src/b.ts");
+  });
+
+  it("validates finding updates against supplied IDs and preserves legacy output", () => {
+    const valid = parseAgentResponseWithStatus(JSON.stringify({ summary: "updated", comments: [], finding_updates: [{ comment_id: 7, status: "RESOLVED", explanation: "fixed" }] }), "INFO", new Set([7]));
+    expect(valid.parsed).toBe(true);
+    expect(valid.result.finding_updates?.[0].status).toBe("RESOLVED");
+    expect(parseAgentResponseWithStatus(JSON.stringify({ summary: "bad", comments: [], finding_updates: [{ comment_id: 8, status: "RESOLVED", explanation: "x" }] }), "INFO", new Set([7])).parsed).toBe(false);
+  });
+
+  it("normalizes duplicate finding identities", () => {
+    expect(normalizeFinding({ file: "a.ts", line: 1, side: "RIGHT", body: "🔴 issue\n\n details" })).toBe(normalizeFinding({ file: "a.ts", line: 1, side: "RIGHT", body: "issue\n details" }));
+  });
+});
+
+describe("reconcileFindingUpdates", () => {
+  it("does not mutate still-open findings", async () => {
+    const fetchMock = vi.fn(); vi.stubGlobal("fetch", fetchMock);
+    await reconcileFindingUpdates({ token: "t", repo: "o/r", prNumber: 1, targetSha: "head", updates: [{ comment_id: 3, status: "STILL_OPEN", explanation: "unchanged" }], findings: [{ commentId: 3, threadId: "thread" }] });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ headers: expect.objectContaining({ authorization: "Bearer t" }) });
+  });
+  it("replies and resolves a resolved finding", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue(JSON.stringify({ login: "bot" })) })
+      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue(JSON.stringify({ head: { sha: "head" } })) })
+      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue("[]") })
+      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue(JSON.stringify({ head: { sha: "head" } })) })
+      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue("{}") })
+      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue(JSON.stringify({ head: { sha: "head" } })) })
+      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue(JSON.stringify({ data: { resolveReviewThread: { thread: { id: "thread", isResolved: true } } } })) });
+    vi.stubGlobal("fetch", fetchMock);
+    await reconcileFindingUpdates({ token: "t", repo: "o/r", prNumber: 1, targetSha: "head", updates: [{ comment_id: 3, status: "RESOLVED", explanation: "fixed" }], findings: [{ commentId: 3, threadId: "thread" }] });
+    expect(fetchMock).toHaveBeenCalledTimes(7);
+  });
+  it("continues after reply or resolve failures", async () => {
+    const replyFailure = vi.fn()
+      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue(JSON.stringify({ login: "bot" })) })
+      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue(JSON.stringify({ head: { sha: "head" } })) })
+      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue("[]") })
+      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue(JSON.stringify({ head: { sha: "head" } })) })
+      .mockResolvedValueOnce({ ok: false, status: 500, statusText: "error", text: vi.fn().mockResolvedValue("failed") });
+    vi.stubGlobal("fetch", replyFailure);
+    await expect(reconcileFindingUpdates({ token: "t", repo: "o/r", prNumber: 1, targetSha: "head", updates: [{ comment_id: 3, status: "RESOLVED", explanation: "fixed" }], findings: [{ commentId: 3, threadId: "thread" }] })).resolves.toBeUndefined();
+    expect(replyFailure).toHaveBeenCalledTimes(5);
+
+    const resolveFailure = vi.fn()
+      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue(JSON.stringify({ login: "bot" })) })
+      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue(JSON.stringify({ head: { sha: "head" } })) })
+      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue("[]") })
+      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue(JSON.stringify({ head: { sha: "head" } })) })
+      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue("{}") })
+      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue(JSON.stringify({ head: { sha: "head" } })) })
+      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue(JSON.stringify({ errors: [{ message: "failed" }] })) });
+    vi.stubGlobal("fetch", resolveFailure);
+    await expect(reconcileFindingUpdates({ token: "t", repo: "o/r", prNumber: 1, targetSha: "head", updates: [{ comment_id: 3, status: "RESOLVED", explanation: "fixed" }], findings: [{ commentId: 3, threadId: "thread" }] })).resolves.toBeUndefined();
+    expect(resolveFailure).toHaveBeenCalledTimes(7);
+  });
+  it("does not resolve a finding when the head changes during reconciliation", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue(JSON.stringify({ login: "bot" })) })
+      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue(JSON.stringify({ head: { sha: "old-head" } })) })
+      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue("[]") })
+      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue(JSON.stringify({ head: { sha: "new-head" } })) });
+    vi.stubGlobal("fetch", fetchMock);
+    await reconcileFindingUpdates({ token: "t", repo: "o/r", prNumber: 1, targetSha: "old-head", updates: [{ comment_id: 3, status: "RESOLVED", explanation: "fixed" }], findings: [{ commentId: 3, threadId: "thread" }] });
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(fetchMock.mock.calls[3][0]).toContain("/pulls/1");
+  });
+  it("persists the reconciliation status in the status marker", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue(JSON.stringify({ login: "bot" })) })
+      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue(JSON.stringify({ head: { sha: "head" } })) })
+      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue("[]") })
+      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue(JSON.stringify({ head: { sha: "head" } })) })
+      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue("{}") });
+    vi.stubGlobal("fetch", fetchMock);
+    await reconcileFindingUpdates({ token: "t", repo: "o/r", prNumber: 1, targetSha: "head", updates: [{ comment_id: 3, status: "PARTIALLY_RESOLVED", explanation: "still needs work" }], findings: [{ commentId: 3, threadId: "thread" }] });
+    const body = JSON.parse((fetchMock.mock.calls[4][1] as { body: string }).body).body as string;
+    expect(body).toContain('"status":"PARTIALLY_RESOLVED"');
+  });
+  it("leaves partial findings open and skips an already-posted reply", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue(JSON.stringify({ login: "bot" })) })
+      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue(JSON.stringify({ head: { sha: "head" } })) })
+      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue(JSON.stringify([{ id: 9, in_reply_to_id: 3, user: { login: "bot" }, body: '"targetSha":"head","status":"PARTIALLY_RESOLVED"' }])) });
+    vi.stubGlobal("fetch", fetchMock);
+    await reconcileFindingUpdates({ token: "t", repo: "o/r", prNumber: 1, targetSha: "head", updates: [{ comment_id: 3, status: "PARTIALLY_RESOLVED", explanation: "changed; remains" }, { comment_id: 4, status: "STILL_OPEN", explanation: "same" }], findings: [{ commentId: 3, threadId: "thread" }, { commentId: 4, threadId: "thread2" }] });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+  it("does not deduplicate a transition from partial to resolved", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue(JSON.stringify({ login: "bot" })) })
+      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue(JSON.stringify({ head: { sha: "head" } })) })
+      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue(JSON.stringify([{ id: 9, in_reply_to_id: 3, user: { login: "bot" }, body: '"targetSha":"head","status":"PARTIALLY_RESOLVED"' }])) })
+      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue(JSON.stringify({ head: { sha: "head" } })) })
+      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue("{}") })
+      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue(JSON.stringify({ head: { sha: "head" } })) })
+      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue(JSON.stringify({ data: { resolveReviewThread: { thread: { id: "thread", isResolved: true } } } })) });
+    vi.stubGlobal("fetch", fetchMock);
+    await reconcileFindingUpdates({ token: "t", repo: "o/r", prNumber: 1, targetSha: "head", updates: [{ comment_id: 3, status: "RESOLVED", explanation: "fixed" }], findings: [{ commentId: 3, threadId: "thread" }] });
+    expect(fetchMock).toHaveBeenCalledTimes(7);
+  });
+  it("does not treat a participant's forged status reply as an existing lifecycle reply", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue(JSON.stringify({ login: "bot" })) })
+      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue(JSON.stringify({ head: { sha: "head" } })) })
+      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue(JSON.stringify([{ id: 9, in_reply_to_id: 3, user: { login: "human" }, body: '"targetSha":"head"' }])) })
+      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue(JSON.stringify({ head: { sha: "head" } })) })
+      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue("{}") });
+    vi.stubGlobal("fetch", fetchMock);
+    await reconcileFindingUpdates({ token: "t", repo: "o/r", prNumber: 1, targetSha: "head", updates: [{ comment_id: 3, status: "PARTIALLY_RESOLVED", explanation: "changed" }], findings: [{ commentId: 3 }] });
+    expect(fetchMock).toHaveBeenCalledTimes(5);
+    expect(fetchMock.mock.calls[4][0]).toContain("/comments");
+  });
+  it("suppresses an existing finding across batches", async () => {
+    const fetchMock = okFetch(); vi.stubGlobal("fetch", fetchMock);
+    await sendOutput({ target: "comment", content: JSON.stringify({ summary: "review", comments: [{ file: "src/a.ts", line: 1, side: "RIGHT", severity: "WARN", body: "same issue" }] }), githubToken: "t", prNumber: 1, repo: "o/r", commitId: "head", existingFindingKeys: new Set([normalizeFinding({ file: "src/a.ts", line: 1, side: "RIGHT", body: "same issue" })]) });
+    const payload = JSON.parse((fetchMock.mock.calls[0][1] as { body: string }).body);
+    expect(payload.comments).toEqual([]);
+  });
+  it("retains a batch marker in the body-only fallback", async () => {
+    const marker = '<!-- pi-reviewer:batch:v1 {"version":1,"fromSha":"base","toSha":"head","kind":"synchronize","actor":"bot","reviewId":0} -->';
+    const response = (body: unknown, ok = true, status = 200) => ({ ok, status, text: vi.fn().mockResolvedValue(typeof body === "string" ? body : JSON.stringify(body)), json: vi.fn().mockResolvedValue(body), clone() { return this; } });
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(response({ head: { sha: "head" } }))
+      .mockResolvedValueOnce(response("bad", false, 422))
+      .mockResolvedValueOnce(response({ id: 12, comments: [] }))
+      .mockResolvedValueOnce(response({ id: 12 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await sendOutput({ target: "comment", content: JSON.stringify({ summary: "review", comments: [] }), githubToken: "t", prNumber: 1, repo: "o/r", commitId: "head", batchMarker: marker });
+    const fallback = JSON.parse((fetchMock.mock.calls[2][1] as { body: string }).body);
+    expect(fallback.body).toContain(marker);
   });
 });

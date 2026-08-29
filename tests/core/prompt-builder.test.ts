@@ -5,6 +5,7 @@ import {
   buildMarkdownSystemPrompt,
   buildSSHUserPrompt,
   buildUserPrompt,
+  type ActiveFindingContext,
 } from "../../src/core/prompt-builder.js";
 
 describe("prompt-builder", () => {
@@ -15,6 +16,16 @@ describe("prompt-builder", () => {
     expect(prompt).toContain("Return only a JSON object matching this schema exactly");
     expect(prompt).not.toContain("<conventions>");
     expect(prompt).not.toContain("<review_rules>");
+  });
+
+  it("injects bounded active findings and prior summary", () => {
+    const findings: ActiveFindingContext[] = Array.from({ length: 51 }, (_, i) => ({ commentId: i + 1, body: "x".repeat(2500) }));
+    const prompt = buildJSONSystemPrompt({ conventions: [], reviewRules: [] }, "INFO", undefined, findings, "previous review");
+    expect(prompt).toContain("<active_findings>");
+    expect(prompt).toContain("<previous_review_summary>\nprevious review");
+    const findingsSection = prompt.slice(prompt.indexOf("<active_findings>"), prompt.indexOf("</active_findings>"));
+    expect(findingsSection.match(/"comment_id":/g)?.length).toBe(50);
+    expect(prompt).not.toContain("x".repeat(2001));
   });
 
   it("appends conventions section when conventions is provided", () => {

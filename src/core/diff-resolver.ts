@@ -1,4 +1,4 @@
-import { execSync } from "node:child_process";
+import { execFileSync, execSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -10,6 +10,9 @@ export interface DiffOptions {
   branch?: string;
   cwd?: string;
   dir?: string;
+  fromSha?: string;
+  toSha?: string;
+  allowEmpty?: boolean;
 }
 
 export interface DiffResult {
@@ -100,7 +103,10 @@ export async function resolveDiff(options: DiffOptions): Promise<DiffResult> {
   let raw: string;
   let source: string;
 
-  if (typeof options.pr === "number") {
+  if (options.fromSha && options.toSha) {
+    raw = execFileSync("git", ["diff", `${options.fromSha}..${options.toSha}`], { cwd, encoding: "utf-8", env: { ...process.env, PATH: augmentedPath } });
+    source = `git diff ${options.fromSha}..${options.toSha}`;
+  } else if (typeof options.pr === "number") {
     try {
       raw = run(`gh pr diff ${options.pr}`, cwd);
     } catch (e) {
@@ -132,7 +138,7 @@ export async function resolveDiff(options: DiffOptions): Promise<DiffResult> {
     }
   }
 
-  ensureNonEmptyDiff(raw);
+  if (!options.allowEmpty) ensureNonEmptyDiff(raw);
   const { diff, warning, skippedFiles } = filterDiff(raw);
   return { diff, source, warning, skippedFiles };
 }

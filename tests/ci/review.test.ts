@@ -185,6 +185,13 @@ describe("review", () => {
     );
   });
 
+  it("reviews an explicit multi-commit range as one batch", async () => {
+    sendOutputMock.mockClear();
+    await review({ cwd: "/repo", fromSha: "base-sha", commitId: "head-sha", output: "comment", pr: 42, githubToken: "token", repo: "owner/repo" });
+    expect(resolveDiffMock).toHaveBeenCalledWith(expect.objectContaining({ fromSha: "base-sha", toSha: "head-sha" }));
+    expect(sendOutputMock).toHaveBeenCalledTimes(1);
+  });
+
   it("allows explicit output option to override auto-detect", async () => {
     process.env.GITHUB_ACTIONS = "true";
 

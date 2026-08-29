@@ -2,16 +2,19 @@ import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 vi.mock("node:child_process", () => ({
   execSync: vi.fn(),
+  execFileSync: vi.fn(),
 }));
 
-import { execSync } from "node:child_process";
+import { execFileSync, execSync } from "node:child_process";
 import { resolveDiff, extractDiffFiles } from "../../src/core/diff-resolver.js";
 
 const execSyncMock = vi.mocked(execSync);
+const execFileSyncMock = vi.mocked(execFileSync);
 
 describe("resolveDiff", () => {
   beforeEach(() => {
     execSyncMock.mockReset();
+    execFileSyncMock.mockReset();
     delete process.env.GITHUB_ACTIONS;
     delete process.env.GITHUB_BASE_REF;
   });
@@ -29,6 +32,13 @@ describe("resolveDiff", () => {
       }),
     );
     expect(result.source).toBe("PR #42");
+  });
+
+  it("resolves an exact SHA-to-SHA diff", async () => {
+    execFileSyncMock.mockReturnValue("diff --git a/a.ts b/a.ts\n");
+    const result = await resolveDiff({ fromSha: "base", toSha: "head", cwd: "/repo" });
+    expect(execFileSyncMock).toHaveBeenCalledWith("git", ["diff", "base..head"], expect.objectContaining({ cwd: "/repo" }));
+    expect(result.source).toBe("git diff base..head");
   });
 
   it("uses git diff <ref> for --diff", async () => {

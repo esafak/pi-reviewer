@@ -4,15 +4,18 @@ import path from "node:path";
 
 export interface InitOptions {
   cwd?: string;
+  reviewDrafts?: boolean;
 }
 
 const WORKFLOW_RELATIVE_PATH = path.join(".github", "workflows", "pi-review.yml");
 
-const WORKFLOW_CONTENT = `name: Pi Reviewer
+function workflowContent(reviewDrafts = false): string { return `name: Pi Reviewer
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened]
+    types: [opened, synchronize, reopened, ready_for_review]
+  issue_comment:
+    types: [created]
   workflow_dispatch:
     inputs:
       min-severity:
@@ -24,6 +27,14 @@ on:
           - info
           - warn
           - critical
+      pr-number:
+        description: 'Pull request number to review'
+        required: false
+        type: number
+      target-head:
+        description: 'Optional ancestor commit to review'
+        required: false
+        type: string
 
 jobs:
   review:
@@ -32,8 +43,19 @@ jobs:
       contents: read
       pull-requests: write
 
+    concurrency:
+      group: pi-reviewer-\${{ github.repository }}-\${{ github.event.pull_request.number || github.event.issue.number || inputs.pr-number || github.run_id }}
+      cancel-in-progress: false
+
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: \${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Fetch PR refs for comment and manual events
+        shell: bash
+        run: git fetch origin '+refs/pull/*/head:refs/remotes/origin/pr/*' --no-tags
 
       - uses: zeflq/pi-reviewer@main
         with:
@@ -41,10 +63,11 @@ jobs:
           pi-api-key: \${{ secrets.PI_API_KEY }}
           model: openrouter/openai/gpt-5.4-mini
           min-severity: \${{ inputs.min-severity || 'info' }}
+          review-drafts: '${reviewDrafts ? "true" : "false"}'
           # Opt in to injecting matching project docs into the review.
           # Comma-separated dirs scanned for .md files with a 'description' frontmatter.
           # doc-dirs: '.pi/notes,docs/review'
-`;
+ `; }
 
 export async function init(options: InitOptions = {}): Promise<void> {
   const cwd = options.cwd ?? process.cwd();
@@ -56,7 +79,7 @@ export async function init(options: InitOptions = {}): Promise<void> {
   }
 
   mkdirSync(path.dirname(workflowPath), { recursive: true });
-  await writeFile(workflowPath, WORKFLOW_CONTENT, "utf-8");
+  await writeFile(workflowPath, workflowContent(options.reviewDrafts), "utf-8");
 
   console.log("✓ Created .github/workflows/pi-review.yml");
   console.log("");

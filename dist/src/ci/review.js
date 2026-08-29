@@ -4,7 +4,7 @@ import { createReadOnlyTools } from "@earendil-works/pi-coding-agent";
 import { loadContext, mergeContextFiles } from "../core/context.js";
 import { resolveDiff, extractDiffFiles } from "../core/diff-resolver.js";
 import { loadDocContext } from "../core/doc-context.js";
-import { sendOutput, extractLastAssistantText } from "../core/output.js";
+import { sendOutput, extractLastAssistantText, normalizeFinding } from "../core/output.js";
 import { buildJSONSystemPrompt, buildUserPrompt } from "../core/prompt-builder.js";
 import { createReviewTool } from "../core/review-tool.js";
 const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"];
@@ -30,6 +30,9 @@ export async function review(options) {
         diff: options.diff,
         branch: options.branch,
         cwd,
+        fromSha: options.fromSha,
+        toSha: options.commitId,
+        allowEmpty: options.allowEmptyDiff,
     });
     console.log(`[pi-reviewer] diff resolved — source: ${source}, size: ${diff.length} chars`);
     if (warning)
@@ -49,7 +52,7 @@ export async function review(options) {
     if (docContextFiles.length > 0) {
         console.log(`[pi-reviewer] doc-context loaded: ${docContextFiles.map(f => f.path).join(", ")}`);
     }
-    const systemPrompt = buildJSONSystemPrompt(context, options.minSeverity, docContextFiles);
+    const systemPrompt = buildJSONSystemPrompt(context, options.minSeverity, docContextFiles, options.activeFindings, options.priorSummary);
     const userPrompt = buildUserPrompt(diff, skippedFiles);
     const target = options.output ?? (process.env.GITHUB_ACTIONS === "true" ? "comment" : "terminal");
     if (options.dryRun) {
@@ -168,6 +171,10 @@ export async function review(options) {
             commitId: options.commitId,
             minSeverity: options.minSeverity,
             diff,
+            batchMarker: options.batchMarker,
+            existingFindings: options.activeFindings?.map(f => ({ commentId: f.commentId, threadId: f.threadId })),
+            existingFindingKeys: new Set(options.activeFindings?.filter(f => f.file && f.line && f.side).map(f => normalizeFinding({ file: f.file, line: f.line, side: f.side, body: f.body }))),
+            allowedFindingIds: new Set(options.activeFindings?.map(f => f.commentId)),
         });
     }
     finally {

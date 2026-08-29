@@ -6,8 +6,8 @@ import { createReadOnlyTools } from "@earendil-works/pi-coding-agent";
 import { loadContext, mergeContextFiles } from "../core/context.js";
 import { resolveDiff, extractDiffFiles } from "../core/diff-resolver.js";
 import { loadDocContext } from "../core/doc-context.js";
-import { sendOutput, extractLastAssistantText, type OutputTarget, type Severity } from "../core/output.js";
-import { buildJSONSystemPrompt, buildUserPrompt, type MinSeverity } from "../core/prompt-builder.js";
+import { sendOutput, extractLastAssistantText, normalizeFinding, type OutputTarget, type Severity } from "../core/output.js";
+import { buildJSONSystemPrompt, buildUserPrompt, type MinSeverity, type ActiveFindingContext } from "../core/prompt-builder.js";
 import { createReviewTool } from "../core/review-tool.js";
 import type { ThinkingLevel } from "../core/config.js";
 
@@ -26,6 +26,11 @@ export interface ReviewOptions {
   thinking?: ThinkingLevel;
   minSeverity?: MinSeverity;
   docDirs?: string[]; // dirs to scan for doc-context; empty = inject nothing (opt-in)
+  fromSha?: string;
+  batchMarker?: string;
+  activeFindings?: ActiveFindingContext[];
+  allowEmptyDiff?: boolean;
+  priorSummary?: string;
 }
 
 const THINKING_LEVELS: readonly ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh"];
@@ -54,6 +59,9 @@ export async function review(options: ReviewOptions): Promise<void> {
     diff: options.diff,
     branch: options.branch,
     cwd,
+    fromSha: options.fromSha,
+    toSha: options.commitId,
+    allowEmpty: options.allowEmptyDiff,
   });
   console.log(`[pi-reviewer] diff resolved — source: ${source}, size: ${diff.length} chars`);
   if (warning) console.warn(`[pi-reviewer] ${warning}`);
@@ -74,7 +82,7 @@ export async function review(options: ReviewOptions): Promise<void> {
     console.log(`[pi-reviewer] doc-context loaded: ${docContextFiles.map(f => f.path).join(", ")}`);
   }
 
-  const systemPrompt = buildJSONSystemPrompt(context, options.minSeverity, docContextFiles);
+   const systemPrompt = buildJSONSystemPrompt(context, options.minSeverity, docContextFiles, options.activeFindings, options.priorSummary);
   const userPrompt = buildUserPrompt(diff, skippedFiles);
 
   const target: OutputTarget =
@@ -218,6 +226,10 @@ export async function review(options: ReviewOptions): Promise<void> {
       commitId: options.commitId,
       minSeverity: options.minSeverity as Severity | undefined,
       diff,
+      batchMarker: options.batchMarker,
+      existingFindings: options.activeFindings?.map(f => ({ commentId: f.commentId, threadId: f.threadId })),
+      existingFindingKeys: new Set(options.activeFindings?.filter(f => f.file && f.line && f.side).map(f => normalizeFinding({ file: f.file!, line: f.line!, side: f.side as "LEFT" | "RIGHT", body: f.body }))),
+      allowedFindingIds: new Set(options.activeFindings?.map(f => f.commentId)),
     });
   } finally {
     unsubscribe?.();

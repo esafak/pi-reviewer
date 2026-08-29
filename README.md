@@ -54,7 +54,7 @@ Theme, view mode, default model, and thinking level are remembered across review
 
 ## CI Agent
 
-Runs on every pull request via GitHub Actions and posts an inline review comment on the PR. See [CI.md](./CI.md) for setup, inputs, and custom bot identity.
+Runs on PR lifecycle events via GitHub Actions. Reviews are grouped by event batch, with authenticated GitHub review markers and durable inline-thread reconciliation; no LLM session replay is required. See [CI.md](./CI.md) for setup and policy.
 
 ---
 

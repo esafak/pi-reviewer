@@ -20,11 +20,6 @@ inputs:
     required: false
     default: "off"
 
-  post-comment:
-    description: "Post review as a GitHub PR comment"
-    required: false
-    default: "true"
-
   min-severity:
     description: "Minimum severity level to report: info, warn, or critical (default: info)"
     required: false
@@ -34,6 +29,11 @@ inputs:
     description: "Comma-separated dirs to scan for matching docs to inject into the review (e.g. '.pi/notes,docs/review'). Empty = inject nothing."
     required: false
     default: ""
+
+  review-drafts:
+    description: "Review draft pull requests (default: false)."
+    required: false
+    default: "false"
 
   setup-node:
     description: "Set up Node via actions/setup-node. Set to false only if the runner already provides Node 24 or newer."
@@ -106,7 +106,7 @@ runs:
       env:
         GITHUB_TOKEN: ${{ inputs.github-token }}
         PI_API_KEY: ${{ inputs.pi-api-key }}
-        POST_COMMENT: ${{ inputs.post-comment }}
+        REVIEW_DRAFTS: ${{ inputs.review-drafts }}
         PI_REVIEWER_MODEL: ${{ inputs.model }}
         PI_REVIEWER_THINKING: ${{ inputs.thinking }}
         MIN_SEVERITY: ${{ inputs.min-severity }}
