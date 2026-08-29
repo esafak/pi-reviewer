@@ -1,0 +1,69 @@
+.github/workflows/test.yml
+  s_f984f8f3099e3b::t_d001c865459682 37
+CI.md
+  s_f984f8f3099e3b::t_d6b9b2445e0eb2 3,20-22,41-43,46-51,58,60-62,73-79,91
+README.md
+  s_f984f8f3099e3b::t_5f686f68b61c99 57
+action.yml
+  s_f984f8f3099e3b::t_5bc935085b09d6 33-37,109
+dist/src/ci/action-entry.js
+  s_f984f8f3099e3b::t_09231c5bc9b872 1-4,6-10,13,19-31,34-85,87-102
+dist/src/ci/batch.js
+  s_f984f8f3099e3b::t_ededadf9177e80 1-22
+dist/src/ci/github.js
+  s_f984f8f3099e3b::t_1775a9fad515cb 1-64
+dist/src/ci/init.js
+  s_f984f8f3099e3b::t_c5605f31248339 5-6,10-12,24-31,40-43,46-52,60,64-65,74
+dist/src/ci/review.js
+  s_f984f8f3099e3b::t_b705838f8c6bad 7,33-35,55,174-177
+dist/src/core/diff-resolver.js
+  s_f984f8f3099e3b::t_254881b58355e0 1,82-86,121-122
+dist/src/core/output.js
+  s_f984f8f3099e3b::t_41dd12fda682dc 4,7-47,200,221-227,231,236,244-255,270-273,316,320,342-346,350,359,361-366,368,383-395,403,416-427,438,445-446,452
+dist/src/core/prompt-builder.js
+  s_f984f8f3099e3b::t_1312d8a3b70f29 34,47,54-55,61,72-77
+dist/src/core/review-tool.js
+  s_f984f8f3099e3b::t_3c3c3df02ffcf4 28-32
+package.json
+  s_f984f8f3099e3b::t_6e125be85a3cce 13
+src/ci/init.ts
+  s_f984f8f3099e3b::t_f3d967c9c122c1 7,12,16-18,30-37,46-49,52-58,66,70,82
+src/ci/review.ts
+  s_f984f8f3099e3b::t_5c8f9a1e076cd0 9-10,29-33,62-64,85,229-232
+src/core/diff-resolver.ts
+  s_f984f8f3099e3b::t_6a1602537f8ccd 1,13-15,106-109,141
+src/core/output.ts
+  s_f984f8f3099e3b::t_adf2bbd3645432 5,34,40-45,65-99,244-245,269-274,279,285,293-303,319-323,385-386,391,421-424,428,440,443-448,451,471-482,493,509-518,534,544-545,552
+src/core/prompt-builder.ts
+  s_f984f8f3099e3b::t_ae96e2c38ff8de 4,48-49,63,70-71,77,87-91
+src/core/review-tool.ts
+  s_f984f8f3099e3b::t_05e73abc9d149b 43-47
+tests/ci/init.test.ts
+  s_f984f8f3099e3b::t_5a1d05c31ae30d 38-42
+tests/core/diff-resolver.test.ts
+  s_9ff07a4e545fe4::t_69b2dffa29c942 5,8,12,17,37-43
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "2f6dc54ff116b16194b943198b257b51c4e7f03e",
+  "prompts": {},
+  "sessions": {
+    "s_9ff07a4e545fe4": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fb1f47fbbffeNuBRwghO6tswkT",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "Emre Şafak <3928300+esafak@users.noreply.github.com>"
+    },
+    "s_f984f8f3099e3b": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fb1c25adbffeRp9V9g4sSQatnN",
+        "model": "glm-5.3-flash"
+      },
+      "human_author": "Emre Şafak <3928300+esafak@users.noreply.github.com>"
+    }
+  }
+}
