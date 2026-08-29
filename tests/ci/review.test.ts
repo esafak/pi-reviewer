@@ -41,7 +41,7 @@ import { resolveDiff } from "../../src/core/diff-resolver.js";
 import { loadDocContext } from "../../src/core/doc-context.js";
 import { sendOutput } from "../../src/core/output.js";
 import { createReviewTool } from "../../src/core/review-tool.js";
-import { review, parseDocDirs } from "../../src/ci/review.js";
+import { review, parseDocDirs, parseThinkingLevel } from "../../src/ci/review.js";
 
 const resolveDiffMock = vi.mocked(resolveDiff);
 const loadContextMock = vi.mocked(loadContext);
@@ -127,6 +127,16 @@ describe("review", () => {
         target: "terminal",
         content: "LGTM",
         cwd: "/repo",
+      })
+    );
+  });
+
+  it("passes the configured thinking level to the agent", async () => {
+    await review({ cwd: "/repo", thinking: "high" });
+
+    expect(AgentMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        initialState: expect.objectContaining({ thinkingLevel: "high" }),
       })
     );
   });
@@ -334,5 +344,19 @@ describe("review", () => {
     expect(log).toHaveBeenCalledWith("| first line");
     expect(log).toHaveBeenCalledWith("| ::warning::not-a-command");
     expect(log).toHaveBeenCalledWith("::endgroup::");
+  });
+});
+
+describe("parseThinkingLevel", () => {
+  it("defaults to off", () => {
+    expect(parseThinkingLevel(undefined)).toBe("off");
+  });
+
+  it.each(["off", "minimal", "low", "medium", "high", "xhigh"])("accepts %s", (level) => {
+    expect(parseThinkingLevel(level)).toBe(level);
+  });
+
+  it("rejects unknown levels", () => {
+    expect(() => parseThinkingLevel("turbo")).toThrow(/Invalid thinking level/);
   });
 });

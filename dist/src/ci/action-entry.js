@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { review } from "./review.js";
+import { parseThinkingLevel, review } from "./review.js";
 async function getPrInfo() {
     const eventPath = process.env.GITHUB_EVENT_PATH;
     if (!eventPath)
@@ -27,9 +27,11 @@ const minSeverityRaw = process.env.MIN_SEVERITY?.toUpperCase();
 const minSeverity = minSeverityRaw === "CRITICAL" || minSeverityRaw === "WARN" || minSeverityRaw === "INFO"
     ? minSeverityRaw
     : undefined;
+const thinking = parseThinkingLevel(process.env.PI_REVIEWER_THINKING);
 await review({
     pr: prInfo.number,
     commitId: prInfo.headSha,
     output: "comment",
     minSeverity,
+    thinking,
 });

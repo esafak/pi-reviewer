@@ -43,6 +43,7 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           pi-api-key: ${{ secrets.PI_API_KEY }}
           model: openrouter/openai/gpt-5.4-mini
+          thinking: off
           min-severity: ${{ inputs.min-severity || 'info' }}
           # Opt in to injecting matching project docs into the review.
           # Comma-separated dirs scanned for .md files with a 'description' frontmatter.
@@ -63,6 +64,7 @@ Every pull request triggers an automatic review comment posted by `github-action
 | `github-token` | yes | GitHub token to post PR comments |
 | `pi-api-key` | yes | API key for the model's provider (forwarded to the model endpoint; e.g. an OpenRouter `sk-or-...` key for `openrouter/...` models) |
 | `model` | yes | Model to use in `provider/modelId` format (e.g. `openrouter/openai/gpt-5.4-mini`) |
+| `thinking` | no | Thinking budget: `off`, `minimal`, `low`, `medium`, `high`, or `xhigh` (default: `off`) |
 | `post-comment` | no | Post review as a GitHub PR comment (default: `true`) |
 | `min-severity` | no | Minimum severity: `info`, `warn`, or `critical` (default: `info`) |
 | `doc-dirs` | no | Comma-separated dirs to scan for docs to inject into the review (default: empty — inject nothing) |

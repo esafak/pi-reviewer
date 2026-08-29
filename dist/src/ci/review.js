@@ -7,6 +7,14 @@ import { loadDocContext } from "../core/doc-context.js";
 import { sendOutput, extractLastAssistantText } from "../core/output.js";
 import { buildJSONSystemPrompt, buildUserPrompt } from "../core/prompt-builder.js";
 import { createReviewTool } from "../core/review-tool.js";
+const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"];
+export function parseThinkingLevel(raw) {
+    const value = raw ?? "off";
+    if (!THINKING_LEVELS.includes(value)) {
+        throw new Error(`Invalid thinking level: ${value}. Expected: ${THINKING_LEVELS.join(", ")}`);
+    }
+    return value;
+}
 /** Parses a comma/newline-separated doc-dirs string into a trimmed, non-empty list. */
 export function parseDocDirs(raw) {
     if (!raw)
@@ -77,7 +85,7 @@ export async function review(options) {
             systemPrompt,
             model: resolvedModel,
             tools: [...createReadOnlyTools(cwd), reviewTool],
-            thinkingLevel: "off",
+            thinkingLevel: options.thinking ?? "off",
         },
         streamFn: models.streamSimple.bind(models),
         getApiKey: async () => {

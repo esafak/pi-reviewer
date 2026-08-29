@@ -9,6 +9,7 @@ import { loadDocContext } from "../core/doc-context.js";
 import { sendOutput, extractLastAssistantText, type OutputTarget, type Severity } from "../core/output.js";
 import { buildJSONSystemPrompt, buildUserPrompt, type MinSeverity } from "../core/prompt-builder.js";
 import { createReviewTool } from "../core/review-tool.js";
+import type { ThinkingLevel } from "../core/config.js";
 
 export interface ReviewOptions {
   cwd?: string;
@@ -22,10 +23,20 @@ export interface ReviewOptions {
   repo?: string;
   commitId?: string;
   model?: string; // format: "provider/modelId" e.g. "anthropic/claude-opus-4-6"
+  thinking?: ThinkingLevel;
   minSeverity?: MinSeverity;
   docDirs?: string[]; // dirs to scan for doc-context; empty = inject nothing (opt-in)
 }
 
+const THINKING_LEVELS: readonly ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh"];
+
+export function parseThinkingLevel(raw: string | undefined): ThinkingLevel | undefined {
+  const value = raw ?? "off";
+  if (!THINKING_LEVELS.includes(value as ThinkingLevel)) {
+    throw new Error(`Invalid thinking level: ${value}. Expected: ${THINKING_LEVELS.join(", ")}`);
+  }
+  return value as ThinkingLevel;
+}
 
 /** Parses a comma/newline-separated doc-dirs string into a trimmed, non-empty list. */
 export function parseDocDirs(raw: string | undefined): string[] {
@@ -109,7 +120,7 @@ export async function review(options: ReviewOptions): Promise<void> {
       systemPrompt,
       model: resolvedModel,
       tools: [...createReadOnlyTools(cwd), reviewTool],
-      thinkingLevel: "off",
+      thinkingLevel: options.thinking ?? "off",
     },
     streamFn: models.streamSimple.bind(models),
     getApiKey: async () => {

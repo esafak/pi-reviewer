@@ -15,6 +15,11 @@ inputs:
     description: "Model to use in provider/modelId format (e.g. openrouter/openai/gpt-5.4-mini)"
     required: true
 
+  thinking:
+    description: "Thinking budget: off, minimal, low, medium, high, or xhigh (default: off)"
+    required: false
+    default: "off"
+
   post-comment:
     description: "Post review as a GitHub PR comment"
     required: false
@@ -86,6 +91,7 @@ runs:
         PI_API_KEY: ${{ inputs.pi-api-key }}
         POST_COMMENT: ${{ inputs.post-comment }}
         PI_REVIEWER_MODEL: ${{ inputs.model }}
+        PI_REVIEWER_THINKING: ${{ inputs.thinking }}
         MIN_SEVERITY: ${{ inputs.min-severity }}
         PI_REVIEWER_DOC_DIRS: ${{ inputs.doc-dirs }}
       run: node ${{ github.action_path }}/dist/src/ci/action-entry.js

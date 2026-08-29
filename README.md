@@ -140,30 +140,6 @@ Create `AGENTS.md` or `CLAUDE.md` at your project root to give the reviewer cont
 - Files can also live in `.pi/`, `.claude/`, or `.agents/` subdirectories.
 - **Monorepo support:** pi-reviewer walks up from the working directory to the git root and collects `AGENTS.md`/`REVIEW.md` at every level, root first. `--dir` extends the walk-up to the outer project root.
 
-**`AGENTS.md`** — general project conventions:
-```markdown
-# Project Conventions
-
-## Function Naming
-- Prefix async data fetchers with `fetch` (e.g. `fetchUser`, `fetchOrders`)
-- Prefix boolean functions with `is`, `has`, or `can`
-- Prefix mutations with a verb: `update`, `delete`, `create`, `reset`
-```
-
-**`REVIEW.md`** — review-only rules:
-```markdown
-# Review Guidelines
-
-## Always flag
-- New API endpoints without an integration test
-- Database migrations that are not backward-compatible
-- `fetch` calls missing `res.ok` check or `try/catch`
-
-## Skip
-- Formatting-only changes in generated files under `dist/`
-- Lock file diffs
-```
-
 ### Context providers
 
 Any pi extension can inject additional context into the review prompt by listening on the `"pi-reviewer:collect-context-providers"` event — providers receive the changed files and a filesystem abstraction (works locally and over SSH) and return `{ path, content }` pairs appended to the system prompt.
@@ -173,4 +149,3 @@ Any pi extension can inject additional context into the review prompt by listeni
 ---
 
 See [TODO.md](./TODO.md) for the full roadmap.
-

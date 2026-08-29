@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { review } from "./review.js";
+import { parseThinkingLevel, review } from "./review.js";
 
 interface PrInfo {
   number: number;
@@ -39,9 +39,12 @@ const minSeverity =
     ? minSeverityRaw
     : undefined;
 
+const thinking = parseThinkingLevel(process.env.PI_REVIEWER_THINKING);
+
 await review({
   pr: prInfo.number,
   commitId: prInfo.headSha,
   output: "comment",
   minSeverity,
+  thinking,
 });
