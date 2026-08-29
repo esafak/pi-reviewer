@@ -81,13 +81,20 @@ export async function reconcileFindingUpdates(options: { token: string; repo: st
   const known = new Map(options.findings.map(f => [f.commentId, f]));
   const hasMutations = options.updates.some(update => update.status !== "STILL_OPEN");
   const identity = hasMutations ? await client.getUser() : undefined;
+  if (identity) {
+    const current = await client.getPullRequest(options.repo, options.prNumber);
+    if (current.head.sha !== options.targetSha) {
+      console.warn("[pi-reviewer] PR head changed before reconciliation; leaving lifecycle state unchanged");
+      return;
+    }
+  }
   const priorReplies = await client.listComments(options.repo, options.prNumber).catch(() => []);
   for (const update of options.updates) {
     const finding = known.get(update.comment_id);
     if (!finding) continue;
     if (update.status === "STILL_OPEN") continue;
     const body = `<!-- pi-reviewer:status:v1 ${JSON.stringify({ findingId: update.comment_id, targetSha: options.targetSha, status: update.status })} -->\n${update.status === "RESOLVED" ? `Resolved in ${options.targetSha.slice(0, 7)}` : "Partially addressed"}: ${update.explanation}`;
-    const alreadyReplied = priorReplies.some(reply => reply.user?.login === identity?.login && reply.in_reply_to_id === finding.commentId && reply.body.includes(`"targetSha":"${options.targetSha}"`));
+    const alreadyReplied = priorReplies.some(reply => reply.user?.login === identity?.login && reply.in_reply_to_id === finding.commentId && reply.body.includes(`"targetSha":"${options.targetSha}"`) && reply.body.includes(`"status":"${update.status}"`));
     try {
       if (!alreadyReplied) await client.reply(options.repo, options.prNumber, finding.commentId, body);
     } catch (error) {
