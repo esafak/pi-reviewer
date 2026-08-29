@@ -132,6 +132,14 @@ pi-reviewer automatically filters out noise files (lockfiles, `dist/`, `build/`,
 ⚠ 1 noise file excluded (package-lock.json) — 2 files skipped — diff exceeded 100,000 chars (src/big.ts, src/huge.ts)
 ```
 
+### Project conventions
+
+Create `AGENTS.md` or `CLAUDE.md` at your project root to give the reviewer context about your conventions. `REVIEW.md` is always loaded alongside it for review-specific rules.
+
+- `AGENTS.md` is checked first; `CLAUDE.md` is the fallback. Matched case-insensitively.
+- Files can also live in `.pi/`, `.claude/`, or `.agents/` subdirectories.
+- **Monorepo support:** pi-reviewer walks up from the working directory to the git root and collects `AGENTS.md`/`REVIEW.md` at every level, root first. `--dir` extends the walk-up to the outer project root.
+
 ### Context providers
 
 Any pi extension can inject additional context into the review prompt by listening on the `"pi-reviewer:collect-context-providers"` event — providers receive the changed files and a filesystem abstraction (works locally and over SSH) and return `{ path, content }` pairs appended to the system prompt.
