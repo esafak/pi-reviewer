@@ -38,7 +38,7 @@ export function runSSHReview(opts) {
     pi.sendUserMessage(userPrompt);
 }
 export function runSSHReviewAndWait(opts) {
-    const { systemPrompt, userPrompt, diff, pi, minSeverity, stopLoader, notify } = opts;
+    const { systemPrompt, userPrompt, diff, pi, minSeverity, stopLoader } = opts;
     let done = false;
     return new Promise((resolve, reject) => {
         pi.on("before_agent_start", async () => {
