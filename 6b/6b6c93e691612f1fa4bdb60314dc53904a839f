@@ -1,0 +1,21 @@
+dist/extensions/pi-reviewer/handlers/ssh.js
+  s_2315e773dc1f55::t_0c9ab854e13032 41
+dist/src/core/output.js
+  s_2315e773dc1f55::t_90ed2f1fa075b5 118-132,175-176
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "6b6b6c93e691612f1fa4bdb60314dc53904a839f",
+  "prompts": {},
+  "sessions": {
+    "s_2315e773dc1f55": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fb489023dffeH1wF5ZTwyTyeLi",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "Emre Şafak <3928300+esafak@users.noreply.github.com>"
+    }
+  }
+}
