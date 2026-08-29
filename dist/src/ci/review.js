@@ -1,5 +1,5 @@
 import { Agent } from "@earendil-works/pi-agent-core";
-import { getModel } from "@earendil-works/pi-ai";
+import { builtinModels, getBuiltinModel } from "@earendil-works/pi-ai/providers/all";
 import { createReadOnlyTools } from "@earendil-works/pi-coding-agent";
 import { loadContext, mergeContextFiles } from "../core/context.js";
 import { resolveDiff, extractDiffFiles } from "../core/diff-resolver.js";
@@ -62,12 +62,16 @@ export async function review(options) {
     }
     const provider = modelStr.slice(0, slash);
     const modelId = modelStr.slice(slash + 1);
-    const resolvedModel = getModel(provider, modelId);
+    // pi-ai 0.84 moved the static catalog helpers out of the package root.
+    // Use the built-in catalog directly; dynamic model discovery is not needed
+    // here because the action accepts the same provider/model catalog entries.
+    const resolvedModel = getBuiltinModel(provider, modelId);
     if (!resolvedModel) {
         throw new Error(`Unknown model "${modelStr}" — not found in the pi model registry.`);
     }
     console.log(`[pi-reviewer] running agent (model: ${resolvedModel.api})`);
     const { tool: reviewTool, getResult } = createReviewTool();
+    const models = builtinModels();
     const agent = new Agent({
         initialState: {
             systemPrompt,
@@ -75,6 +79,7 @@ export async function review(options) {
             tools: [...createReadOnlyTools(cwd), reviewTool],
             thinkingLevel: "off",
         },
+        streamFn: models.streamSimple.bind(models),
         getApiKey: async () => {
             const key = options.piApiKey ?? process.env.PI_API_KEY;
             if (!key)
