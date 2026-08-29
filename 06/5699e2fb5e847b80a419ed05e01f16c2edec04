@@ -1,0 +1,16 @@
+extensions/pi-reviewer/handlers/ssh.ts
+  h_ea91e2db23540f 67
+src/core/output.ts
+  h_ea91e2db23540f 166-176,225-226
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "065699e2fb5e847b80a419ed05e01f16c2edec04",
+  "prompts": {},
+  "humans": {
+    "h_ea91e2db23540f": {
+      "author": "Emre Şafak <3928300+esafak@users.noreply.github.com>"
+    }
+  }
+}
