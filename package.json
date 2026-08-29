@@ -10,7 +10,7 @@
     "build": "vp run build:ui && tsc -p tsconfig.json",
     "build:ui": "vp build --config ui/vite.config.ts",
     "dev:ui": "vp dev --config ui/vite.config.ts",
-    "test": "vp test --run"
+    "test": "vitest run"
   },
   "dependencies": {
     "@earendil-works/pi-agent-core": "^0.84.0",

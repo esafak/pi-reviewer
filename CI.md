@@ -1,6 +1,6 @@
 # CI Agent
 
-Runs on every pull request via GitHub Actions. The agent posts an inline review comment directly on the PR using the GitHub Reviews API.
+Runs on PR lifecycle events via GitHub Actions. Each invocation reviews one accumulated commit batch and stores its authenticated batch marker in the GitHub review.
 
 ## Setup
 
@@ -17,7 +17,9 @@ name: Pi Reviewer
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened]
+    types: [opened, synchronize, reopened, ready_for_review]
+  issue_comment:
+    types: [created]
   workflow_dispatch:
     inputs:
       min-severity:
@@ -36,15 +38,28 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
+    concurrency:
+      group: pi-reviewer-${{ github.repository }}-${{ github.event.pull_request.number || github.event.issue.number || inputs.pr-number || github.run_id }}
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Fetch PR refs for comment and manual events
+        shell: bash
+        run: git fetch origin '+refs/pull/*/head:refs/remotes/origin/pr/*' --no-tags
       - uses: zeflq/pi-reviewer@main
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           pi-api-key: ${{ secrets.PI_API_KEY }}
           model: openrouter/openai/gpt-5.4-mini
           thinking: off
+          review-drafts: false
           min-severity: ${{ inputs.min-severity || 'info' }}
+          # Optional workflow_dispatch inputs:
+          # pr-number: 123
+          # target-head: <ancestor SHA>
           # Opt in to injecting matching project docs into the review.
           # Comma-separated dirs scanned for .md files with a 'description' frontmatter.
           # doc-dirs: '.pi/notes,docs/review'
@@ -55,7 +70,13 @@ Commit it to your default branch, then add your API key to your repo secrets:
 
 ## Usage
 
-Every pull request triggers an automatic review comment posted by `github-actions[bot]`. You can also trigger a review manually via **Actions → Pi Reviewer → Run workflow** to select the minimum severity level.
+Every eligible PR event produces at most one review for the range since the last successful marker. Existing agent findings are reconciled in their original threads; human-authored threads are never changed. `/pi-review` is restricted to authorized internal PR commenters. Fork PRs are skipped.
+
+The marker is authenticated with the identity returned by `GET /user` and contains the reviewed `fromSha`, `toSha`, event kind, and review ID. It is the durable state for batching—not an LLM session, transcript replay, Actions cache, or provider cache. If several pushes arrive while a runner is pending, the next run recomputes the complete range from the latest marker.
+
+New findings are posted only for the current batch. Existing findings are returned as `finding_updates`: fully resolved findings receive one marked reply and are then resolved, partial findings receive one explanatory reply and remain open, and unchanged findings receive no reply. If a reply succeeds but resolution fails, the resolution remains independently retryable.
+
+Draft pull requests are skipped by default, including manual dispatch and `/pi-review`. Set `review-drafts: true` to review draft lifecycle events. When a draft becomes ready, the accumulated range is reviewed once. Manual dispatch accepts a PR number and optional ancestor target head; the target must belong to the current PR history.
 
 ## Inputs
 
@@ -65,9 +86,9 @@ Every pull request triggers an automatic review comment posted by `github-action
 | `pi-api-key` | yes | API key for the model's provider (forwarded to the model endpoint; e.g. an OpenRouter `sk-or-...` key for `openrouter/...` models) |
 | `model` | yes | Model to use in `provider/modelId` format (e.g. `openrouter/openai/gpt-5.4-mini`) |
 | `thinking` | no | Thinking budget: `off`, `minimal`, `low`, `medium`, `high`, or `xhigh` (default: `off`) |
-| `post-comment` | no | Post review as a GitHub PR comment (default: `true`) |
 | `min-severity` | no | Minimum severity: `info`, `warn`, or `critical` (default: `info`) |
 | `doc-dirs` | no | Comma-separated dirs to scan for docs to inject into the review (default: empty — inject nothing) |
+| `review-drafts` | no | Review draft PRs (default: `false`) |
 | `setup-node` | no | Set up Node 24 via `actions/setup-node` (default: `true`). Disable if the runner image already provides Node. |
 | `cache` | no | Cache the pnpm store across runs (default: `true`). Disable on runners where the cache service is unavailable or unwanted. |
 

@@ -1,6 +1,7 @@
 import type { ContextFile, ContextResult } from "./context.js";
 
 export type MinSeverity = "CRITICAL" | "WARN" | "INFO";
+export interface ActiveFindingContext { commentId: number; threadId?: string; file?: string; line?: number; side?: string; body: string; sourceBatch?: string; latestStatus?: string }
 
 const SEVERITY_RULE: Record<MinSeverity, string | null> = {
   INFO: null,
@@ -44,6 +45,8 @@ export function buildJSONSystemPrompt(
   context: ContextResult | string,
   minSeverity: MinSeverity = "INFO",
   contextFiles?: ContextFile[],
+  activeFindings: ActiveFindingContext[] = [],
+  priorSummary?: string,
 ): string {
   const base = [
     ...buildSharedBase(minSeverity),
@@ -57,17 +60,21 @@ export function buildJSONSystemPrompt(
     '  "comments": [',
     '    { "file": "src/auth.ts", "line": 42, "side": "RIGHT", "severity": "CRITICAL", "body": "Inline comment in Markdown." }',
     "  ]",
+    '  ,"finding_updates": [{ "comment_id": 123, "status": "RESOLVED", "explanation": "The null check now handles this path." }]',
     "}",
     "</output_format>",
     "",
     "Field rules:",
     "- summary: overall review written in Markdown",
     "- comments: inline comments attached to specific diff lines (may be empty [])",
+    "- finding_updates: optional array for existing findings only; comment_id must match an active finding supplied below",
+    "- PARTIALLY_RESOLVED explanations must state both what changed and what remains unresolved",
     "- file: relative path from repo root",
     "- line: line number of a changed or context line within a diff hunk (only lines shown in the diff can receive comments — never pick an arbitrary line outside the diff)",
     '- side: "RIGHT" for added/context lines, "LEFT" for removed lines',
     '- severity: "CRITICAL" | "WARN" | "INFO"',
     "- body: inline comment text, may use Markdown",
+    "- finding_updates: optional updates to existing findings supplied below. Use RESOLVED only when fully addressed, PARTIALLY_RESOLVED when some concern remains, and STILL_OPEN when unchanged.",
   ].join("\n");
 
   const conventionsStr = typeof context === "string" ? context : mergeContent(context.conventions);
@@ -77,6 +84,11 @@ export function buildJSONSystemPrompt(
   if (conventionsStr.trim()) sections.push(`<conventions>\n${conventionsStr}\n</conventions>`);
   if (reviewRulesStr.trim()) sections.push(`<review_rules>\n${reviewRulesStr}\n</review_rules>`);
   if (contextFiles && contextFiles.length > 0) sections.push(contextFiles.map(f => f.content).join("\n\n"));
+  if (activeFindings.length > 0) {
+    const findings = activeFindings.slice(0, 50).sort((a, b) => a.commentId - b.commentId).map(f => JSON.stringify({ comment_id: f.commentId, thread_id: f.threadId, file: f.file, line: f.line, side: f.side, body: f.body.slice(0, 2000), source_batch: f.sourceBatch, latest_status: f.latestStatus })).join("\n");
+    sections.push(`<active_findings>\n${findings}\n</active_findings>\nDo not repost these findings in comments; report their changes in finding_updates using the supplied comment_id.`);
+  }
+  if (priorSummary?.trim()) sections.push(`<previous_review_summary>\n${priorSummary.slice(0, 8000)}\n</previous_review_summary>`);
 
   return sections.join("\n\n");
 }

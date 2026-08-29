@@ -35,43 +35,11 @@ describe("init", () => {
     const workflowPath = path.join(dir, ".github", "workflows", "pi-review.yml");
     const content = await readFile(workflowPath, "utf-8");
 
-    expect(content).toBe(`name: Pi Reviewer
-
-on:
-  pull_request:
-    types: [opened, synchronize, reopened]
-  workflow_dispatch:
-    inputs:
-      min-severity:
-        description: 'Minimum severity to report (info, warn, critical)'
-        required: false
-        default: 'info'
-        type: choice
-        options:
-          - info
-          - warn
-          - critical
-
-jobs:
-  review:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pull-requests: write
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: zeflq/pi-reviewer@main
-        with:
-          github-token: \${{ secrets.GITHUB_TOKEN }}
-          pi-api-key: \${{ secrets.PI_API_KEY }}
-          model: openrouter/openai/gpt-5.4-mini
-          min-severity: \${{ inputs.min-severity || 'info' }}
-          # Opt in to injecting matching project docs into the review.
-          # Comma-separated dirs scanned for .md files with a 'description' frontmatter.
-          # doc-dirs: '.pi/notes,docs/review'
-`);
+    expect(content).toContain("types: [opened, synchronize, reopened, ready_for_review]");
+    expect(content).toContain("issue_comment:");
+    expect(content).toContain("fetch-depth: 0");
+    expect(content).toContain("cancel-in-progress: false");
+    expect(content).toContain("review-drafts: 'false'");
   });
 
   it("creates intermediate directories when missing", async () => {

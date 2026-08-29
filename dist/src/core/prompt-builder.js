@@ -31,7 +31,7 @@ function buildSharedBase(minSeverity) {
  * Agent must return a structured JSON ReviewResult.
  * Conventions and review rules are injected from context when available.
  */
-export function buildJSONSystemPrompt(context, minSeverity = "INFO", contextFiles) {
+export function buildJSONSystemPrompt(context, minSeverity = "INFO", contextFiles, activeFindings = [], priorSummary) {
     const base = [
         ...buildSharedBase(minSeverity),
         "- Do not repeat what the project conventions already enforce",
@@ -44,17 +44,21 @@ export function buildJSONSystemPrompt(context, minSeverity = "INFO", contextFile
         '  "comments": [',
         '    { "file": "src/auth.ts", "line": 42, "side": "RIGHT", "severity": "CRITICAL", "body": "Inline comment in Markdown." }',
         "  ]",
+        '  ,"finding_updates": [{ "comment_id": 123, "status": "RESOLVED", "explanation": "The null check now handles this path." }]',
         "}",
         "</output_format>",
         "",
         "Field rules:",
         "- summary: overall review written in Markdown",
         "- comments: inline comments attached to specific diff lines (may be empty [])",
+        "- finding_updates: optional array for existing findings only; comment_id must match an active finding supplied below",
+        "- PARTIALLY_RESOLVED explanations must state both what changed and what remains unresolved",
         "- file: relative path from repo root",
         "- line: line number of a changed or context line within a diff hunk (only lines shown in the diff can receive comments — never pick an arbitrary line outside the diff)",
         '- side: "RIGHT" for added/context lines, "LEFT" for removed lines',
         '- severity: "CRITICAL" | "WARN" | "INFO"',
         "- body: inline comment text, may use Markdown",
+        "- finding_updates: optional updates to existing findings supplied below. Use RESOLVED only when fully addressed, PARTIALLY_RESOLVED when some concern remains, and STILL_OPEN when unchanged.",
     ].join("\n");
     const conventionsStr = typeof context === "string" ? context : mergeContent(context.conventions);
     const reviewRulesStr = typeof context === "string" ? "" : mergeContent(context.reviewRules);
@@ -65,6 +69,12 @@ export function buildJSONSystemPrompt(context, minSeverity = "INFO", contextFile
         sections.push(`<review_rules>\n${reviewRulesStr}\n</review_rules>`);
     if (contextFiles && contextFiles.length > 0)
         sections.push(contextFiles.map(f => f.content).join("\n\n"));
+    if (activeFindings.length > 0) {
+        const findings = activeFindings.slice(0, 50).sort((a, b) => a.commentId - b.commentId).map(f => JSON.stringify({ comment_id: f.commentId, thread_id: f.threadId, file: f.file, line: f.line, side: f.side, body: f.body.slice(0, 2000), source_batch: f.sourceBatch, latest_status: f.latestStatus })).join("\n");
+        sections.push(`<active_findings>\n${findings}\n</active_findings>\nDo not repost these findings in comments; report their changes in finding_updates using the supplied comment_id.`);
+    }
+    if (priorSummary?.trim())
+        sections.push(`<previous_review_summary>\n${priorSummary.slice(0, 8000)}\n</previous_review_summary>`);
     return sections.join("\n\n");
 }
 /**

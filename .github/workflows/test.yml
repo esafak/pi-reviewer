@@ -34,7 +34,7 @@ jobs:
         run: vp install --frozen-lockfile
 
       - name: Run tests
-        run: vp test
+        run: vp run test
 
       - name: Build
         run: vp run build
