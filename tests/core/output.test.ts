@@ -105,6 +105,17 @@ describe("parseAgentResponse", () => {
     expect(result.comments).toHaveLength(0);
   });
 
+  it("preserves formatting whitespace when a formatted JSON string contains a raw newline", () => {
+    const malformed = `{
+  "summary": "looks good
+with details",
+  "comments": []
+}`;
+    const result = parseAgentResponseWithStatus(malformed);
+    expect(result.parsed).toBe(true);
+    expect(result.result.summary).toBe("looks good\nwith details");
+  });
+
   it("parses JSON when trailing prose after closing fence contains braces", () => {
     const json = JSON.stringify({ summary: "looks good", comments: [] });
     const result = parseAgentResponse(

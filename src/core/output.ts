@@ -164,12 +164,23 @@ function extractAllJsonObjects(text: string): Candidate[] {
 
 function tryParseJSON(raw: string): Record<string, unknown> | null {
   let escaped = "";
+  let inString = false;
+  let escape = false;
   for (const c of raw) {
     const code = c.charCodeAt(0);
-    if (c === "\n") escaped += "\\n";
-    else if (c === "\r") escaped += "\\r";
-    else if (c === "\t") escaped += "\\t";
-    else if (code >= 0 && code <= 0x1f) continue;
+    if (escape) {
+      escaped += c;
+      escape = false;
+    } else if (c === "\\" && inString) {
+      escaped += c;
+      escape = true;
+    } else if (c === '"') {
+      escaped += c;
+      inString = !inString;
+    } else if (inString && c === "\n") escaped += "\\n";
+    else if (inString && c === "\r") escaped += "\\r";
+    else if (inString && c === "\t") escaped += "\\t";
+    else if (inString && code >= 0 && code <= 0x1f) continue;
     else escaped += c;
   }
 
