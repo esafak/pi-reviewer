@@ -2,10 +2,19 @@ import { execSync } from "node:child_process";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
-import { loadContext, walkUpContextFiles, collectProviderContext, CONTEXT_PROVIDER_EVENT } from "../../src/core/context.js";
-import type { ContextProviderEvent, MinimalEventBus, ContextGroup } from "../../src/core/context.js";
+import {
+  loadContext,
+  walkUpContextFiles,
+  collectProviderContext,
+  CONTEXT_PROVIDER_EVENT,
+} from "../../src/core/context.js";
+import type {
+  ContextProviderEvent,
+  MinimalEventBus,
+  ContextGroup,
+} from "../../src/core/context.js";
 import { localFs } from "../../src/core/ssh.js";
 
 const createdDirs: string[] = [];
@@ -65,12 +74,18 @@ describe("loadContext", () => {
   it("returns reviewRules when REVIEW.md exists", async () => {
     const dir = await createTempDir();
     await writeFile(path.join(dir, "AGENTS.md"), "conventions", "utf-8");
-    await writeFile(path.join(dir, "REVIEW.md"), "# Review rules\n- Always check res.ok\n", "utf-8");
+    await writeFile(
+      path.join(dir, "REVIEW.md"),
+      "# Review rules\n- Always check res.ok\n",
+      "utf-8",
+    );
 
     const result = await loadContext({ cwd: dir });
 
     expect(result.conventions).toEqual([{ path: "AGENTS.md", content: "conventions" }]);
-    expect(result.reviewRules).toEqual([{ path: "REVIEW.md", content: "# Review rules\n- Always check res.ok\n" }]);
+    expect(result.reviewRules).toEqual([
+      { path: "REVIEW.md", content: "# Review rules\n- Always check res.ok\n" },
+    ]);
   });
 
   it("returns reviewRules even when no conventions file exists", async () => {
@@ -104,7 +119,9 @@ describe("loadContext", () => {
 
     const result = await loadContext({ cwd: dir });
 
-    expect(result.conventions).toEqual([{ path: path.join(".pi", "AGENTS.md"), content: "pi-dir conventions" }]);
+    expect(result.conventions).toEqual([
+      { path: path.join(".pi", "AGENTS.md"), content: "pi-dir conventions" },
+    ]);
   });
 
   it("prefers root AGENTS.md over .pi/AGENTS.md", async () => {
@@ -125,7 +142,9 @@ describe("loadContext", () => {
 
     const result = await loadContext({ cwd: dir });
 
-    expect(result.reviewRules).toEqual([{ path: path.join(".pi", "REVIEW.md"), content: "pi-dir review rules" }]);
+    expect(result.reviewRules).toEqual([
+      { path: path.join(".pi", "REVIEW.md"), content: "pi-dir review rules" },
+    ]);
   });
 });
 
@@ -143,7 +162,10 @@ describe("loadContext — monorepo (git root walk-up)", () => {
     const result = await loadContext({ cwd: pkgDir });
 
     expect(result.conventions).toHaveLength(2);
-    expect(result.conventions[0]).toEqual({ path: path.join("..", "..", "AGENTS.md"), content: "root conventions" });
+    expect(result.conventions[0]).toEqual({
+      path: path.join("..", "..", "AGENTS.md"),
+      content: "root conventions",
+    });
     expect(result.conventions[1]).toEqual({ path: "AGENTS.md", content: "api conventions" });
   });
 
@@ -300,7 +322,9 @@ function createStubEventBus(): MinimalEventBus & { _emit(channel: string, data: 
       handlers.get(channel)!.push(handler);
       return () => {};
     },
-    _emit(channel, data) { this.emit(channel, data); },
+    _emit(channel, data) {
+      this.emit(channel, data);
+    },
   };
 }
 
@@ -321,7 +345,9 @@ describe("collectProviderContext", () => {
 
     await collectProviderContext(events, "/project", ["src/foo.ts"]);
 
-    expect(provider).toHaveBeenCalledWith(expect.objectContaining({ cwd: "/project", diffFiles: ["src/foo.ts"] }));
+    expect(provider).toHaveBeenCalledWith(
+      expect.objectContaining({ cwd: "/project", diffFiles: ["src/foo.ts"] }),
+    );
   });
 
   it("returns a group with files from a registered provider", async () => {
@@ -370,7 +396,7 @@ describe("collectProviderContext", () => {
     events.on(CONTEXT_PROVIDER_EVENT, (data) => {
       const { register, diffFiles } = data as ContextProviderEvent;
       register("test-ext", async () =>
-        diffFiles.some(f => f.startsWith("src/auth/"))
+        diffFiles.some((f) => f.startsWith("src/auth/"))
           ? [{ path: "docs/auth.md", content: "Auth docs" }]
           : [],
       );

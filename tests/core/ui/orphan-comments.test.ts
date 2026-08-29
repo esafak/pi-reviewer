@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 
 /**
  * Reproduces the allDone logic from App.tsx exactly.
@@ -17,13 +17,14 @@ function computeAllDone(
 const DIFF_FILES = new Set(["src/auth.ts", "src/utils.ts"]);
 
 const COMMENTS = [
-  { file: "src/auth.ts", line: 10, body: "use const" },       // idx 0 — renderable
-  { file: "src/utils.ts", line: 5, body: "missing check" },   // idx 1 — renderable
-  { file: "src/ghost.ts", line: 3, body: "orphan comment" },  // idx 2 — NOT in diff → orphan
+  { file: "src/auth.ts", line: 10, body: "use const" }, // idx 0 — renderable
+  { file: "src/utils.ts", line: 5, body: "missing check" }, // idx 1 — renderable
+  { file: "src/ghost.ts", line: 3, body: "orphan comment" }, // idx 2 — NOT in diff → orphan
 ];
 
 function renderableIndices(comments: Array<{ file: string }>, diffFiles: Set<string>): number[] {
-  return comments.map((c, i) => ({ file: c.file, i }))
+  return comments
+    .map((c, i) => ({ file: c.file, i }))
     .filter(({ file }) => diffFiles.has(file))
     .map(({ i }) => i);
 }

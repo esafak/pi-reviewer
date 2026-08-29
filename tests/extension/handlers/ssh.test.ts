@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 vi.mock("../../../src/core/ssh.js", async (importActual) => {
   const actual = await importActual<typeof import("../../../src/core/ssh.js")>();
@@ -31,7 +31,9 @@ import type { ReviewCommandArgs } from "../../../extensions/pi-reviewer/args.js"
 function createStubEventBus() {
   const handlers = new Map<string, Array<(data: unknown) => void>>();
   return {
-    emit(channel: string, data: unknown) { for (const h of handlers.get(channel) ?? []) h(data); },
+    emit(channel: string, data: unknown) {
+      for (const h of handlers.get(channel) ?? []) h(data);
+    },
     on(channel: string, handler: (data: unknown) => void) {
       if (!handlers.has(channel)) handlers.set(channel, []);
       handlers.get(channel)!.push(handler);
@@ -41,9 +43,17 @@ function createStubEventBus() {
 }
 
 const baseParsed: ReviewCommandArgs = {
-  diff: undefined, branch: undefined, pr: undefined, dir: undefined,
-  dryRun: false, ssh: true, ui: false,
-  verbose: undefined, minSeverity: undefined, model: undefined, thinking: undefined,
+  diff: undefined,
+  branch: undefined,
+  pr: undefined,
+  dir: undefined,
+  dryRun: false,
+  ssh: true,
+  ui: false,
+  verbose: undefined,
+  minSeverity: undefined,
+  model: undefined,
+  thinking: undefined,
 };
 
 const ctx = { cwd: "/project", ui: { setFooter: vi.fn(), notify: vi.fn() } } as any;
@@ -57,9 +67,13 @@ function makeOpts(parsedOverrides: Partial<ReviewCommandArgs> = {}) {
     loaderState,
     notify: vi.fn(),
     minSeverity: "INFO" as const,
-    verbose: undefined, model: undefined, thinking: undefined,
-    currentModelId: undefined, defaultModel: undefined,
-    availableModels: [], defaultThinking: undefined,
+    verbose: undefined,
+    model: undefined,
+    thinking: undefined,
+    currentModelId: undefined,
+    defaultModel: undefined,
+    availableModels: [],
+    defaultThinking: undefined,
   };
 }
 
@@ -99,7 +113,7 @@ describe("handleSSHReview — non-UI path (sshState = null)", () => {
   it("registers before_agent_start and agent_end hooks", async () => {
     const opts = makeOpts();
     await handleSSHReview(opts);
-    const events = vi.mocked(opts.pi.on).mock.calls.map(c => c[0]);
+    const events = vi.mocked(opts.pi.on).mock.calls.map((c) => c[0]);
     expect(events).toContain("before_agent_start");
     expect(events).toContain("agent_end");
   });

@@ -9,7 +9,7 @@ vi.mock("../../src/core/ssh.js", async (importActual) => {
   return { ...actual, sshExec: vi.fn(), sshFs: vi.fn() };
 });
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { posix } from "node:path";
 import { sshExec, sshFs, type FsOps } from "../../src/core/ssh.js";
 import { loadContextSSH } from "../../src/core/context.js";
@@ -17,11 +17,13 @@ import { loadContextSSH } from "../../src/core/context.js";
 /** Builds a fake FsOps backed by an in-memory map of absolute posix paths → content. */
 function makeFakeSshFs(files: Record<string, string>): FsOps {
   return {
-    async read(p) { return files[p] ?? null; },
+    async read(p) {
+      return files[p] ?? null;
+    },
     async list(dir) {
       return Object.keys(files)
-        .filter(p => posix.dirname(p) === dir)
-        .map(p => posix.basename(p));
+        .filter((p) => posix.dirname(p) === dir)
+        .map((p) => posix.basename(p));
     },
     join: posix.join,
     dirname: posix.dirname,
@@ -36,10 +38,12 @@ beforeEach(() => {
 
 describe("loadContextSSH — .pi/ subdir", () => {
   it("reads AGENTS.md and REVIEW.md from .pi/", async () => {
-    vi.mocked(sshFs).mockReturnValue(makeFakeSshFs({
-      "/remote/root/.pi/AGENTS.md": "# SSH Pi Conventions",
-      "/remote/root/.pi/REVIEW.md": "# SSH Pi Review Rules",
-    }));
+    vi.mocked(sshFs).mockReturnValue(
+      makeFakeSshFs({
+        "/remote/root/.pi/AGENTS.md": "# SSH Pi Conventions",
+        "/remote/root/.pi/REVIEW.md": "# SSH Pi Review Rules",
+      }),
+    );
 
     const result = await loadContextSSH("user@host", "/remote/root");
 
@@ -48,10 +52,12 @@ describe("loadContextSSH — .pi/ subdir", () => {
   });
 
   it("reads root-level AGENTS.md and REVIEW.md", async () => {
-    vi.mocked(sshFs).mockReturnValue(makeFakeSshFs({
-      "/remote/root/AGENTS.md": "# SSH Root Conventions",
-      "/remote/root/REVIEW.md": "# SSH Root Review Rules",
-    }));
+    vi.mocked(sshFs).mockReturnValue(
+      makeFakeSshFs({
+        "/remote/root/AGENTS.md": "# SSH Root Conventions",
+        "/remote/root/REVIEW.md": "# SSH Root Review Rules",
+      }),
+    );
 
     const result = await loadContextSSH("user@host", "/remote/root");
 
@@ -62,10 +68,12 @@ describe("loadContextSSH — .pi/ subdir", () => {
 
 describe("loadContextSSH — monorepo walk-up", () => {
   it("collects root AGENTS.md and package REVIEW.md when cwd is a nested package", async () => {
-    vi.mocked(sshFs).mockReturnValue(makeFakeSshFs({
-      "/remote/root/AGENTS.md": "# SSH Monorepo Conventions",
-      "/remote/root/packages/api/REVIEW.md": "# SSH Package Review Rules",
-    }));
+    vi.mocked(sshFs).mockReturnValue(
+      makeFakeSshFs({
+        "/remote/root/AGENTS.md": "# SSH Monorepo Conventions",
+        "/remote/root/packages/api/REVIEW.md": "# SSH Package Review Rules",
+      }),
+    );
     // git root is /remote/root; cwd is the nested package
     vi.mocked(sshExec).mockResolvedValue("/remote/root\n");
 
@@ -76,10 +84,12 @@ describe("loadContextSSH — monorepo walk-up", () => {
   });
 
   it("collects both root and package AGENTS.md in root → cwd order", async () => {
-    vi.mocked(sshFs).mockReturnValue(makeFakeSshFs({
-      "/remote/root/AGENTS.md": "# Root Level",
-      "/remote/root/packages/api/AGENTS.md": "# Package Level",
-    }));
+    vi.mocked(sshFs).mockReturnValue(
+      makeFakeSshFs({
+        "/remote/root/AGENTS.md": "# Root Level",
+        "/remote/root/packages/api/AGENTS.md": "# Package Level",
+      }),
+    );
     vi.mocked(sshExec).mockResolvedValue("/remote/root\n");
 
     const result = await loadContextSSH("user@host", "/remote/root/packages/api");

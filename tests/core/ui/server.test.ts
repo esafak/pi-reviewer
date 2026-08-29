@@ -1,5 +1,5 @@
 import http from "node:http";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import type { ReviewResult } from "../../../src/core/output.js";
 import { buildHTML } from "../../../src/core/ui/template.js";
 import { startUIServer, type UIAction } from "../../../src/core/ui/server/index.js";
@@ -90,7 +90,9 @@ function get(url: string): Promise<{ status: number; body: string }> {
     http
       .get(url, (res) => {
         let body = "";
-        res.on("data", (chunk) => { body += chunk; });
+        res.on("data", (chunk) => {
+          body += chunk;
+        });
         res.on("end", () => resolve({ status: res.statusCode ?? 0, body }));
       })
       .on("error", reject);
@@ -100,10 +102,20 @@ function get(url: string): Promise<{ status: number; body: string }> {
 function post(url: string, body: unknown): Promise<{ status: number }> {
   return new Promise((resolve, reject) => {
     const payload = JSON.stringify(body);
-    const req = http.request(url, { method: "POST", headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload) } }, (res) => {
-      res.resume();
-      res.on("end", () => resolve({ status: res.statusCode ?? 0 }));
-    });
+    const req = http.request(
+      url,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Content-Length": Buffer.byteLength(payload),
+        },
+      },
+      (res) => {
+        res.resume();
+        res.on("end", () => resolve({ status: res.statusCode ?? 0 }));
+      },
+    );
     req.on("error", reject);
     req.end(payload);
   });
@@ -153,7 +165,10 @@ describe("startUIServer", () => {
     const handle = await startUIServer(RESULT, DIFF);
     const payload: UIAction = {
       type: "save",
-      decisions: [{ index: 0, decision: "accept" }, { index: 1, decision: "reject" }],
+      decisions: [
+        { index: 0, decision: "accept" },
+        { index: 1, decision: "reject" },
+      ],
     };
     await post(handle.url + "/action", payload);
     const action = await handle.waitForAction();
@@ -178,7 +193,10 @@ describe("startUIServer", () => {
 
   it("POST /config calls applyConfigPatch with the patch and returns 204", async () => {
     const handle = await startUIServer(RESULT, DIFF);
-    const { status } = await post(handle.url + "/config", { model: "openai/gpt-4o", theme: "light" });
+    const { status } = await post(handle.url + "/config", {
+      model: "openai/gpt-4o",
+      theme: "light",
+    });
     expect(status).toBe(204);
     expect(applyConfigPatchMock).toHaveBeenCalledWith({ model: "openai/gpt-4o", theme: "light" });
     await handle.close();

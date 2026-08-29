@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 vi.mock("../../../src/core/context.js", async (importActual) => {
   const actual = await importActual<typeof import("../../../src/core/context.js")>();
@@ -6,7 +6,10 @@ vi.mock("../../../src/core/context.js", async (importActual) => {
 });
 
 import { collectProviderContext } from "../../../src/core/context.js";
-import { buildContextGroups, BUILT_IN_GROUP } from "../../../extensions/pi-reviewer/handlers/context.js";
+import {
+  buildContextGroups,
+  BUILT_IN_GROUP,
+} from "../../../extensions/pi-reviewer/handlers/context.js";
 
 const stubEvents = { emit: vi.fn(), on: vi.fn().mockReturnValue(() => {}) };
 const emptyContext = { conventions: [], reviewRules: [] };
@@ -67,8 +70,20 @@ describe("buildContextGroups", () => {
   });
 
   it("passes fs argument through to collectProviderContext", async () => {
-    const fakeFs = { read: vi.fn(), list: vi.fn(), join: vi.fn(), dirname: vi.fn(), relative: vi.fn() } as any;
+    const fakeFs = {
+      read: vi.fn(),
+      list: vi.fn(),
+      join: vi.fn(),
+      dirname: vi.fn(),
+      relative: vi.fn(),
+    } as any;
     await buildContextGroups(stubEvents, "/project", emptyContext, ["src/x.ts"], fakeFs);
-    expect(collectProviderContext).toHaveBeenCalledWith(stubEvents, "/project", ["src/x.ts"], fakeFs, undefined);
+    expect(collectProviderContext).toHaveBeenCalledWith(
+      stubEvents,
+      "/project",
+      ["src/x.ts"],
+      fakeFs,
+      undefined,
+    );
   });
 });

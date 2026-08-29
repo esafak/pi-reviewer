@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 vi.mock("../../src/core/diff-resolver.js", async (importActual) => {
   const actual = await importActual<typeof import("../../src/core/diff-resolver.js")>();
@@ -31,7 +31,11 @@ vi.mock("node:child_process", async (importActual) => {
 
 vi.mock("node:fs/promises", async (importActual) => {
   const actual = await importActual<typeof import("node:fs/promises")>();
-  return { ...actual, writeFile: vi.fn().mockResolvedValue(undefined), unlink: vi.fn().mockResolvedValue(undefined) };
+  return {
+    ...actual,
+    writeFile: vi.fn().mockResolvedValue(undefined),
+    unlink: vi.fn().mockResolvedValue(undefined),
+  };
 });
 
 vi.mock("../../extensions/pi-reviewer/footer.js", () => ({
@@ -57,7 +61,10 @@ function makeFakeProcess(reviewJson = '{"summary":"LGTM","comments":[]}') {
     stderr: new EventEmitter(),
   }) as any;
   setImmediate(() => {
-    const line = JSON.stringify({ type: "turn_end", message: { role: "assistant", content: reviewJson } });
+    const line = JSON.stringify({
+      type: "turn_end",
+      message: { role: "assistant", content: reviewJson },
+    });
     proc.stdout.emit("data", Buffer.from(line + "\n"));
     proc.emit("close", 0, null);
   });
@@ -118,8 +125,8 @@ describe("context provider integration", () => {
       modelRegistry: { getAvailable: () => [] },
     });
 
-    const systemPromptNotify = notifySpy.mock.calls.find((args) =>
-      typeof args[0] === "string" && args[0].includes("System prompt:")
+    const systemPromptNotify = notifySpy.mock.calls.find(
+      (args) => typeof args[0] === "string" && args[0].includes("System prompt:"),
     );
     expect(systemPromptNotify).toBeDefined();
     expect(systemPromptNotify![0]).toContain("TEST EXTRA");
@@ -139,10 +146,12 @@ describe("context provider integration", () => {
       modelRegistry: { getAvailable: () => [] },
     });
 
-    expect(provider).toHaveBeenCalledWith(expect.objectContaining({
-      cwd: "/project",
-      diffFiles: ["src/foo.ts"],
-    }));
+    expect(provider).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cwd: "/project",
+        diffFiles: ["src/foo.ts"],
+      }),
+    );
   });
 
   it("no providers registered — system prompt is unchanged", async () => {
@@ -158,8 +167,8 @@ describe("context provider integration", () => {
       modelRegistry: { getAvailable: () => [] },
     });
 
-    const systemPromptNotify = notifySpy.mock.calls.find((args) =>
-      typeof args[0] === "string" && args[0].includes("System prompt:")
+    const systemPromptNotify = notifySpy.mock.calls.find(
+      (args) => typeof args[0] === "string" && args[0].includes("System prompt:"),
     );
     expect(systemPromptNotify![0]).toContain("use strict typing");
     expect(systemPromptNotify![0]).not.toContain("TEST EXTRA");
@@ -172,7 +181,10 @@ describe("command routing", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(resolveDiff).mockResolvedValue({ diff: "diff --git a/foo.ts\n", source: "feature vs main" });
+    vi.mocked(resolveDiff).mockResolvedValue({
+      diff: "diff --git a/foo.ts\n",
+      source: "feature vs main",
+    });
     vi.mocked(loadContext).mockResolvedValue({ conventions: [], reviewRules: [] });
     vi.mocked(spawn).mockReturnValue(makeFakeProcess() as any);
     vi.mocked(setReviewFooter).mockReturnValue(vi.fn());
@@ -245,7 +257,7 @@ describe("error handling", () => {
       model: undefined,
       modelRegistry: { getAvailable: () => [] },
     });
-    const errorCall = notifySpy.mock.calls.find(c => String(c[0]).startsWith("Review failed:"));
+    const errorCall = notifySpy.mock.calls.find((c) => String(c[0]).startsWith("Review failed:"));
     expect(errorCall![0]).toContain("try adding --ssh");
     expect(errorCall![1]).toBe("error");
   });
@@ -258,7 +270,7 @@ describe("error handling", () => {
       model: undefined,
       modelRegistry: { getAvailable: () => [] },
     });
-    const errorCall = notifySpy.mock.calls.find(c => String(c[0]).startsWith("Review failed:"));
+    const errorCall = notifySpy.mock.calls.find((c) => String(c[0]).startsWith("Review failed:"));
     expect(errorCall![0]).not.toContain("try adding --ssh");
   });
 
@@ -267,11 +279,16 @@ describe("error handling", () => {
     vi.mocked(setReviewFooter).mockReturnValue(stopFn);
     // resolveDiff resolves so we get past the loader setup, then spawn fails
     vi.mocked(resolveDiff).mockResolvedValue({ diff: "diff --git\n", source: "x" });
-    vi.mocked(spawn).mockReturnValue((() => {
-      const proc = Object.assign(new EventEmitter(), { stdout: new EventEmitter(), stderr: new EventEmitter() }) as any;
-      setImmediate(() => proc.emit("close", 1, null));
-      return proc;
-    })() as any);
+    vi.mocked(spawn).mockReturnValue(
+      (() => {
+        const proc = Object.assign(new EventEmitter(), {
+          stdout: new EventEmitter(),
+          stderr: new EventEmitter(),
+        }) as any;
+        setImmediate(() => proc.emit("close", 1, null));
+        return proc;
+      })() as any,
+    );
 
     await capturedHandler!("", {
       cwd: "/project",

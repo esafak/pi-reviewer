@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 
 import { parseDiffPositions, partitionComments } from "../../src/core/diff-positions.js";
 import type { ReviewComment } from "../../src/core/output.js";
@@ -160,9 +160,21 @@ describe("partitionComments", () => {
     const positions = parseDiffPositions(TAG_INPUT_DIFF);
     const comments: ReviewComment[] = [
       // positionable: inside hunk @@ -17,6 +17,7 @@ (new line 20)
-      { file: PATH, line: 20, side: "RIGHT", severity: "INFO", body: "customValidation missing from types" },
+      {
+        file: PATH,
+        line: 20,
+        side: "RIGHT",
+        severity: "INFO",
+        body: "customValidation missing from types",
+      },
       // unpositionable: line 36 in the unmodified $effect block
-      { file: PATH, line: 36, side: "RIGHT", severity: "INFO", body: "global DOM query in $effect" },
+      {
+        file: PATH,
+        line: 36,
+        side: "RIGHT",
+        severity: "INFO",
+        body: "global DOM query in $effect",
+      },
       // positionable: line 65 in hunk @@ -63,6 +65,9 @@
       { file: PATH, line: 65, side: "RIGHT", severity: "WARN", body: "allowPaste is fine" },
     ];
@@ -211,9 +223,21 @@ describe("partitionComments", () => {
     const positions = parseDiffPositions(diff);
     const comments: ReviewComment[] = [
       { file: "src/a.ts", line: 10, side: "RIGHT", severity: "INFO", body: "on leading context" },
-      { file: "src/a.ts", line: 11, side: "LEFT", severity: "INFO", body: "on removed line (LEFT)" },
+      {
+        file: "src/a.ts",
+        line: 11,
+        side: "LEFT",
+        severity: "INFO",
+        body: "on removed line (LEFT)",
+      },
       { file: "src/a.ts", line: 13, side: "RIGHT", severity: "INFO", body: "on added-two (RIGHT)" },
-      { file: "src/a.ts", line: 13, side: "LEFT", severity: "INFO", body: "trailing context is LEFT-only on old side" },
+      {
+        file: "src/a.ts",
+        line: 13,
+        side: "LEFT",
+        severity: "INFO",
+        body: "trailing context is LEFT-only on old side",
+      },
     ];
 
     const { inline, moved } = partitionComments(comments, positions);

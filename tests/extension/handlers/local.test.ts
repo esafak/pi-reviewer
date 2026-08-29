@@ -1,6 +1,6 @@
 import { EventEmitter } from "node:events";
 import path from "node:path";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 vi.mock("node:child_process", async (importActual) => {
   const actual = await importActual<typeof import("node:child_process")>();
@@ -9,7 +9,11 @@ vi.mock("node:child_process", async (importActual) => {
 
 vi.mock("node:fs/promises", async (importActual) => {
   const actual = await importActual<typeof import("node:fs/promises")>();
-  return { ...actual, writeFile: vi.fn().mockResolvedValue(undefined), unlink: vi.fn().mockResolvedValue(undefined) };
+  return {
+    ...actual,
+    writeFile: vi.fn().mockResolvedValue(undefined),
+    unlink: vi.fn().mockResolvedValue(undefined),
+  };
 });
 
 vi.mock("../../../src/core/diff-resolver.js", async (importActual) => {
@@ -69,7 +73,9 @@ function makeFakeProcess(reviewJson = '{"summary":"LGTM","comments":[]}') {
 function createStubEventBus() {
   const handlers = new Map<string, Array<(data: unknown) => void>>();
   return {
-    emit(channel: string, data: unknown) { for (const h of handlers.get(channel) ?? []) h(data); },
+    emit(channel: string, data: unknown) {
+      for (const h of handlers.get(channel) ?? []) h(data);
+    },
     on(channel: string, handler: (data: unknown) => void) {
       if (!handlers.has(channel)) handlers.set(channel, []);
       handlers.get(channel)!.push(handler);
@@ -79,9 +85,17 @@ function createStubEventBus() {
 }
 
 const baseParsed: ReviewCommandArgs = {
-  diff: undefined, branch: undefined, pr: undefined, dir: undefined,
-  dryRun: false, ssh: false, ui: false,
-  verbose: undefined, minSeverity: undefined, model: undefined, thinking: undefined,
+  diff: undefined,
+  branch: undefined,
+  pr: undefined,
+  dir: undefined,
+  dryRun: false,
+  ssh: false,
+  ui: false,
+  verbose: undefined,
+  minSeverity: undefined,
+  model: undefined,
+  thinking: undefined,
 };
 
 const ctx = { cwd: "/project", ui: { setFooter: vi.fn(), notify: vi.fn() } } as any;
@@ -95,18 +109,29 @@ function makeOpts(parsedOverrides: Partial<ReviewCommandArgs> = {}) {
     loaderState,
     notify: vi.fn(),
     minSeverity: "INFO" as const,
-    verbose: undefined, model: undefined, thinking: undefined,
-    currentModelId: undefined, defaultModel: undefined,
-    availableModels: [], defaultThinking: undefined,
+    verbose: undefined,
+    model: undefined,
+    thinking: undefined,
+    currentModelId: undefined,
+    defaultModel: undefined,
+    availableModels: [],
+    defaultThinking: undefined,
   };
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(resolveDiff).mockResolvedValue({ diff: "diff --git a/foo.ts\n", source: "feature vs main" });
+  vi.mocked(resolveDiff).mockResolvedValue({
+    diff: "diff --git a/foo.ts\n",
+    source: "feature vs main",
+  });
   vi.mocked(loadContext).mockResolvedValue({ conventions: [], reviewRules: [] });
   vi.mocked(spawn).mockReturnValue(makeFakeProcess() as any);
-  vi.mocked(buildContextGroups).mockResolvedValue({ groups: [], contextFiles: [], contextPaths: [] });
+  vi.mocked(buildContextGroups).mockResolvedValue({
+    groups: [],
+    contextFiles: [],
+    contextPaths: [],
+  });
   vi.mocked(handleUIReview).mockResolvedValue(undefined);
   vi.mocked(setReviewFooter).mockReturnValue(vi.fn());
 });
@@ -115,7 +140,7 @@ describe("handleLocalReview — non-UI path", () => {
   it("sends progress notifications in order", async () => {
     const opts = makeOpts();
     await handleLocalReview(opts);
-    const messages = opts.notify.mock.calls.map(c => c[0]);
+    const messages = opts.notify.mock.calls.map((c) => c[0]);
     expect(messages.indexOf("Fetching diff…")).toBeLessThan(messages.indexOf("Loading context…"));
   });
 
@@ -128,7 +153,11 @@ describe("handleLocalReview — non-UI path", () => {
   it("spawns pi with --append-system-prompt flag", async () => {
     const opts = makeOpts();
     await handleLocalReview(opts);
-    expect(spawn).toHaveBeenCalledWith("pi", expect.arrayContaining(["--append-system-prompt"]), expect.any(Object));
+    expect(spawn).toHaveBeenCalledWith(
+      "pi",
+      expect.arrayContaining(["--append-system-prompt"]),
+      expect.any(Object),
+    );
   });
 
   it("writes pi-review.md to ctx.cwd", async () => {
@@ -152,10 +181,12 @@ describe("handleLocalReview — --ui path", () => {
   it("calls handleUIReview with result, diff, and source", async () => {
     const opts = makeOpts({ ui: true });
     await handleLocalReview(opts);
-    expect(handleUIReview).toHaveBeenCalledWith(expect.objectContaining({
-      diff: "diff --git a/foo.ts\n",
-      source: "feature vs main",
-    }));
+    expect(handleUIReview).toHaveBeenCalledWith(
+      expect.objectContaining({
+        diff: "diff --git a/foo.ts\n",
+        source: "feature vs main",
+      }),
+    );
   });
 
   it("sends injection message via pi.sendUserMessage", async () => {
@@ -168,7 +199,9 @@ describe("handleLocalReview — --ui path", () => {
   it("does not write pi-review.md", async () => {
     const opts = makeOpts({ ui: true });
     await handleLocalReview(opts);
-    const reviewSave = vi.mocked(writeFile).mock.calls.find(c => String(c[0]).endsWith("pi-review.md"));
+    const reviewSave = vi
+      .mocked(writeFile)
+      .mock.calls.find((c) => String(c[0]).endsWith("pi-review.md"));
     expect(reviewSave).toBeUndefined();
   });
 });
@@ -201,7 +234,7 @@ describe("handleLocalReview — context paths notify", () => {
   it("does not send context notify when no files", async () => {
     const opts = makeOpts();
     await handleLocalReview(opts);
-    const contextCall = opts.notify.mock.calls.find(c => String(c[0]).startsWith("Context:"));
+    const contextCall = opts.notify.mock.calls.find((c) => String(c[0]).startsWith("Context:"));
     expect(contextCall).toBeUndefined();
   });
 });

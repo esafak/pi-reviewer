@@ -19,7 +19,7 @@ vi.mock("../../src/core/ui/server/index.js", () => ({
   readDefaultBranch: vi.fn().mockReturnValue(undefined),
 }));
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { resolveDiff } from "../../src/core/diff-resolver.js";
 import { handleDryRun } from "../../extensions/pi-reviewer/handlers/dry-run.js";
 import { createTempProject } from "../fixtures/factory.js";
@@ -28,7 +28,9 @@ import type { ReviewCommandArgs } from "../../extensions/pi-reviewer/args.js";
 function createStubEventBus() {
   const handlers = new Map<string, Array<(data: unknown) => void>>();
   return {
-    emit(channel: string, data: unknown) { for (const h of handlers.get(channel) ?? []) h(data); },
+    emit(channel: string, data: unknown) {
+      for (const h of handlers.get(channel) ?? []) h(data);
+    },
     on(channel: string, handler: (data: unknown) => void) {
       if (!handlers.has(channel)) handlers.set(channel, []);
       handlers.get(channel)!.push(handler);
@@ -41,18 +43,33 @@ function makeOpts(cwd: string, parsedOverrides: Partial<ReviewCommandArgs> = {})
   const notify = vi.fn();
   const pi = { events: createStubEventBus(), on: vi.fn(), sendUserMessage: vi.fn() } as any;
   const parsed: ReviewCommandArgs = {
-    diff: undefined, branch: undefined, pr: undefined, dir: undefined,
-    dryRun: true, ssh: false, ui: false,
-    verbose: undefined, minSeverity: undefined, model: undefined, thinking: undefined,
+    diff: undefined,
+    branch: undefined,
+    pr: undefined,
+    dir: undefined,
+    dryRun: true,
+    ssh: false,
+    ui: false,
+    verbose: undefined,
+    minSeverity: undefined,
+    model: undefined,
+    thinking: undefined,
     ...parsedOverrides,
   };
   return {
-    parsed, cwd, pi, notify,
+    parsed,
+    cwd,
+    pi,
+    notify,
     loaderState: { stop: vi.fn() },
     minSeverity: "INFO" as const,
-    verbose: undefined, model: undefined, thinking: undefined,
-    currentModelId: undefined, defaultModel: undefined,
-    availableModels: [], defaultThinking: undefined,
+    verbose: undefined,
+    model: undefined,
+    thinking: undefined,
+    currentModelId: undefined,
+    defaultModel: undefined,
+    availableModels: [],
+    defaultThinking: undefined,
   };
 }
 
@@ -72,11 +89,13 @@ describe("context loading — .pi/ subdir", () => {
     try {
       const opts = makeOpts(dir);
       await handleDryRun(opts);
-      const call = opts.notify.mock.calls.find(c => String(c[0]).includes("System prompt:"));
+      const call = opts.notify.mock.calls.find((c) => String(c[0]).includes("System prompt:"));
       expect(call).toBeDefined();
       expect(call![0]).toContain("# Pi Subdir Conventions");
       expect(call![0]).toContain("# Pi Subdir Review Rules");
-    } finally { await cleanup(); }
+    } finally {
+      await cleanup();
+    }
   });
 });
 
@@ -89,11 +108,13 @@ describe("context loading — root level", () => {
     try {
       const opts = makeOpts(dir);
       await handleDryRun(opts);
-      const call = opts.notify.mock.calls.find(c => String(c[0]).includes("System prompt:"));
+      const call = opts.notify.mock.calls.find((c) => String(c[0]).includes("System prompt:"));
       expect(call).toBeDefined();
       expect(call![0]).toContain("# Root Conventions");
       expect(call![0]).toContain("# Root Review Rules");
-    } finally { await cleanup(); }
+    } finally {
+      await cleanup();
+    }
   });
 });
 
@@ -107,11 +128,13 @@ describe("context loading — monorepo (--dir)", () => {
     try {
       const opts = makeOpts(dir, { dir: "packages/api" });
       await handleDryRun(opts);
-      const call = opts.notify.mock.calls.find(c => String(c[0]).includes("System prompt:"));
+      const call = opts.notify.mock.calls.find((c) => String(c[0]).includes("System prompt:"));
       expect(call).toBeDefined();
       expect(call![0]).toContain("# Monorepo Root Conventions");
       expect(call![0]).toContain("# Package Review Rules");
-    } finally { await cleanup(); }
+    } finally {
+      await cleanup();
+    }
   });
 
   it("only package REVIEW.md appears when no root context files exist", async () => {
@@ -121,9 +144,11 @@ describe("context loading — monorepo (--dir)", () => {
     try {
       const opts = makeOpts(dir, { dir: "packages/api" });
       await handleDryRun(opts);
-      const call = opts.notify.mock.calls.find(c => String(c[0]).includes("System prompt:"));
+      const call = opts.notify.mock.calls.find((c) => String(c[0]).includes("System prompt:"));
       expect(call).toBeDefined();
       expect(call![0]).toContain("# Package Only Rules");
-    } finally { await cleanup(); }
+    } finally {
+      await cleanup();
+    }
   });
 });
