@@ -29,6 +29,13 @@ describe("batch markers", () => {
     expect(selectBatchRange("base", "first", marker, () => true)).toEqual({ fromSha: "first", toSha: "first", fresh: false });
     expect(normalizeEvent({ action: "synchronize", before: "first", after: "third", pull_request: { number: 1, head: { sha: "third", repo: { full_name: "o/r" } }, base: { repo: { full_name: "o/r" } } } })).toMatchObject({ beforeSha: "first", afterSha: "third" });
   });
+  it("keeps the newest marker when finalization left reviewId at zero", () => {
+    const reviews = [
+      { id: 10, user: { login: "bot" }, body: encodeBatchMarker({ fromSha: "base", toSha: "old", kind: "opened", actor: "bot", reviewId: 10 }) },
+      { id: 11, user: { login: "bot" }, body: encodeBatchMarker({ fromSha: "old", toSha: "new", kind: "synchronize", actor: "bot", reviewId: 0 }) },
+    ];
+    expect(selectAuthenticatedBatchMarkers(reviews, "bot").at(-1)?.toSha).toBe("new");
+  });
 });
 
 describe("event normalization", () => {

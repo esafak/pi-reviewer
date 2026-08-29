@@ -926,6 +926,12 @@ describe("reconcileFindingUpdates", () => {
     await expect(reconcileFindingUpdates({ token: "t", repo: "o/r", prNumber: 1, targetSha: "head", updates: [{ comment_id: 3, status: "RESOLVED", explanation: "fixed" }], findings: [{ commentId: 3, threadId: "thread" }] })).resolves.toBeUndefined();
     expect(resolveFailure).toHaveBeenCalledTimes(3);
   });
+  it("persists the reconciliation status in the status marker", async () => {
+    const fetchMock = okFetch(); vi.stubGlobal("fetch", fetchMock);
+    await reconcileFindingUpdates({ token: "t", repo: "o/r", prNumber: 1, targetSha: "head", updates: [{ comment_id: 3, status: "PARTIALLY_RESOLVED", explanation: "still needs work" }], findings: [{ commentId: 3, threadId: "thread" }] });
+    const body = JSON.parse((fetchMock.mock.calls[1][1] as { body: string }).body).body as string;
+    expect(body).toContain('"status":"PARTIALLY_RESOLVED"');
+  });
   it("leaves partial findings open and skips an already-posted reply", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue(JSON.stringify([{ id: 9, in_reply_to_id: 3, body: '"targetSha":"head"' }])) })

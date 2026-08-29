@@ -28,13 +28,16 @@ if (event.kind === "manual" && event.command !== "/pi-review" && process.env.GIT
 if (pr.draft && process.env.REVIEW_DRAFTS !== "true") { console.log("[pi-reviewer] draft PR reviews are disabled"); process.exit(0); }
 const identity = await github.getUser();
 const reviews = await github.listReviews(repo, event.pr);
+// GitHub returns reviews in chronological order. Preserve that order because a
+// failed marker finalization leaves reviewId at 0 and must not sort behind old
+// finalized markers.
 const marked = selectAuthenticatedBatchMarkers(reviews, identity.login);
-const latest = marked.sort((a, b) => a.reviewId - b.reviewId).at(-1);
+const latest = marked.at(-1);
 const priorSummary = latest ? reviews.find(r => r.id === latest.reviewId)?.body?.replace(/<!-- pi-reviewer:batch:v1 [^>]+ -->/, "").trim() : undefined;
 const batchByReview = new Map(reviews.map(r => [r.id, decodeBatchMarker(r.body)]));
 const [comments, threads] = await Promise.all([github.listComments(repo, event.pr), github.listThreads(repo, event.pr)]);
 const threadByComment = new Map(threads.flatMap(t => t.comments.nodes.map(c => [c.id, { id: t.id, resolved: t.isResolved }] as const)));
-const activeFindings = comments.filter(c => c.user?.login === identity.login && c.id > 0 && !c.body.includes("pi-reviewer:status:v1") && !threadByComment.get(c.id)?.resolved).map(c => { const batch = c.pull_request_review_id ? batchByReview.get(c.pull_request_review_id) : undefined; const replies = comments.filter(reply => reply.in_reply_to_id === c.id).sort((a, b) => a.id - b.id); return { commentId: c.id, threadId: threadByComment.get(c.id)?.id, file: c.path, line: c.line, side: c.side, body: c.body, sourceBatch: batch ? `${batch.fromSha}..${batch.toSha}` : undefined, latestStatus: replies.at(-1)?.body.match(/status:v1 \{[^}]*"status":"([^"]+)/)?.[1] }; });
+const activeFindings = comments.filter(c => c.user?.login === identity.login && c.id > 0 && c.body.includes("<!-- pi-reviewer:finding:v1 -->") && !c.body.includes("pi-reviewer:status:v1") && !threadByComment.get(c.id)?.resolved).map(c => { const batch = c.pull_request_review_id ? batchByReview.get(c.pull_request_review_id) : undefined; const replies = comments.filter(reply => reply.in_reply_to_id === c.id).sort((a, b) => a.id - b.id); return { commentId: c.id, threadId: threadByComment.get(c.id)?.id, file: c.path, line: c.line, side: c.side, body: c.body, sourceBatch: batch ? `${batch.fromSha}..${batch.toSha}` : undefined, latestStatus: replies.at(-1)?.body.match(/status:v1 \{[^}]*"status":"([^"]+)/)?.[1] }; });
 const head = event.targetHead ?? pr.head.sha;
 if (pr.head.repo?.full_name !== repo) { console.log("[pi-reviewer] fork or deleted-head PRs are not reviewed"); process.exit(0); }
 if (event.targetHead && !ancestor(head, pr.head.sha)) { throw new Error("workflow target-head must be an ancestor of the current PR head"); }
