@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 vi.mock("node:fs", async (importActual) => {
   const actual = await importActual<typeof import("node:fs")>();
@@ -14,7 +14,11 @@ vi.mock("node:fs", async (importActual) => {
 });
 
 import registerExtension from "../../extensions/pi-reviewer-doc-context/index.js";
-import { extractKeywords, parseDescription, isRelevant } from "../../extensions/pi-reviewer-doc-context/index.js";
+import {
+  extractKeywords,
+  parseDescription,
+  isRelevant,
+} from "../../extensions/pi-reviewer-doc-context/index.js";
 
 describe("extractKeywords", () => {
   it("returns empty array for empty diffFiles", () => {
@@ -53,8 +57,8 @@ describe("extractKeywords", () => {
 
   it("deduplicates across multiple files", () => {
     const kws = extractKeywords(["src/auth/login.ts", "src/auth/logout.ts"]);
-    expect(kws.filter(k => k === "auth")).toHaveLength(1);
-    expect(kws.filter(k => k === "src")).toHaveLength(1);
+    expect(kws.filter((k) => k === "auth")).toHaveLength(1);
+    expect(kws.filter((k) => k === "src")).toHaveLength(1);
   });
 
   it("ignores segments shorter than 3 chars", () => {
@@ -73,7 +77,8 @@ describe("parseDescription", () => {
   });
 
   it("extracts description from frontmatter", () => {
-    const content = "---\ndescription: Authentication and token handling\n---\n# Auth Guide\n\ncontent";
+    const content =
+      "---\ndescription: Authentication and token handling\n---\n# Auth Guide\n\ncontent";
     expect(parseDescription(content)).toBe("Authentication and token handling");
   });
 
@@ -144,7 +149,9 @@ function makeFakeFsOps(files: Record<string, string>) {
 function captureProvider() {
   const handlers = new Map<string, Array<(data: unknown) => void>>();
   const events = {
-    emit(channel: string, data: unknown) { for (const h of handlers.get(channel) ?? []) h(data); },
+    emit(channel: string, data: unknown) {
+      for (const h of handlers.get(channel) ?? []) h(data);
+    },
     on(channel: string, handler: (data: unknown) => void) {
       if (!handlers.has(channel)) handlers.set(channel, []);
       handlers.get(channel)!.push(handler);
@@ -154,11 +161,20 @@ function captureProvider() {
 
   registerExtension({ events } as any);
 
-  let captured: ((opts: { cwd: string; diffFiles: string[]; fs: any; gitRoot?: string }) => Promise<{ path: string; content: string }[]>) | null = null;
+  let captured:
+    | ((opts: {
+        cwd: string;
+        diffFiles: string[];
+        fs: any;
+        gitRoot?: string;
+      }) => Promise<{ path: string; content: string }[]>)
+    | null = null;
   events.emit(CONTEXT_PROVIDER_EVENT, {
     cwd: "",
     diffFiles: [],
-    register: (_name: string, provider: typeof captured) => { captured = provider; },
+    register: (_name: string, provider: typeof captured) => {
+      captured = provider;
+    },
   });
 
   if (!captured) throw new Error("Provider was not registered");
@@ -180,7 +196,7 @@ describe("doc-context provider — walk-up (gitRoot)", () => {
       "/repo/app/.pi/notes/auth.md": docContent("auth token handling"),
     });
     const files = await provider({ cwd: "/repo/app", diffFiles: ["deploy.ts", "auth.ts"], fs });
-    const paths = files.map(f => f.path);
+    const paths = files.map((f) => f.path);
     expect(paths).toContain(".pi/notes/auth.md");
     expect(paths).not.toContain("../.pi/notes/deploy.md");
   });
@@ -191,8 +207,13 @@ describe("doc-context provider — walk-up (gitRoot)", () => {
       "/repo/.pi/notes/deploy.md": docContent("deploy pipeline"),
       "/repo/app/.pi/notes/auth.md": docContent("auth token handling"),
     });
-    const files = await provider({ cwd: "/repo/app", diffFiles: ["deploy.ts", "auth.ts"], fs, gitRoot: "/repo" });
-    const paths = files.map(f => f.path);
+    const files = await provider({
+      cwd: "/repo/app",
+      diffFiles: ["deploy.ts", "auth.ts"],
+      fs,
+      gitRoot: "/repo",
+    });
+    const paths = files.map((f) => f.path);
     expect(paths).toContain(".pi/notes/auth.md");
     expect(paths).toContain("../.pi/notes/deploy.md");
   });
@@ -202,7 +223,12 @@ describe("doc-context provider — walk-up (gitRoot)", () => {
     const fs = makeFakeFsOps({
       "/repo/.pi/notes/deploy.md": docContent("deploy pipeline"),
     });
-    const files = await provider({ cwd: "/repo/app", diffFiles: ["deploy.ts"], fs, gitRoot: "/repo" });
+    const files = await provider({
+      cwd: "/repo/app",
+      diffFiles: ["deploy.ts"],
+      fs,
+      gitRoot: "/repo",
+    });
     expect(files[0]?.path).toBe("../.pi/notes/deploy.md");
   });
 

@@ -1,6 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 
-import { buildJSONSystemPrompt, buildMarkdownSystemPrompt, buildSSHUserPrompt, buildUserPrompt } from "../../src/core/prompt-builder.js";
+import {
+  buildJSONSystemPrompt,
+  buildMarkdownSystemPrompt,
+  buildSSHUserPrompt,
+  buildUserPrompt,
+} from "../../src/core/prompt-builder.js";
 
 describe("prompt-builder", () => {
   it("returns base prompt without sections when context is empty", () => {
@@ -13,7 +18,10 @@ describe("prompt-builder", () => {
   });
 
   it("appends conventions section when conventions is provided", () => {
-    const prompt = buildJSONSystemPrompt({ conventions: [{ path: "AGENTS.md", content: "use tabs" }], reviewRules: [] });
+    const prompt = buildJSONSystemPrompt({
+      conventions: [{ path: "AGENTS.md", content: "use tabs" }],
+      reviewRules: [],
+    });
 
     expect(prompt).toContain("<conventions>");
     expect(prompt).toContain("use tabs");
@@ -21,7 +29,10 @@ describe("prompt-builder", () => {
   });
 
   it("appends review rules section when reviewRules is provided", () => {
-    const prompt = buildJSONSystemPrompt({ conventions: [], reviewRules: [{ path: "REVIEW.md", content: "always check res.ok" }] });
+    const prompt = buildJSONSystemPrompt({
+      conventions: [],
+      reviewRules: [{ path: "REVIEW.md", content: "always check res.ok" }],
+    });
 
     expect(prompt).toContain("<review_rules>");
     expect(prompt).toContain("always check res.ok");
@@ -99,7 +110,11 @@ describe("prompt-builder", () => {
 describe("buildJSONSystemPrompt — contextFiles injection", () => {
   it("does not change output when contextFiles is undefined", () => {
     const without = buildJSONSystemPrompt({ conventions: [], reviewRules: [] });
-    const withUndefined = buildJSONSystemPrompt({ conventions: [], reviewRules: [] }, "INFO", undefined);
+    const withUndefined = buildJSONSystemPrompt(
+      { conventions: [], reviewRules: [] },
+      "INFO",
+      undefined,
+    );
     expect(withUndefined).toBe(without);
   });
 
@@ -110,23 +125,17 @@ describe("buildJSONSystemPrompt — contextFiles injection", () => {
   });
 
   it("appends single file content to system prompt", () => {
-    const prompt = buildJSONSystemPrompt(
-      { conventions: [], reviewRules: [] },
-      "INFO",
-      [{ path: "docs/arch.md", content: "Architecture notes" }],
-    );
+    const prompt = buildJSONSystemPrompt({ conventions: [], reviewRules: [] }, "INFO", [
+      { path: "docs/arch.md", content: "Architecture notes" },
+    ]);
     expect(prompt).toContain("Architecture notes");
   });
 
   it("appends multiple file contents separated by double newline", () => {
-    const prompt = buildJSONSystemPrompt(
-      { conventions: [], reviewRules: [] },
-      "INFO",
-      [
-        { path: "docs/arch.md", content: "Architecture notes" },
-        { path: "docs/api.md", content: "API notes" },
-      ],
-    );
+    const prompt = buildJSONSystemPrompt({ conventions: [], reviewRules: [] }, "INFO", [
+      { path: "docs/arch.md", content: "Architecture notes" },
+      { path: "docs/api.md", content: "API notes" },
+    ]);
     expect(prompt).toContain("Architecture notes\n\nAPI notes");
   });
 });
@@ -173,7 +182,9 @@ describe("buildMarkdownSystemPrompt — contextFiles injection", () => {
   });
 
   it("appends provider file content to system prompt", () => {
-    const prompt = buildMarkdownSystemPrompt("INFO", undefined, [{ path: "docs/arch.md", content: "Architecture notes" }]);
+    const prompt = buildMarkdownSystemPrompt("INFO", undefined, [
+      { path: "docs/arch.md", content: "Architecture notes" },
+    ]);
     expect(prompt).toContain("Architecture notes");
   });
 });

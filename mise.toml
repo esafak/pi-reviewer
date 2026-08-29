@@ -1,2 +1,26 @@
 [tools]
+hk = "1.56.1"
 pnpm = "11.22.0"
+vp = "0.3.0"
+
+[env]
+HK_MISE = "1"
+
+[tasks.lint]
+description = "Lint the project with Vite+"
+run = "vp lint"
+
+[tasks.fmt]
+description = "Format the project with Vite+"
+run = "vp fmt"
+
+[tasks."hk:install"]
+description = "Install the hk git hooks"
+run = "hk install --mise"
+
+[tasks."hk:uninstall"]
+description = "Uninstall the hk git hooks"
+run = "hk uninstall"
+
+[hooks]
+postinstall = "mise run hk:install"

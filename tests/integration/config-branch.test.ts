@@ -24,7 +24,7 @@ vi.mock("../../src/core/context.js", async (importActual) => {
   };
 });
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { readFileSync } from "node:fs";
 import { readConfig, readDefaultBranch } from "../../src/core/config.js";
 import { resolveDiff } from "../../src/core/diff-resolver.js";
@@ -34,7 +34,9 @@ import type { ReviewCommandArgs } from "../../extensions/pi-reviewer/args.js";
 function createStubEventBus() {
   const handlers = new Map<string, Array<(data: unknown) => void>>();
   return {
-    emit(channel: string, data: unknown) { for (const h of handlers.get(channel) ?? []) h(data); },
+    emit(channel: string, data: unknown) {
+      for (const h of handlers.get(channel) ?? []) h(data);
+    },
     on(channel: string, handler: (data: unknown) => void) {
       if (!handlers.has(channel)) handlers.set(channel, []);
       handlers.get(channel)!.push(handler);
@@ -47,24 +49,42 @@ function makeOpts(parsedOverrides: Partial<ReviewCommandArgs> = {}) {
   const notify = vi.fn();
   const pi = { events: createStubEventBus(), on: vi.fn(), sendUserMessage: vi.fn() } as any;
   const parsed: ReviewCommandArgs = {
-    diff: undefined, branch: undefined, pr: undefined, dir: undefined,
-    dryRun: true, ssh: false, ui: false,
-    verbose: undefined, minSeverity: undefined, model: undefined, thinking: undefined,
+    diff: undefined,
+    branch: undefined,
+    pr: undefined,
+    dir: undefined,
+    dryRun: true,
+    ssh: false,
+    ui: false,
+    verbose: undefined,
+    minSeverity: undefined,
+    model: undefined,
+    thinking: undefined,
     ...parsedOverrides,
   };
   return {
-    parsed, cwd: "/project", pi, notify,
+    parsed,
+    cwd: "/project",
+    pi,
+    notify,
     loaderState: { stop: vi.fn() },
     minSeverity: "INFO" as const,
-    verbose: undefined, model: undefined, thinking: undefined,
-    currentModelId: undefined, defaultModel: undefined,
-    availableModels: [], defaultThinking: undefined,
+    verbose: undefined,
+    model: undefined,
+    thinking: undefined,
+    currentModelId: undefined,
+    defaultModel: undefined,
+    availableModels: [],
+    defaultThinking: undefined,
   };
 }
 
 beforeEach(() => {
   vi.mocked(readFileSync).mockClear();
-  vi.mocked(resolveDiff).mockResolvedValue({ diff: "diff --git a/foo.ts\n", source: "feat vs main" });
+  vi.mocked(resolveDiff).mockResolvedValue({
+    diff: "diff --git a/foo.ts\n",
+    source: "feat vs main",
+  });
 });
 
 /** Makes the next readFileSync call return the given config JSON. */
@@ -101,6 +121,8 @@ describe("config branch flows through to resolveDiff", () => {
     mockConfigFile({ branch: "develop" });
     const opts = makeOpts({ branch: "feature/override" });
     await handleDryRun(opts);
-    expect(resolveDiff).toHaveBeenCalledWith(expect.objectContaining({ branch: "feature/override" }));
+    expect(resolveDiff).toHaveBeenCalledWith(
+      expect.objectContaining({ branch: "feature/override" }),
+    );
   });
 });

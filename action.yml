@@ -36,7 +36,7 @@ inputs:
     default: ""
 
   setup-node:
-    description: "Set up Node via actions/setup-node. Set to false if the runner image already provides Node."
+    description: "Set up Node via actions/setup-node. Set to false only if the runner already provides Node 24 or newer."
     required: false
     default: "true"
 
@@ -60,6 +60,23 @@ runs:
       with:
         node-version: "24"
 
+    - name: Setup Vite+
+      uses: voidzero-dev/setup-vp@1b32467adbe183473499fd9d5d372c3ed9641754 # v1.18.0
+      with:
+        working-directory: ${{ github.action_path }}
+        cache: false
+        run-install: false
+        node-manager: false
+
+    - name: Verify Node.js version
+      shell: bash
+      run: |
+        major=$(node -p 'process.versions.node.split(".")[0]')
+        if [ "$major" -lt 24 ]; then
+          echo "::error::pi-reviewer requires Node >= 24 (found $(node -v)). Use setup-node: true or provide Node >= 24."
+          exit 1
+        fi
+
     - name: Resolve pnpm store and lockfile hash
       id: pnpm-meta
       shell: bash
@@ -80,7 +97,7 @@ runs:
 
     - name: Install dependencies
       shell: bash
-      run: pnpm install --frozen-lockfile
+      run: vp install --frozen-lockfile
       working-directory: ${{ github.action_path }}
 
     - name: Run review

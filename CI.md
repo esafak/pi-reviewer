@@ -71,7 +71,7 @@ Every pull request triggers an automatic review comment posted by `github-action
 | `setup-node` | no | Set up Node 24 via `actions/setup-node` (default: `true`). Disable if the runner image already provides Node. |
 | `cache` | no | Cache the pnpm store across runs (default: `true`). Disable on runners where the cache service is unavailable or unwanted. |
 
-The action runs on Node 24 (LTS). Deps are installed with [pnpm](https://pnpm.io); the pnpm store is cached by a standalone `actions/cache` step keyed on a hash of `pnpm-lock.yaml`, so warm runs skip the download. The cache step uses `continue-on-error`, so a cache failure degrades to an uncached install rather than aborting the review.
+The action runs on Node 24 (LTS). The `vp` CLI is installed by the pinned `voidzero-dev/setup-vp` action, and dependencies are installed with pnpm delegated through `vp install`. The pnpm store is cached by a standalone `actions/cache` step keyed on a hash of `pnpm-lock.yaml`, so warm runs skip the download. The cache step uses `continue-on-error`, so a cache failure degrades to an uncached install rather than aborting the review. Consumer runners need network access to `viteplus.dev` for the Vite+ CLI installer in addition to the package registry.
 
 ## Doc context
 

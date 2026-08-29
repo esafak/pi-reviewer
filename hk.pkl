@@ -1,0 +1,15 @@
+amends "package://github.com/jdx/hk/releases/download/v1.56.1/hk@1.56.1#/Config.pkl"
+
+local linters = new Mapping<String, Step> {
+  ["vite-plus-lint"] {
+    glob = List("**/*.js", "**/*.jsx", "**/*.ts", "**/*.tsx")
+    exclude = List("dist/**", "dist-ui/**")
+    check = "mise run lint"
+  }
+}
+
+hooks {
+  ["pre-commit"] {
+    steps = linters
+  }
+}

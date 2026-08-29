@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 
 import { validateToolArguments } from "@earendil-works/pi-ai";
 
@@ -13,8 +13,20 @@ function validArgs() {
   return {
     summary: "Looks good overall.",
     comments: [
-      { file: "src/a.ts", line: 10, side: "RIGHT", severity: "WARN", body: "Consider a null check." },
-      { file: "src/b.ts", line: 5, side: "LEFT", severity: "CRITICAL", body: "This removal breaks callers." },
+      {
+        file: "src/a.ts",
+        line: 10,
+        side: "RIGHT",
+        severity: "WARN",
+        body: "Consider a null check.",
+      },
+      {
+        file: "src/b.ts",
+        line: 5,
+        side: "LEFT",
+        severity: "CRITICAL",
+        body: "This removal breaks callers.",
+      },
     ],
   };
 }

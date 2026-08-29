@@ -1,7 +1,7 @@
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { init } from "../../src/ci/init.js";
 
@@ -22,7 +22,9 @@ describe("init", () => {
   });
 
   afterEach(async () => {
-    await Promise.all(createdDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+    await Promise.all(
+      createdDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })),
+    );
   });
 
   it("generates workflow file with correct content", async () => {
@@ -103,10 +105,10 @@ jobs:
 
     expect(logSpy).toHaveBeenCalledWith("✓ Created .github/workflows/pi-review.yml");
     expect(logSpy).toHaveBeenCalledWith(
-      "Next step: add your project conventions to AGENTS.md at the root of your project."
+      "Next step: add your project conventions to AGENTS.md at the root of your project.",
     );
     expect(logSpy).toHaveBeenCalledWith(
-      "This file will be used by the reviewer to understand your project's rules and patterns."
+      "This file will be used by the reviewer to understand your project's rules and patterns.",
     );
   });
 });

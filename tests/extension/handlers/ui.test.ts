@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 vi.mock("node:fs/promises", () => ({
   writeFile: vi.fn().mockResolvedValue(undefined),
@@ -45,7 +45,14 @@ describe("handleUIReview — injection message context selection", () => {
     const groups = makeGroups("built-in", "my-provider");
     vi.mocked(startUIServer).mockResolvedValue(makeHandle({ selectedGroups: undefined }) as any);
 
-    const msg = await handleUIReview({ result: baseResult, diff: baseDiff, source: "HEAD vs main", cwd: "/p", notify: vi.fn(), contextGroups: groups });
+    const msg = await handleUIReview({
+      result: baseResult,
+      diff: baseDiff,
+      source: "HEAD vs main",
+      cwd: "/p",
+      notify: vi.fn(),
+      contextGroups: groups,
+    });
 
     expect(msg).toContain("content of built-in");
     expect(msg).toContain("content of my-provider");
@@ -55,7 +62,14 @@ describe("handleUIReview — injection message context selection", () => {
     const groups = makeGroups("built-in", "my-provider");
     vi.mocked(startUIServer).mockResolvedValue(makeHandle({ selectedGroups: ["built-in"] }) as any);
 
-    const msg = await handleUIReview({ result: baseResult, diff: baseDiff, source: "HEAD vs main", cwd: "/p", notify: vi.fn(), contextGroups: groups });
+    const msg = await handleUIReview({
+      result: baseResult,
+      diff: baseDiff,
+      source: "HEAD vs main",
+      cwd: "/p",
+      notify: vi.fn(),
+      contextGroups: groups,
+    });
 
     expect(msg).toContain("content of built-in");
     expect(msg).not.toContain("content of my-provider");
@@ -65,16 +79,32 @@ describe("handleUIReview — injection message context selection", () => {
     const groups = makeGroups("built-in", "my-provider");
     vi.mocked(startUIServer).mockResolvedValue(makeHandle({ selectedGroups: [] }) as any);
 
-    const msg = await handleUIReview({ result: baseResult, diff: baseDiff, source: "HEAD vs main", cwd: "/p", notify: vi.fn(), contextGroups: groups });
+    const msg = await handleUIReview({
+      result: baseResult,
+      diff: baseDiff,
+      source: "HEAD vs main",
+      cwd: "/p",
+      notify: vi.fn(),
+      contextGroups: groups,
+    });
 
     expect(msg).not.toContain("Project context");
   });
 
   it("includes all groups when selectedGroups names all of them", async () => {
     const groups = makeGroups("built-in", "provider-a", "provider-b");
-    vi.mocked(startUIServer).mockResolvedValue(makeHandle({ selectedGroups: ["built-in", "provider-a", "provider-b"] }) as any);
+    vi.mocked(startUIServer).mockResolvedValue(
+      makeHandle({ selectedGroups: ["built-in", "provider-a", "provider-b"] }) as any,
+    );
 
-    const msg = await handleUIReview({ result: baseResult, diff: baseDiff, source: "HEAD vs main", cwd: "/p", notify: vi.fn(), contextGroups: groups });
+    const msg = await handleUIReview({
+      result: baseResult,
+      diff: baseDiff,
+      source: "HEAD vs main",
+      cwd: "/p",
+      notify: vi.fn(),
+      contextGroups: groups,
+    });
 
     expect(msg).toContain("content of built-in");
     expect(msg).toContain("content of provider-a");
@@ -84,7 +114,14 @@ describe("handleUIReview — injection message context selection", () => {
   it("returns undefined for closed action", async () => {
     vi.mocked(startUIServer).mockResolvedValue(makeHandle({ type: "closed" }) as any);
 
-    const msg = await handleUIReview({ result: baseResult, diff: baseDiff, source: "HEAD vs main", cwd: "/p", notify: vi.fn(), contextGroups: makeGroups("built-in") });
+    const msg = await handleUIReview({
+      result: baseResult,
+      diff: baseDiff,
+      source: "HEAD vs main",
+      cwd: "/p",
+      notify: vi.fn(),
+      contextGroups: makeGroups("built-in"),
+    });
 
     expect(msg).toBeUndefined();
   });
