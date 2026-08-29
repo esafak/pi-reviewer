@@ -188,7 +188,6 @@ export function parseAgentResponseWithStatus(text, minSeverity = "INFO") {
 export function parseAgentResponse(text, minSeverity = "INFO") {
     return parseAgentResponseWithStatus(text, minSeverity).result;
 }
-const ATTRIBUTION = "*Review by [pi-reviewer](https://github.com/zeflq/pi-reviewer)*";
 function formatForGitHub(result) {
     const lines = ["## Pi Reviewer", "", result.summary];
     if (result.comments.length > 0) {
@@ -197,7 +196,6 @@ function formatForGitHub(result) {
             lines.push("", `${SEVERITY_EMOJI[comment.severity]} **\`${comment.file}:${comment.line}\`** · ${comment.side}`, comment.body);
         }
     }
-    lines.push("", "---", ATTRIBUTION);
     return lines.join("\n");
 }
 /**

@@ -368,6 +368,9 @@ describe("sendOutput", () => {
         body: expect.stringContaining("LGTM"),
       })
     );
+    const body = (fetchMock.mock.calls[0][1] as { body: string }).body;
+    expect(body).not.toContain("---");
+    expect(body).not.toContain("Review by pi-reviewer");
   });
 
   it("posts to Reviews API with inline comments when commitId is provided", async () => {

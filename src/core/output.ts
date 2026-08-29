@@ -241,8 +241,6 @@ export function parseAgentResponse(text: string, minSeverity: Severity = "INFO")
   return parseAgentResponseWithStatus(text, minSeverity).result;
 }
 
-const ATTRIBUTION = "*Review by [pi-reviewer](https://github.com/zeflq/pi-reviewer)*";
-
 function formatForGitHub(result: ReviewResult): string {
   const lines = ["## Pi Reviewer", "", result.summary];
 
@@ -257,7 +255,6 @@ function formatForGitHub(result: ReviewResult): string {
     }
   }
 
-  lines.push("", "---", ATTRIBUTION);
   return lines.join("\n");
 }
 
