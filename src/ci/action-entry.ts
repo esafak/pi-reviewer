@@ -16,7 +16,7 @@ function hasCommit(sha: string, cwd = process.cwd()): boolean { try { execFileSy
 function ensureCommit(sha: string, ref: string | undefined, cwd = process.cwd()): void {
   if (hasCommit(sha, cwd)) return;
   if (ref) {
-    execFileSync("git", ["fetch", "--no-tags", "origin", ref], { cwd });
+    try { execFileSync("git", ["fetch", "--no-tags", "origin", ref], { cwd }); } catch { /* try the authenticated SHA below */ }
   }
   if (!hasCommit(sha, cwd)) {
     execFileSync("git", ["fetch", "--no-tags", "origin", `+${sha}`], { cwd });
