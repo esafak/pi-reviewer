@@ -131,10 +131,9 @@ tests/
 
 ### 5. Release
 
-- [x] Add `build` script: `tsc`
-- [x] Update `action.yml` run step: `node ${{ github.action_path }}/dist/src/review.js`
-- [x] `dist/` compiled and tracked in git (commit before tagging)
-- [ ] Publish to GitHub Marketplace as `zeflq/pi-reviewer`
+- [x] Run TypeScript sources directly with `tsx`
+- [x] Keep the UI bundle at `dist-ui/index.html` as the only generated runtime artifact
+- [x] Publish to GitHub Marketplace as `zeflq/pi-reviewer`
 
 ### ✅ 6. Multi-provider API key support
 
@@ -341,4 +340,3 @@ See [`extensions/pi-reviewer-doc-context/README.md`](./extensions/pi-reviewer-do
 - [ ] Read and compile patterns in `readConfig`; pass to `filterDiff` alongside the built-in list
 - [ ] Surface excluded-by-user files in the existing `⚠` warning line, distinct from built-in noise exclusions
 - [ ] Update README configuration table with `excludePatterns` field
-

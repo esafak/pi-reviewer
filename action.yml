@@ -229,7 +229,7 @@ runs:
         MIN_SEVERITY: ${{ inputs.min-severity }}
         REACT_ON_NO_FINDINGS: ${{ inputs.react-on-no-findings }}
         PI_REVIEWER_DOC_DIRS: ${{ inputs.doc-dirs }}
-      run: node ${{ github.action_path }}/dist/src/ci/action-entry.js
+      run: "${{ github.action_path }}/node_modules/.bin/tsx" "${{ github.action_path }}/src/ci/action-entry.ts"
 
     - name: Clean up executable temporary directory
       if: ${{ always() && steps.executable-temp.outputs.path != '' }}
