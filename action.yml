@@ -216,6 +216,11 @@ runs:
         PI_REVIEWER_DOC_DIRS: ${{ inputs.doc-dirs }}
       run: node ${{ github.action_path }}/dist/src/ci/action-entry.js
 
+    - name: Clean up executable temporary directory
+      if: ${{ always() && steps.executable-temp.outputs.path != '' }}
+      shell: bash
+      run: rm -rf -- "${{ steps.executable-temp.outputs.path }}"
+
 branding:
   icon: "eye"
   color: "blue"

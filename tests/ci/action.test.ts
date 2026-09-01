@@ -10,5 +10,7 @@ describe("GitHub Action Vite+ setup", () => {
     expect(action).toContain("if: ${{ steps.toolchain.outputs.vite_plus_ready != 'true' }}");
     expect(action).toContain("TMPDIR: ${{ steps.executable-temp.outputs.path }}");
     expect(action).toContain('tmpdir=$(mktemp -d "$base/pi-reviewer-XXXXXX")');
+    expect(action).toContain("if: ${{ always() && steps.executable-temp.outputs.path != '' }}");
+    expect(action).toContain('rm -rf -- "${{ steps.executable-temp.outputs.path }}"');
   });
 });
