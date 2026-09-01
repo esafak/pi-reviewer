@@ -339,7 +339,7 @@ describe("review", () => {
 
     expect(sendOutputMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        content: JSON.stringify(toolReview),
+        structuredResult: toolReview,
       }),
     );
   });

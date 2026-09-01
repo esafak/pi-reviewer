@@ -101,6 +101,7 @@ export async function review(options) {
     let unsubscribe;
     try {
         let finalResponse = "";
+        let structuredResult;
         const ended = new Promise((resolve, reject) => {
             unsubscribe = agent.subscribe((event) => {
                 if (!event || typeof event !== "object")
@@ -126,7 +127,7 @@ export async function review(options) {
                 // call the tool.
                 const toolResult = getResult();
                 if (toolResult) {
-                    finalResponse = JSON.stringify(toolResult);
+                    structuredResult = toolResult;
                     console.log(`[pi-reviewer] agent completed via submit_review tool — ${toolResult.comments.length} comment(s)`);
                     resolve();
                     return;
@@ -164,6 +165,7 @@ export async function review(options) {
         await sendOutput({
             target,
             content: finalResponse,
+            structuredResult,
             cwd,
             githubToken,
             prNumber: options.pr,

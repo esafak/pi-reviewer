@@ -47,11 +47,15 @@ export interface ParsedAgentResponse {
   result: ReviewResult;
   /** True only when the response contained a valid review-shaped JSON object. */
   parsed: boolean;
+  /** Safe diagnostic for a rejected text fallback; never contains model content. */
+  rejectionReason?: "malformed JSON" | "invalid summary" | "invalid comments" | "invalid finding_updates";
 }
 
 export interface OutputOptions {
   target: OutputTarget;
-  content: string;
+  content?: string;
+  /** Schema-validated result from submit_review. When present, content is not parsed. */
+  structuredResult?: ReviewResult;
   cwd?: string;
   githubToken?: string;
   prNumber?: number;
@@ -76,6 +80,59 @@ async function responseJson(response: Response): Promise<{ id?: number; comments
 }
 
 export interface ExistingFinding { commentId: number; threadId?: string; body?: string; }
+
+const FINDING_STATUSES = ["RESOLVED", "PARTIALLY_RESOLVED", "STILL_OPEN"] as const;
+
+function findingUpdateRejection(update: unknown, allowedFindingIds?: ReadonlySet<number>): { update?: FindingUpdate; reason: string; commentId: unknown; status: unknown } {
+  const value = update && typeof update === "object" ? update as Record<string, unknown> : {};
+  const commentId = value.comment_id;
+  const status = value.status;
+  if (!Number.isInteger(commentId)) return { reason: "comment_id is not an integer", commentId, status };
+  if (allowedFindingIds && !allowedFindingIds.has(commentId as number)) return { reason: "unknown active-finding ID", commentId, status };
+  if (!FINDING_STATUSES.includes(status as typeof FINDING_STATUSES[number])) return { reason: "invalid status", commentId, status };
+  if (typeof value.explanation !== "string") return { reason: "explanation is not a string", commentId, status };
+  if (value.explanation.length > 2000) return { reason: "explanation exceeds 2000 characters", commentId, status };
+  return { update: { comment_id: commentId as number, status: status as FindingUpdate["status"], explanation: value.explanation }, reason: "", commentId, status };
+}
+
+function formatDiagnosticValue(value: unknown, kind: "comment_id" | "status"): string {
+  if (kind === "comment_id" && typeof value === "number" && Number.isFinite(value)) return String(value);
+  if (kind === "status" && typeof value === "string" && FINDING_STATUSES.includes(value as typeof FINDING_STATUSES[number])) return value;
+  return "invalid";
+}
+
+function structuredResultRejection(value: unknown): "invalid summary" | "invalid comments" | "invalid finding_updates" | undefined {
+  if (!value || typeof value !== "object") return "invalid summary";
+  const result = value as Record<string, unknown>;
+  if (typeof result.summary !== "string") return "invalid summary";
+  if (!Array.isArray(result.comments) || !result.comments.every(isReviewComment)) return "invalid comments";
+  if (result.finding_updates !== undefined && !Array.isArray(result.finding_updates)) return "invalid finding_updates";
+  return undefined;
+}
+
+/** Normalize tool output while isolating contextual finding validation from the review itself. */
+function normalizeReviewResult(result: ReviewResult, options: Pick<OutputOptions, "minSeverity" | "allowedFindingIds" | "existingFindingKeys">, warnInvalidUpdates: boolean): ReviewResult {
+  const minRank = SEVERITY_RANK[options.minSeverity ?? "INFO"];
+  const comments = result.comments
+    .map((comment) => ({ ...comment, severity: normalizeSeverity(comment.severity) }))
+    .filter((comment) => SEVERITY_RANK[comment.severity] >= minRank)
+    .filter((comment) => !options.existingFindingKeys?.has(normalizeFinding(comment)))
+    .map((comment) => {
+      const emoji = SEVERITY_EMOJI[comment.severity];
+      const prefix = ["🔴 ", "🟡 ", "🔵 "].find((value) => comment.body.startsWith(value));
+      const body = prefix ? comment.body.slice(prefix.length) : comment.body;
+      return { ...comment, body: `${emoji} ${body}` };
+    });
+  const updates: FindingUpdate[] = [];
+  for (const candidate of result.finding_updates ?? []) {
+    const checked = findingUpdateRejection(candidate, options.allowedFindingIds);
+    if (checked.update) updates.push(checked.update);
+    else if (warnInvalidUpdates) {
+      console.warn(`[pi-reviewer] dropped finding update comment_id=${formatDiagnosticValue(checked.commentId, "comment_id")}${checked.status === undefined ? "" : ` status=${formatDiagnosticValue(checked.status, "status")}`} reason=${checked.reason}`);
+    }
+  }
+  return { summary: result.summary, comments, ...(updates.length ? { finding_updates: updates } : {}), ...(result.diff !== undefined ? { diff: result.diff } : {}) };
+}
 
 /** Applies model-approved transitions independently so a failed mutation can be retried safely. */
 export async function reconcileFindingUpdates(options: { token: string; repo: string; prNumber: number; targetSha: string; updates: FindingUpdate[]; findings: ExistingFinding[] }): Promise<Set<number>> {
@@ -303,44 +360,29 @@ export function parseAgentResponseWithStatus(
   // No early return: last-wins requires a full scan.
   let resultWithComments: ReviewResult | null = null;
   let resultAny: ReviewResult | null = null;
+  let rejectionReason: ParsedAgentResponse["rejectionReason"] = "malformed JSON";
 
   for (const { content } of candidates) {
     const parsed = tryParseJSON(content);
+    if (parsed) {
+      rejectionReason = typeof parsed.summary !== "string"
+        ? "invalid summary"
+        : !Array.isArray(parsed.comments) || !parsed.comments.every(isReviewComment)
+          ? "invalid comments"
+          : (parsed.finding_updates !== undefined && (!Array.isArray(parsed.finding_updates) || !parsed.finding_updates.every((u) => findingUpdateRejection(u, allowedFindingIds).update !== undefined)))
+            ? "invalid finding_updates"
+            : rejectionReason;
+    }
     const rawUpdates = parsed && Array.isArray(parsed.finding_updates) ? parsed.finding_updates : [];
-    const updatesValid = rawUpdates.every((u) => {
-      if (!u || typeof u !== "object") return false;
-      const value = u as Record<string, unknown>;
-      return Number.isInteger(value.comment_id) && (!allowedFindingIds || allowedFindingIds.has(value.comment_id as number)) && ["RESOLVED", "PARTIALLY_RESOLVED", "STILL_OPEN"].includes(value.status as string) && typeof value.explanation === "string" && value.explanation.length <= 2000;
-    });
+    const updatesValid = rawUpdates.every((u) => findingUpdateRejection(u, allowedFindingIds).update !== undefined);
     if (
       parsed &&
       typeof parsed.summary === "string" &&
       Array.isArray(parsed.comments) &&
       parsed.comments.every(isReviewComment) && updatesValid
     ) {
-      const minRank = SEVERITY_RANK[minSeverity];
-      const comments = parsed.comments
-        .map((c) => ({ ...c, severity: normalizeSeverity(c.severity) }))
-        .filter((c) => SEVERITY_RANK[c.severity] >= minRank)
-        .filter((c) => !existingFindingKeys?.has(normalizeFinding(c)))
-        .map((c) => {
-          const emoji = SEVERITY_EMOJI[c.severity];
-          const prefix = ["🔴 ", "🟡 ", "🔵 "].find((value) => c.body.startsWith(value));
-          const body = prefix ? c.body.slice(prefix.length) : c.body;
-          return { ...c, body: `${emoji} ${body}` };
-        });
       const diff = typeof parsed.diff === "string" ? parsed.diff : undefined;
-      const updates = Array.isArray(parsed.finding_updates)
-        ? parsed.finding_updates.filter((u): u is FindingUpdate => {
-            if (!u || typeof u !== "object") return false;
-            const value = u as Record<string, unknown>;
-            return Number.isInteger(value.comment_id) &&
-              (!allowedFindingIds || allowedFindingIds.has(value.comment_id as number)) &&
-              ["RESOLVED", "PARTIALLY_RESOLVED", "STILL_OPEN"].includes(value.status as string) &&
-              typeof value.explanation === "string" && value.explanation.length <= 2000;
-          })
-        : [];
-      const review = { summary: parsed.summary, comments, ...(updates.length ? { finding_updates: updates } : {}), ...(diff !== undefined ? { diff } : {}) };
+      const review = normalizeReviewResult({ summary: parsed.summary, comments: parsed.comments as ReviewComment[], finding_updates: rawUpdates as FindingUpdate[], ...(diff !== undefined ? { diff } : {}) }, { minSeverity, allowedFindingIds, existingFindingKeys }, false);
       resultAny = review;
       // Base the preference on what the model emitted, not on what remains
       // after minSeverity filtering. A genuine review whose findings are all
@@ -353,7 +395,7 @@ export function parseAgentResponseWithStatus(
   const result = resultWithComments ?? resultAny;
   if (result) return { result, parsed: true };
 
-  return { result: { summary: text, comments: [] }, parsed: false };
+  return { result: { summary: text, comments: [] }, parsed: false, rejectionReason };
 }
 
 /** Stable identity used to avoid reposting the same finding in a batch. */
@@ -423,7 +465,17 @@ export function formatForTerminal(result: ReviewResult): string {
 }
 
 export async function sendOutput(options: OutputOptions): Promise<OutputMetadata> {
-  const parsedResponse = parseAgentResponseWithStatus(options.content, options.minSeverity, options.allowedFindingIds, options.existingFindingKeys);
+  let parsedResponse: ParsedAgentResponse;
+  if (options.structuredResult !== undefined) {
+    const rejectionReason = structuredResultRejection(options.structuredResult);
+    if (rejectionReason) {
+      console.warn(`[pi-reviewer] rejected structured result: ${rejectionReason}`);
+      throw new Error(`Agent output was not a valid structured review: ${rejectionReason}`);
+    }
+    parsedResponse = { result: normalizeReviewResult(options.structuredResult, options, true), parsed: true };
+  } else {
+    parsedResponse = parseAgentResponseWithStatus(options.content ?? "", options.minSeverity, options.allowedFindingIds, options.existingFindingKeys);
+  }
   const result = parsedResponse.result;
 
   if (options.target === "terminal") {
@@ -445,6 +497,7 @@ export async function sendOutput(options: OutputOptions): Promise<OutputMetadata
     }
 
     if (!parsedResponse.parsed) {
+      console.warn(`[pi-reviewer] rejected text fallback: ${parsedResponse.rejectionReason ?? "invalid structured review"}`);
       throw new Error(
         "Agent output was not a valid structured review; refusing to post raw model output",
       );
@@ -458,10 +511,10 @@ export async function sendOutput(options: OutputOptions): Promise<OutputMetadata
     // Split comments into inline (positionable on the diff) and moved (kept in
     // the review body). Without a diff we can't validate positions, so every
     // comment is treated as inline (local/SSH callers, which never pass a diff).
-      const unique = new Map<string, ReviewComment>();
-      for (const comment of result.comments) unique.set(normalizeFinding(comment), comment);
-      const comments = [...unique.values()];
-      let inline = comments;
+    const unique = new Map<string, ReviewComment>();
+    for (const comment of result.comments) unique.set(normalizeFinding(comment), comment);
+    const comments = [...unique.values()];
+    let inline = comments;
     let moved: ReviewComment[] = [];
     if (options.diff) {
       const positions = parseDiffPositions(options.diff);
@@ -577,7 +630,7 @@ export async function sendOutput(options: OutputOptions): Promise<OutputMetadata
       // valid (e.g. a force-push changed the diff between resolution and post).
       // Retry once as a body-only review, moving every comment into the body.
       if (reviewResponse.status === 422) {
-         const allMovedBody = [options.batchMarker, buildReviewBody(result.summary, comments)].filter(Boolean).join("\n\n");
+        const allMovedBody = [options.batchMarker, buildReviewBody(result.summary, comments)].filter(Boolean).join("\n\n");
         reviewResponse = await fetch(
           `https://api.github.com/repos/${options.repo}/pulls/${options.prNumber}/reviews`,
           {
@@ -601,7 +654,7 @@ export async function sendOutput(options: OutputOptions): Promise<OutputMetadata
             }
           }
           if (!findingUpdatesReconciled && result.finding_updates?.length && options.existingFindings && options.githubToken && options.repo && options.prNumber && options.commitId) await reconcileFindingUpdates({ token: options.githubToken, repo: options.repo, prNumber: options.prNumber, targetSha: options.commitId, updates: result.finding_updates, findings: options.existingFindings });
-            const posted = await responseJson(reviewResponse);
+          const posted = await responseJson(reviewResponse);
           return { reviewId: posted?.id, commentIds: posted?.comments?.flatMap(c => c.id ? [c.id] : []) ?? [], fallback: true };
         }
         errBody = await reviewResponse.text().catch(() => "");

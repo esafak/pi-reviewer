@@ -61,6 +61,7 @@ describe("parseAgentResponse", () => {
     expect(parseAgentResponseWithStatus("not-json")).toEqual({
       result: { summary: "not-json", comments: [] },
       parsed: false,
+      rejectionReason: "malformed JSON",
     });
     expect(parseAgentResponseWithStatus(JSON.stringify({ summary: "LGTM", comments: [] }))).toEqual(
       {
@@ -971,11 +972,117 @@ describe("sendOutput", () => {
     expect(body.comments[0].path).toBe("src/b.ts");
   });
 
-  it("validates finding updates against supplied IDs and preserves legacy output", () => {
+  it("keeps text fallback strict for finding updates", () => {
     const valid = parseAgentResponseWithStatus(JSON.stringify({ summary: "updated", comments: [], finding_updates: [{ comment_id: 7, status: "RESOLVED", explanation: "fixed" }] }), "INFO", new Set([7]));
     expect(valid.parsed).toBe(true);
     expect(valid.result.finding_updates?.[0].status).toBe("RESOLVED");
     expect(parseAgentResponseWithStatus(JSON.stringify({ summary: "bad", comments: [], finding_updates: [{ comment_id: 8, status: "RESOLVED", explanation: "x" }] }), "INFO", new Set([7])).parsed).toBe(false);
+  });
+
+  it("posts valid structured comments inline while dropping only invalid finding updates", async () => {
+    const fetchMock = okFetch();
+    vi.stubGlobal("fetch", fetchMock);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await sendOutput({
+      target: "comment",
+      content: "",
+      structuredResult: {
+        summary: "review",
+        comments: [{ file: "src/a.ts", line: 2, side: "RIGHT", severity: "WARN", body: "valid comment" }],
+        finding_updates: [
+          { comment_id: 999, status: "RESOLVED", explanation: "do not log this model text" },
+          { comment_id: {}, status: {}, explanation: "another model detail" } as never,
+        ],
+      },
+      githubToken: "token",
+      prNumber: 1,
+      repo: "owner/repo",
+      commitId: "head",
+      allowedFindingIds: new Set([7]),
+      diff: `diff --git a/src/a.ts b/src/a.ts
+--- a/src/a.ts
++++ b/src/a.ts
+@@ -1,2 +1,3 @@
+ export function run() {
++  return true;
+ }
+`,
+    });
+
+    const payload = JSON.parse((fetchMock.mock.calls[0][1] as { body: string }).body);
+    expect(payload.comments).toEqual([
+      {
+        path: "src/a.ts",
+        line: 2,
+        side: "RIGHT",
+        body: "<!-- pi-reviewer:finding:v1 -->\n🟡 valid comment",
+      },
+    ]);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("comment_id=999"));
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("reason=unknown active-finding ID"));
+    expect(warn.mock.calls.flat().join(" ")).not.toContain("do not log this model text");
+    expect(warn.mock.calls.flat().join(" ")).not.toContain("[object Object]");
+  });
+
+  it.each([
+    ["malformed JSON", "{not-json", "malformed JSON"],
+    ["invalid comments", JSON.stringify({ summary: "review", comments: [{ file: "a.ts" }] }), "invalid comments"],
+    ["invalid finding_updates", JSON.stringify({ summary: "review", comments: [], finding_updates: [{ comment_id: 7, status: "BROKEN", explanation: "secret model text" }] }), "invalid finding_updates"],
+  ])("diagnoses text fallback rejection as %s without raw content", async (_label, content, reason) => {
+    const fetchMock = okFetch();
+    vi.stubGlobal("fetch", fetchMock);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await expect(sendOutput({
+      target: "comment",
+      content,
+      githubToken: "token",
+      prNumber: 1,
+      repo: "owner/repo",
+    })).rejects.toThrow("refusing to post raw model output");
+
+    expect(warn).toHaveBeenCalledWith(`[pi-reviewer] rejected text fallback: ${reason}`);
+    expect(warn.mock.calls.flat().join(" ")).not.toContain("secret model text");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects malformed structured results cleanly instead of throwing a TypeError", async () => {
+    const fetchMock = okFetch();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(sendOutput({
+      target: "comment",
+      content: "",
+      structuredResult: { comments: [] } as never,
+      githubToken: "token",
+      prNumber: 1,
+      repo: "owner/repo",
+    })).rejects.toThrow("valid structured review: invalid summary");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("moves a structured comment from a previous-batch location into the review body", async () => {
+    const fetchMock = okFetch();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await sendOutput({
+      target: "comment",
+      content: "",
+      structuredResult: {
+        summary: "review",
+        comments: [{ file: "src/a.ts", line: 99, side: "RIGHT", severity: "INFO", body: "stale location" }],
+      },
+      githubToken: "token",
+      prNumber: 1,
+      repo: "owner/repo",
+      commitId: "head",
+      diff: "diff --git a/src/a.ts b/src/a.ts\n--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1,1 +1,1 @@\n-old\n+new\n",
+    });
+
+    const payload = JSON.parse((fetchMock.mock.calls[0][1] as { body: string }).body);
+    expect(payload.comments).toEqual([]);
+    expect(payload.body).toContain("stale location");
   });
 
   it("normalizes duplicate finding identities", () => {

@@ -83,7 +83,7 @@ export async function review(options: ReviewOptions): Promise<void> {
     console.log(`[pi-reviewer] doc-context loaded: ${docContextFiles.map(f => f.path).join(", ")}`);
   }
 
-   const systemPrompt = buildJSONSystemPrompt(context, options.minSeverity, docContextFiles, options.activeFindings, options.priorSummary);
+  const systemPrompt = buildJSONSystemPrompt(context, options.minSeverity, docContextFiles, options.activeFindings, options.priorSummary);
   const userPrompt = buildUserPrompt(diff, skippedFiles);
 
   const target: OutputTarget =
@@ -143,6 +143,7 @@ export async function review(options: ReviewOptions): Promise<void> {
 
   try {
     let finalResponse = "";
+    let structuredResult: ReturnType<typeof getResult>;
 
     const ended = new Promise<void>((resolve, reject) => {
       unsubscribe = agent.subscribe((event: unknown) => {
@@ -173,7 +174,7 @@ export async function review(options: ReviewOptions): Promise<void> {
         // call the tool.
         const toolResult = getResult();
         if (toolResult) {
-          finalResponse = JSON.stringify(toolResult);
+          structuredResult = toolResult;
           console.log(
             `[pi-reviewer] agent completed via submit_review tool — ${toolResult.comments.length} comment(s)`,
           );
@@ -220,6 +221,7 @@ export async function review(options: ReviewOptions): Promise<void> {
     await sendOutput({
       target,
       content: finalResponse,
+      structuredResult,
       cwd,
       githubToken,
       prNumber: options.pr,

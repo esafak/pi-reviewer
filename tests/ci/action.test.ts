@@ -29,4 +29,12 @@ describe("GitHub Action Vite+ setup", () => {
       action.indexOf("- name: Run review"),
     );
   });
+
+  it("keeps the checked-in UI build artifact usable by the UI template", async () => {
+    const template = await readFile(path.join(process.cwd(), "src/core/ui/template.ts"), "utf8");
+    const artifact = await readFile(path.join(process.cwd(), "dist-ui/index.html"), "utf8");
+
+    expect(template).toContain('"../../../dist-ui/index.html"');
+    expect(artifact).toContain("/*%%DATA%%*/null/*%%END%%*/");
+  });
 });
