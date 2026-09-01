@@ -36,6 +36,7 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
+      issues: write
 
     concurrency:
       group: pi-reviewer-\${{ github.repository }}-\${{ github.event.pull_request.number || github.event.issue.number || inputs.pr-number || github.run_id }}
@@ -58,6 +59,7 @@ jobs:
           model: openrouter/openai/gpt-5.4-mini
           min-severity: \${{ inputs.min-severity || 'info' }}
           review-drafts: '${reviewDrafts ? "true" : "false"}'
+          react-on-no-findings: 'true'
           # Opt in to injecting matching project docs into the review.
           # Comma-separated dirs scanned for .md files with a 'description' frontmatter.
           # doc-dirs: '.pi/notes,docs/review'

@@ -175,6 +175,7 @@ export async function review(options) {
             existingFindings: options.activeFindings?.map(f => ({ commentId: f.commentId, threadId: f.threadId })),
             existingFindingKeys: new Set(options.activeFindings?.filter(f => f.file && f.line && f.side).map(f => normalizeFinding({ file: f.file, line: f.line, side: f.side, body: f.body }))),
             allowedFindingIds: new Set(options.activeFindings?.map(f => f.commentId)),
+            reactOnNoFindings: options.reactOnNoFindings,
         });
     }
     finally {

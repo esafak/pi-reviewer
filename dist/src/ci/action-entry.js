@@ -93,7 +93,7 @@ console.log(`[pi-reviewer] reviewing PR #${event.pr}: ${range.fromSha}..${range.
 const worktree = await mkdtemp(path.join(tmpdir(), "pi-reviewer-"));
 try {
     execFileSync("git", ["worktree", "add", "--detach", worktree, head], { cwd: process.cwd(), stdio: "ignore" });
-    await review({ cwd: worktree, pr: event.pr, commitId: head, fromSha: range.fresh ? range.fromSha : head, allowEmptyDiff: !range.fresh, batchMarker: range.fresh ? marker : undefined, activeFindings, priorSummary, output: "comment", minSeverity, thinking: parseThinkingLevel(process.env.PI_REVIEWER_THINKING), githubToken: token, repo });
+    await review({ cwd: worktree, pr: event.pr, commitId: head, fromSha: range.fresh ? range.fromSha : head, allowEmptyDiff: !range.fresh, batchMarker: range.fresh ? marker : undefined, activeFindings, priorSummary, output: "comment", minSeverity, thinking: parseThinkingLevel(process.env.PI_REVIEWER_THINKING), githubToken: token, repo, reactOnNoFindings: process.env.REACT_ON_NO_FINDINGS === "true" });
 }
 finally {
     try {

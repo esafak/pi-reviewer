@@ -36,6 +36,8 @@ export class GitHubClient {
     createReview(repo, number, body, commit_id, comments) { return this.request(`/repos/${repo}/pulls/${number}/reviews`, { method: "POST", body: JSON.stringify({ body, commit_id, event: "COMMENT", comments }) }); }
     updateReview(repo, number, review, body) { return this.request(`/repos/${repo}/pulls/${number}/reviews/${review}`, { method: "PUT", body: JSON.stringify({ body }) }); }
     reply(repo, number, comment, body) { return this.request(`/repos/${repo}/pulls/${number}/comments`, { method: "POST", body: JSON.stringify({ body, in_reply_to: comment }) }); }
+    createReaction(repo, number, content = "+1") { return this.request(`/repos/${repo}/issues/${number}/reactions`, { method: "POST", body: JSON.stringify({ content }) }); }
+    listReactions(repo, number) { return this.list(`/repos/${repo}/issues/${number}/reactions`); }
     async graphql(query, variables) { const result = await this.request("https://api.github.com/graphql", { method: "POST", body: JSON.stringify({ query, variables }) }); if (result.errors?.length)
         throw new Error(result.errors.map(e => e.message).join("; ")); return result.data; }
     resolveThread(threadId) { return this.graphql("mutation($id:ID!){resolveReviewThread(input:{threadId:$id}){thread{id isResolved}}}", { id: threadId }); }
