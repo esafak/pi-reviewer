@@ -36,6 +36,10 @@ describe("batch markers", () => {
     ];
     expect(selectAuthenticatedBatchMarkers(reviews, "bot").at(-1)?.toSha).toBe("new");
   });
+  it("accepts authenticated markers from issue-comment-shaped sources", () => {
+    const marker = encodeBatchMarker({ fromSha: "base", toSha: "new", kind: "synchronize", actor: "bot", reviewId: 0 });
+    expect(selectAuthenticatedBatchMarkers([{ id: 99, user: { login: "bot" }, body: marker }], "bot").at(-1)?.toSha).toBe("new");
+  });
 });
 
 describe("event normalization", () => {

@@ -1,6 +1,6 @@
 export interface PullRequest { number: number; head: { sha: string; repo?: { full_name?: string } }; base: { sha: string; repo?: { full_name?: string } }; draft?: boolean }
-export interface Review { id: number; body?: string | null; user?: { login?: string; type?: string }; commit_id?: string }
-export interface ReviewComment { id: number; body: string; user?: { login?: string; type?: string }; path?: string; line?: number; side?: string; pull_request_review_id?: number; in_reply_to_id?: number }
+export interface Review { id: number; body?: string | null; user?: { login?: string; type?: string }; commit_id?: string; created_at?: string }
+export interface ReviewComment { id: number; body: string; user?: { login?: string; type?: string }; path?: string; line?: number; side?: string; pull_request_review_id?: number; in_reply_to_id?: number; created_at?: string }
 export interface PageInfo { hasNextPage: boolean; endCursor?: string }
 export interface ReviewThread { id: string; isResolved: boolean; comments: { nodes: ReviewComment[]; pageInfo: PageInfo } }
 export interface Reaction { id: number; content: string; user?: { login?: string } }
@@ -22,6 +22,7 @@ export class GitHubClient {
   private async list<T>(url: string): Promise<T[]> { const all: T[] = []; for (let page = 1;; page++) { const values = await this.request<T[]>(`${url}?per_page=100&page=${page}`); all.push(...values); if (values.length < 100) return all; } }
   listReviews(repo: string, number: number) { return this.list<Review>(`/repos/${repo}/pulls/${number}/reviews`); }
   listComments(repo: string, number: number) { return this.list<ReviewComment>(`/repos/${repo}/pulls/${number}/comments`); }
+  listIssueComments(repo: string, number: number) { return this.list<ReviewComment>(`/repos/${repo}/issues/${number}/comments`); }
   createReview(repo: string, number: number, body: string, commit_id: string, comments: unknown[]) { return this.request<Review>(`/repos/${repo}/pulls/${number}/reviews`, { method: "POST", body: JSON.stringify({ body, commit_id, event: "COMMENT", comments }) }); }
   updateReview(repo: string, number: number, review: number, body: string) { return this.request<Review>(`/repos/${repo}/pulls/${number}/reviews/${review}`, { method: "PUT", body: JSON.stringify({ body }) }); }
   reply(repo: string, number: number, comment: number, body: string) { return this.request<ReviewComment>(`/repos/${repo}/pulls/${number}/comments`, { method: "POST", body: JSON.stringify({ body, in_reply_to: comment }) }); }

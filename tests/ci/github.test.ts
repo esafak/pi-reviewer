@@ -37,6 +37,12 @@ describe("GitHubClient", () => {
       expect.objectContaining({ method: "POST", body: JSON.stringify({ content: "+1" }) }),
     );
   });
+  it("lists pull request issue comments separately from review comments", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(response([{ id: 1, body: "marker" }]));
+    vi.stubGlobal("fetch", fetchMock);
+    await new GitHubClient("token").listIssueComments("owner/repo", 42);
+    expect(fetchMock).toHaveBeenCalledWith("https://api.github.com/repos/owner/repo/issues/42/comments?per_page=100&page=1", expect.anything());
+  });
   it("follows GraphQL thread cursors", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(response({ data: { repository: { pullRequest: { reviewThreads: { nodes: [{ id: "t1", isResolved: false, comments: { nodes: [], pageInfo: { hasNextPage: false } } }], pageInfo: { hasNextPage: true, endCursor: "cursor-1" } } } } } }))
