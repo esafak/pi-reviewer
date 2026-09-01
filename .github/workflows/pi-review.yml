@@ -86,7 +86,7 @@ jobs:
           printf 'PI_API_KEY=%s\n' "$key" >> "$GITHUB_ENV"
 
       - name: Review
-        uses: esafak/pi-reviewer@21cb8830469478767a1fbfcc2c78ffcf3e582534 # includes action metadata fix
+        uses: esafak/pi-reviewer@f6970f72b9590abe1a52b5205d6c2254e8f68a7e # latest main
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           pi-api-key: ${{ env.PI_API_KEY }}

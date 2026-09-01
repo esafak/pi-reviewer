@@ -82,6 +82,11 @@ async function responseJson(response: Response): Promise<{ id?: number; comments
 
 export interface ExistingFinding { commentId: number; threadId?: string; body?: string; reviewId?: number; bodyFinding?: boolean; reviewBody?: string; }
 
+function normalizeFindingExplanation(status: FindingUpdate["status"], explanation: string): string {
+  const prefix = status === "RESOLVED" ? /^Resolved:\s*/i : status === "PARTIALLY_RESOLVED" ? /^Partially addressed:\s*/i : undefined;
+  return prefix ? explanation.replace(prefix, "") : explanation;
+}
+
 const FINDING_STATUSES = ["RESOLVED", "PARTIALLY_RESOLVED", "STILL_OPEN"] as const;
 
 function findingUpdateRejection(update: unknown, allowedFindingIds?: ReadonlySet<number>): { update?: FindingUpdate; reason: string; commentId: unknown; status: unknown } {
@@ -186,12 +191,13 @@ export async function reconcileFindingUpdates(options: { token: string; repo: st
     }
     const changedFindingIds = new Set<number>();
     for (const update of group.updates) {
+      const explanation = normalizeFindingExplanation(update.status, update.explanation);
       const currentMarker = decodeBodyFindingMarkers(updatedBody).find(marker => marker.findingId === update.comment_id);
-      if (currentMarker?.targetSha === options.targetSha && currentMarker.status === update.status && currentMarker.explanation === update.explanation) {
+      if (currentMarker?.targetSha === options.targetSha && currentMarker.status === update.status && currentMarker.explanation === explanation) {
         if (update.status === "RESOLVED") outstanding.delete(update.comment_id);
         continue;
       }
-      const nextBody = updateBodyFindingMarker(updatedBody, update.comment_id, update.status, options.targetSha, update.explanation);
+      const nextBody = updateBodyFindingMarker(updatedBody, update.comment_id, update.status, options.targetSha, explanation);
       if (nextBody !== updatedBody) {
         updatedBody = nextBody;
         changedFindingIds.add(update.comment_id);
@@ -212,7 +218,8 @@ export async function reconcileFindingUpdates(options: { token: string; repo: st
     if (!finding || update.status === "STILL_OPEN") continue;
     if (finding.bodyFinding && finding.reviewId && finding.reviewBody !== undefined) continue;
     const linkedSha = options.targetSha.slice(0, 7);
-    const body = `<!-- pi-reviewer:status:v1 ${JSON.stringify({ findingId: update.comment_id, targetSha: options.targetSha, status: update.status })} -->\n${update.status === "RESOLVED" ? `Resolved by ${linkedSha}` : `Partially addressed by ${linkedSha}`}: ${update.explanation}`;
+    const explanation = normalizeFindingExplanation(update.status, update.explanation);
+    const body = `<!-- pi-reviewer:status:v1 ${JSON.stringify({ findingId: update.comment_id, targetSha: options.targetSha, status: update.status })} -->\n${update.status === "RESOLVED" ? `Resolved by ${linkedSha}` : `Partially addressed by ${linkedSha}`}: ${explanation}`;
     const alreadyReplied = priorReplies.some(reply => reply.user?.login === identity?.login && reply.in_reply_to_id === finding.commentId && reply.body.includes(`"targetSha":"${options.targetSha}"`) && reply.body.includes(`"status":"${update.status}"`));
     try {
       if (!alreadyReplied) {
