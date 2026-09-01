@@ -3,6 +3,7 @@ import path from "node:path";
 
 import { parseDiffPositions, partitionComments } from "./diff-positions.js";
 import { GitHubClient } from "../ci/github.js";
+import { bodyFindingId, decodeBodyFindingMarkers, encodeBodyFindingMarker, updateBodyFindingMarker } from "../ci/batch.js";
 
 export type OutputTarget = "terminal" | "comment" | "file";
 export type Severity = "CRITICAL" | "WARN" | "INFO";
@@ -79,7 +80,7 @@ async function responseJson(response: Response): Promise<{ id?: number; comments
   try { return await response.json() as { id?: number; comments?: Array<{ id?: number }> }; } catch { return undefined; }
 }
 
-export interface ExistingFinding { commentId: number; threadId?: string; body?: string; }
+export interface ExistingFinding { commentId: number; threadId?: string; body?: string; reviewId?: number; bodyFinding?: boolean; reviewBody?: string; }
 
 const FINDING_STATUSES = ["RESOLVED", "PARTIALLY_RESOLVED", "STILL_OPEN"] as const;
 
@@ -157,10 +158,59 @@ export async function reconcileFindingUpdates(options: { token: string; repo: st
       return false;
     }
   };
+  type BodyUpdate = FindingUpdate & { status: Exclude<FindingUpdate["status"], "STILL_OPEN"> };
+  const bodyUpdates = new Map<number, { finding: ExistingFinding; updates: BodyUpdate[] }>();
   for (const update of options.updates) {
     const finding = known.get(update.comment_id);
     if (!finding) continue;
     if (update.status === "STILL_OPEN") continue;
+    if (finding.bodyFinding && finding.reviewId && finding.reviewBody !== undefined) {
+      const group = bodyUpdates.get(finding.reviewId) ?? { finding, updates: [] };
+      group.updates.push(update as BodyUpdate);
+      bodyUpdates.set(finding.reviewId, group);
+      continue;
+    }
+  }
+  for (const [reviewId, group] of bodyUpdates) {
+    let updatedBody: string;
+    try {
+      const freshReview = await client.getReview(options.repo, options.prNumber, reviewId);
+      if (typeof freshReview.body !== "string") {
+        console.warn(`[pi-reviewer] could not update body review ${reviewId}: fetched review has no body`);
+        continue;
+      }
+      updatedBody = freshReview.body;
+    } catch (error) {
+      console.warn(`[pi-reviewer] could not fetch body review ${reviewId}: ${error instanceof Error ? error.message : String(error)}`);
+      continue;
+    }
+    const changedFindingIds = new Set<number>();
+    for (const update of group.updates) {
+      const currentMarker = decodeBodyFindingMarkers(updatedBody).find(marker => marker.findingId === update.comment_id);
+      if (currentMarker?.targetSha === options.targetSha && currentMarker.status === update.status && currentMarker.explanation === update.explanation) {
+        if (update.status === "RESOLVED") outstanding.delete(update.comment_id);
+        continue;
+      }
+      const nextBody = updateBodyFindingMarker(updatedBody, update.comment_id, update.status, options.targetSha, update.explanation);
+      if (nextBody !== updatedBody) {
+        updatedBody = nextBody;
+        changedFindingIds.add(update.comment_id);
+      }
+    }
+    if (updatedBody === group.finding.reviewBody || !await isTargetHeadCurrent()) continue;
+    try {
+      await client.updateReview(options.repo, options.prNumber, reviewId, updatedBody);
+      for (const update of group.updates) {
+        if (update.status === "RESOLVED" && changedFindingIds.has(update.comment_id)) outstanding.delete(update.comment_id);
+      }
+    } catch (error) {
+      console.warn(`[pi-reviewer] could not update body review ${reviewId}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  for (const update of options.updates) {
+    const finding = known.get(update.comment_id);
+    if (!finding || update.status === "STILL_OPEN") continue;
+    if (finding.bodyFinding && finding.reviewId && finding.reviewBody !== undefined) continue;
     const body = `<!-- pi-reviewer:status:v1 ${JSON.stringify({ findingId: update.comment_id, targetSha: options.targetSha, status: update.status })} -->\n${update.status === "RESOLVED" ? `Resolved in ${options.targetSha.slice(0, 7)}` : "Partially addressed"}: ${update.explanation}`;
     const alreadyReplied = priorReplies.some(reply => reply.user?.login === identity?.login && reply.in_reply_to_id === finding.commentId && reply.body.includes(`"targetSha":"${options.targetSha}"`) && reply.body.includes(`"status":"${update.status}"`));
     try {
@@ -400,7 +450,14 @@ export function parseAgentResponseWithStatus(
 
 /** Stable identity used to avoid reposting the same finding in a batch. */
 export function normalizeFinding(comment: Pick<ReviewComment, "file" | "line" | "side" | "body">): string {
-  return [comment.file, comment.line, comment.side, comment.body.replace(/^[🔴🟡🔵]\s*/u, "").trim().replace(/\n\s*\n+/g, "\n")].join("\0");
+  const storedBody = decodeBodyFindingMarkers(comment.body)[0]?.body;
+  const body = (storedBody ?? comment.body).replace(/<!--\s*pi-reviewer\s*:\s*[\s\S]*?-->/g, "").trim().replace(/^[🔴🟡🔵]\s*/u, "").trim().replace(/\n\s*\n+/g, "\n");
+  return [comment.file, comment.line, comment.side, body].join("\0");
+}
+
+/** Keep model-controlled text from becoming metadata when it is shown in a review body. */
+function sanitizeVisibleReviewText(text: string): string {
+  return text.replace(/<!--\s*pi-reviewer\s*:/gi, "<!-- pi-reviewer :");
 }
 
 export function parseAgentResponse(text: string, minSeverity: Severity = "INFO"): ReviewResult {
@@ -408,7 +465,7 @@ export function parseAgentResponse(text: string, minSeverity: Severity = "INFO")
 }
 
 function formatForGitHub(result: ReviewResult): string {
-  const lines = ["## Pi Reviewer", "", result.summary];
+  const lines = ["## Pi Reviewer", "", sanitizeVisibleReviewText(result.summary)];
 
   if (result.comments.length > 0) {
     lines.push("", "### Inline Comments");
@@ -416,7 +473,7 @@ function formatForGitHub(result: ReviewResult): string {
       lines.push(
         "",
         `${SEVERITY_EMOJI[comment.severity]} **\`${comment.file}:${comment.line}\`** · ${comment.side}`,
-        comment.body
+        sanitizeVisibleReviewText(comment.body)
       );
     }
   }
@@ -430,14 +487,17 @@ function formatForGitHub(result: ReviewResult): string {
  * the review's main text, so moved comments stay visible to the author.
  */
 function buildReviewBody(summary: string, moved: ReviewComment[]): string {
-  if (moved.length === 0) return summary;
-  const lines = [summary, "", "### Comments Not Attached to the Diff", ""];
+  if (moved.length === 0) return sanitizeVisibleReviewText(summary);
+  const lines = [sanitizeVisibleReviewText(summary), "", "### Comments Not Attached to the Diff", ""];
   lines.push("These comments could not be attached to a specific diff line, so the reported location is approximate — the line is not part of the diff:");
   for (const comment of moved) {
+    const visibleBody = sanitizeVisibleReviewText(comment.body);
+    const findingId = bodyFindingId(normalizeFinding(comment));
     lines.push(
       "",
+      encodeBodyFindingMarker({ findingId, file: comment.file, line: comment.line, side: comment.side, severity: comment.severity, body: visibleBody }),
       `> ${SEVERITY_EMOJI[comment.severity]} **\`${comment.file}:${comment.line}\`** · ${comment.side} — location could not be verified`,
-      comment.body
+      visibleBody
     );
   }
   return lines.join("\n");

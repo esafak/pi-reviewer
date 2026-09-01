@@ -230,7 +230,7 @@ export async function review(options: ReviewOptions): Promise<void> {
       minSeverity: options.minSeverity as Severity | undefined,
       diff,
       batchMarker: options.batchMarker,
-      existingFindings: options.activeFindings?.map(f => ({ commentId: f.commentId, threadId: f.threadId })),
+      existingFindings: options.activeFindings?.map(f => ({ commentId: f.commentId, threadId: f.threadId, reviewId: f.reviewId, bodyFinding: f.bodyFinding, reviewBody: f.reviewBody })),
       existingFindingKeys: new Set(options.activeFindings?.filter(f => f.file && f.line && f.side).map(f => normalizeFinding({ file: f.file!, line: f.line!, side: f.side as "LEFT" | "RIGHT", body: f.body }))),
       allowedFindingIds: new Set(options.activeFindings?.map(f => f.commentId)),
       reactOnNoFindings: options.reactOnNoFindings,

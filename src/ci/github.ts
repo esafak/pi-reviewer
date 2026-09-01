@@ -68,6 +68,7 @@ export class GitHubClient {
     }
   }
   getPullRequest(repo: string, number: number) { return this.request<PullRequest>(`/repos/${repo}/pulls/${number}`); }
+  getReview(repo: string, number: number, review: number) { return this.request<Review>(`/repos/${repo}/pulls/${number}/reviews/${review}`); }
   private async list<T>(url: string): Promise<T[]> { const all: T[] = []; for (let page = 1;; page++) { const values = await this.request<T[]>(`${url}?per_page=100&page=${page}`); all.push(...values); if (values.length < 100) return all; } }
   listReviews(repo: string, number: number) { return this.list<Review>(`/repos/${repo}/pulls/${number}/reviews`); }
   listComments(repo: string, number: number) { return this.list<ReviewComment>(`/repos/${repo}/pulls/${number}/comments`); }

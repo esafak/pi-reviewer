@@ -73,6 +73,7 @@ export class GitHubClient {
         }
     }
     getPullRequest(repo, number) { return this.request(`/repos/${repo}/pulls/${number}`); }
+    getReview(repo, number, review) { return this.request(`/repos/${repo}/pulls/${number}/reviews/${review}`); }
     async list(url) { const all = []; for (let page = 1;; page++) {
         const values = await this.request(`${url}?per_page=100&page=${page}`);
         all.push(...values);

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { parseThinkingLevel, review } from "./review.js";
 import { GitHubClient } from "./github.js";
-import { decodeBatchMarker, encodeBatchMarker, isAuthorizedReviewCommand, isEventRangeConsistent, normalizeEvent, selectAuthenticatedBatchMarkers, selectBatchRange } from "./batch.js";
+import { decodeBatchMarker, encodeBatchMarker, isAuthorizedReviewCommand, isEventRangeConsistent, normalizeEvent, reconstructBodyFindings, selectAuthenticatedBatchMarkers, selectBatchRange } from "./batch.js";
 
 async function readEvent(): Promise<unknown> {
   const file = process.env.GITHUB_EVENT_PATH;
@@ -64,7 +64,10 @@ const latestMarkerSource = latest ? [...markerSources].reverse().find(source => 
 const priorSummary = latestMarkerSource?.body?.replace(/<!-- pi-reviewer:batch:v1 [^>]+ -->/, "").trim() || undefined;
 const batchByReview = new Map(reviews.map(r => [r.id, decodeBatchMarker(r.body)]));
 const threadByComment = new Map(threads.flatMap(t => t.comments.nodes.map(c => [c.id, { id: t.id, resolved: t.isResolved }] as const)));
-const activeFindings = comments.filter(c => c.user?.login === identity.login && c.id > 0 && c.body.includes("<!-- pi-reviewer:finding:v1 -->") && !c.body.includes("pi-reviewer:status:v1") && !threadByComment.get(c.id)?.resolved).map(c => { const batch = c.pull_request_review_id ? batchByReview.get(c.pull_request_review_id) : undefined; const replies = comments.filter(reply => reply.in_reply_to_id === c.id && reply.user?.login === identity.login).sort((a, b) => a.id - b.id); return { commentId: c.id, threadId: threadByComment.get(c.id)?.id, file: c.path, line: c.line, side: c.side, body: c.body, sourceBatch: batch ? `${batch.fromSha}..${batch.toSha}` : undefined, latestStatus: replies.at(-1)?.body.match(/status:v1 \{[^}]*"status":"([^"]+)/)?.[1] }; });
+const inlineFindings = comments.filter(c => c.user?.login === identity.login && c.id > 0 && c.body.includes("<!-- pi-reviewer:finding:v1 -->") && !c.body.includes("pi-reviewer:status:v1") && !threadByComment.get(c.id)?.resolved).map(c => { const batch = c.pull_request_review_id ? batchByReview.get(c.pull_request_review_id) : undefined; const replies = comments.filter(reply => reply.in_reply_to_id === c.id && reply.user?.login === identity.login).sort((a, b) => a.id - b.id); return { commentId: c.id, threadId: threadByComment.get(c.id)?.id, file: c.path, line: c.line, side: c.side, body: c.body, sourceBatch: batch ? `${batch.fromSha}..${batch.toSha}` : undefined, latestStatus: replies.at(-1)?.body.match(/status:v1 \{[^}]*"status":"([^"]+)/)?.[1] }; });
+// Body findings have no inline comment target. Their authenticated, hidden
+// markers carry the stable ID and originating review needed for later runs.
+const activeFindings = [...inlineFindings, ...reconstructBodyFindings(reviews, identity.login)];
 const head = event.targetHead ?? pr.head.sha;
 if (pr.head.repo?.full_name !== repo) { console.log("[pi-reviewer] fork or deleted-head PRs are not reviewed"); process.exit(0); }
 // The default-branch checkout used by issue-comment and dispatch events may
