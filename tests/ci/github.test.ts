@@ -28,6 +28,14 @@ describe("GitHubClient", () => {
     await expect(new GitHubClient("token").getUser()).resolves.toMatchObject({ login: "review-app[bot]", type: "Bot" });
     expect(fetchMock).toHaveBeenCalledWith("https://api.github.com/user", expect.objectContaining({ headers: expect.objectContaining({ authorization: "Bearer token" }) }));
   });
+  it("uses GraphQL viewer identity for installation tokens", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(response({ message: "Resource not accessible by integration" }, false, 403))
+      .mockResolvedValueOnce(response({ data: { viewer: { login: "review-app[bot]", id: "42", __typename: "Bot" } } }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(new GitHubClient("token").getUser()).resolves.toMatchObject({ login: "review-app[bot]", type: "Bot" });
+    expect(fetchMock).toHaveBeenLastCalledWith("https://api.github.com/graphql", expect.objectContaining({ headers: expect.objectContaining({ authorization: "Bearer token" }), body: JSON.stringify({ query: "query { viewer { login id __typename } }", variables: {} }) }));
+  });
   it("creates a thumbs-up reaction on a pull request", async () => {
     const fetchMock = vi.fn().mockResolvedValue(response({ id: 7, content: "+1" }));
     vi.stubGlobal("fetch", fetchMock);

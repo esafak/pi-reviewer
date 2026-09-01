@@ -17,7 +17,15 @@ export class GitHubClient {
     if (!response.ok) throw new GitHubError(response.status, `GitHub API ${response.status}: ${response.statusText}`, text);
     return (text ? JSON.parse(text) : undefined) as T;
   }
-  getUser() { return this.request<{ login: string; id: number; type?: string }>("/user"); }
+  async getUser() {
+    try {
+      return await this.request<{ login: string; id: number; type?: string }>("/user");
+    } catch (error) {
+      if (!(error instanceof GitHubError) || error.status !== 403 || !error.details.includes("Resource not accessible by integration")) throw error;
+      const data = await this.graphql<{ viewer: { login: string; id: string; __typename?: string } }>("query { viewer { login id __typename } }", {});
+      return { login: data.viewer.login, id: data.viewer.id, type: data.viewer.__typename };
+    }
+  }
   getPullRequest(repo: string, number: number) { return this.request<PullRequest>(`/repos/${repo}/pulls/${number}`); }
   private async list<T>(url: string): Promise<T[]> { const all: T[] = []; for (let page = 1;; page++) { const values = await this.request<T[]>(`${url}?per_page=100&page=${page}`); all.push(...values); if (values.length < 100) return all; } }
   listReviews(repo: string, number: number) { return this.list<Review>(`/repos/${repo}/pulls/${number}/reviews`); }
