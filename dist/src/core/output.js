@@ -18,13 +18,14 @@ async function responseJson(response) {
 export async function reconcileFindingUpdates(options) {
     const client = new GitHubClient(options.token);
     const known = new Map(options.findings.map(f => [f.commentId, f]));
+    const outstanding = new Set(options.findings.map(f => f.commentId));
     const hasMutations = options.updates.some(update => update.status !== "STILL_OPEN");
     const identity = hasMutations ? await client.getUser() : undefined;
     if (identity) {
         const current = await client.getPullRequest(options.repo, options.prNumber);
         if (current.head.sha !== options.targetSha) {
             console.warn("[pi-reviewer] PR head changed before reconciliation; leaving lifecycle state unchanged");
-            return;
+            return outstanding;
         }
     }
     const priorReplies = await client.listComments(options.repo, options.prNumber).catch(() => []);
@@ -74,9 +75,13 @@ export async function reconcileFindingUpdates(options) {
             }
             catch (error) {
                 console.warn(`[pi-reviewer] could not resolve finding ${finding.commentId}; will retry resolution: ${error instanceof Error ? error.message : String(error)}`);
+                continue;
             }
         }
+        if (update.status === "RESOLVED")
+            outstanding.delete(finding.commentId);
     }
+    return outstanding;
 }
 export function extractAssistantText(message) {
     const msg = message;
@@ -392,10 +397,61 @@ export async function sendOutput(options) {
             body: `<!-- pi-reviewer:finding:v1 -->\n${comment.body}`,
         }));
         const body = [options.batchMarker, buildReviewBody(result.summary, moved)].filter(Boolean).join("\n\n");
-        if (options.batchMarker && options.githubToken && options.repo && options.prNumber && options.commitId) {
+        if (options.commitId && (options.batchMarker || (options.reactOnNoFindings && result.comments.length === 0))) {
             const current = await new GitHubClient(options.githubToken).getPullRequest(options.repo, options.prNumber);
             if (current.head.sha !== options.commitId)
                 throw new Error("PR head changed while the review was running; refusing to post a stale batch");
+        }
+        let outstandingFindings = new Set(options.existingFindings?.map(f => f.commentId));
+        let findingUpdatesReconciled = false;
+        if (options.reactOnNoFindings && result.comments.length === 0 && options.existingFindings && options.commitId) {
+            outstandingFindings = await reconcileFindingUpdates({ token: options.githubToken, repo: options.repo, prNumber: options.prNumber, targetSha: options.commitId, updates: result.finding_updates ?? [], findings: options.existingFindings });
+            findingUpdatesReconciled = true;
+        }
+        if (options.reactOnNoFindings && result.comments.length === 0 && outstandingFindings.size === 0) {
+            const client = new GitHubClient(options.githubToken);
+            let reactionSucceeded = false;
+            try {
+                const identity = await client.getUser();
+                const reactions = await client.listReactions(options.repo, options.prNumber);
+                if (!reactions.some(reaction => reaction.content === "+1" && reaction.user?.login === identity.login)) {
+                    await client.createReaction(options.repo, options.prNumber);
+                    console.log("[pi-reviewer] no findings — left a thumbs-up reaction on the PR");
+                }
+                else {
+                    console.log("[pi-reviewer] no findings — thumbs-up reaction already exists on the PR");
+                }
+                reactionSucceeded = true;
+            }
+            catch (error) {
+                console.warn(`[pi-reviewer] could not leave a thumbs-up reaction: ${error instanceof Error ? error.message : String(error)}`);
+            }
+            if (!reactionSucceeded) {
+                console.warn("[pi-reviewer] falling back to the normal no-findings comment");
+            }
+            else {
+                // Keep the authenticated batch marker without adding visible review text.
+                // Reactions have no metadata, so the hidden review marker remains the
+                // durable range state used by the lifecycle reconciler.
+                let markerCreated = true;
+                if (options.batchMarker && options.commitId) {
+                    try {
+                        const markerReview = await client.createReview(options.repo, options.prNumber, options.batchMarker, options.commitId, []);
+                        if (markerReview.id) {
+                            const finalized = options.batchMarker.replace(/("reviewId"\s*:\s*)0/, `$1${markerReview.id}`);
+                            if (finalized !== options.batchMarker)
+                                await client.updateReview(options.repo, options.prNumber, markerReview.id, finalized).catch(error => console.warn(`[pi-reviewer] could not finalize batch marker: ${error instanceof Error ? error.message : String(error)}`));
+                        }
+                    }
+                    catch (error) {
+                        markerCreated = false;
+                        console.warn(`[pi-reviewer] could not create batch marker: ${error instanceof Error ? error.message : String(error)}`);
+                    }
+                }
+                if (markerCreated)
+                    return { commentIds: [], fallback: false };
+                console.warn("[pi-reviewer] falling back to the normal no-findings comment");
+            }
         }
         // Try PR Reviews API first (supports inline comments and a body).
         if (options.commitId) {
@@ -421,7 +477,7 @@ export async function sendOutput(options) {
                             await new GitHubClient(options.githubToken).updateReview(options.repo, options.prNumber, posted.id, [finalized, buildReviewBody(result.summary, moved)].join("\n\n")).catch(error => console.warn(`[pi-reviewer] could not finalize batch marker: ${error instanceof Error ? error.message : String(error)}`));
                     }
                 }
-                if (result.finding_updates?.length && options.existingFindings && options.githubToken && options.repo && options.prNumber && options.commitId) {
+                if (!findingUpdatesReconciled && result.finding_updates?.length && options.existingFindings && options.githubToken && options.repo && options.prNumber && options.commitId) {
                     await reconcileFindingUpdates({ token: options.githubToken, repo: options.repo, prNumber: options.prNumber, targetSha: options.commitId, updates: result.finding_updates, findings: options.existingFindings });
                 }
                 const posted = await responseJson(reviewResponse);
@@ -454,7 +510,7 @@ export async function sendOutput(options) {
                                 await new GitHubClient(options.githubToken).updateReview(options.repo, options.prNumber, posted.id, [finalized, allMovedBody].join("\n\n")).catch(error => console.warn(`[pi-reviewer] could not finalize batch marker: ${error instanceof Error ? error.message : String(error)}`));
                         }
                     }
-                    if (result.finding_updates?.length && options.existingFindings && options.githubToken && options.repo && options.prNumber && options.commitId)
+                    if (!findingUpdatesReconciled && result.finding_updates?.length && options.existingFindings && options.githubToken && options.repo && options.prNumber && options.commitId)
                         await reconcileFindingUpdates({ token: options.githubToken, repo: options.repo, prNumber: options.prNumber, targetSha: options.commitId, updates: result.finding_updates, findings: options.existingFindings });
                     const posted = await responseJson(reviewResponse);
                     return { reviewId: posted?.id, commentIds: posted?.comments?.flatMap(c => c.id ? [c.id] : []) ?? [], fallback: true };

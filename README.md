@@ -84,6 +84,11 @@ Then inside the pi TUI:
 | `--verbose` | Print full agent output to the console | |
 | `--dry-run` | Print the diff and prompt without calling the agent | |
 
+For CI, the optional `react-on-no-findings` action input leaves a thumbs-up
+reaction on the pull request instead of posting a comment when the review has
+no new findings and all existing findings have been resolved. It defaults to
+`true`.
+
 `--model` and `--thinking` apply to the current run only. To change the permanent default, use the settings panel in `--ui` or edit `~/.pi/pi-reviewer/config.json` directly.
 
 ### Configuration

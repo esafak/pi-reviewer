@@ -28,6 +28,15 @@ describe("GitHubClient", () => {
     await expect(new GitHubClient("token").getUser()).resolves.toMatchObject({ login: "review-app[bot]", type: "Bot" });
     expect(fetchMock).toHaveBeenCalledWith("https://api.github.com/user", expect.objectContaining({ headers: expect.objectContaining({ authorization: "Bearer token" }) }));
   });
+  it("creates a thumbs-up reaction on a pull request", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(response({ id: 7, content: "+1" }));
+    vi.stubGlobal("fetch", fetchMock);
+    await new GitHubClient("token").createReaction("owner/repo", 42);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.github.com/repos/owner/repo/issues/42/reactions",
+      expect.objectContaining({ method: "POST", body: JSON.stringify({ content: "+1" }) }),
+    );
+  });
   it("follows GraphQL thread cursors", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(response({ data: { repository: { pullRequest: { reviewThreads: { nodes: [{ id: "t1", isResolved: false, comments: { nodes: [], pageInfo: { hasNextPage: false } } }], pageInfo: { hasNextPage: true, endCursor: "cursor-1" } } } } } }))

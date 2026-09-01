@@ -31,6 +31,7 @@ export interface ReviewOptions {
   activeFindings?: ActiveFindingContext[];
   allowEmptyDiff?: boolean;
   priorSummary?: string;
+  reactOnNoFindings?: boolean;
 }
 
 const THINKING_LEVELS: readonly ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh"];
@@ -230,6 +231,7 @@ export async function review(options: ReviewOptions): Promise<void> {
       existingFindings: options.activeFindings?.map(f => ({ commentId: f.commentId, threadId: f.threadId })),
       existingFindingKeys: new Set(options.activeFindings?.filter(f => f.file && f.line && f.side).map(f => normalizeFinding({ file: f.file!, line: f.line!, side: f.side as "LEFT" | "RIGHT", body: f.body }))),
       allowedFindingIds: new Set(options.activeFindings?.map(f => f.commentId)),
+      reactOnNoFindings: options.reactOnNoFindings,
     });
   } finally {
     unsubscribe?.();

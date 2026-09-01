@@ -35,6 +35,11 @@ inputs:
     required: false
     default: "false"
 
+  react-on-no-findings:
+    description: "Leave a thumbs-up reaction on the pull request instead of posting a comment when no new findings remain and all existing findings are resolved (default: true)."
+    required: false
+    default: "true"
+
   setup-node:
     description: "Set up Node via actions/setup-node when a compatible Node is not already on PATH. Set to false to require the runner to provide Node 24 or newer."
     required: false
@@ -182,6 +187,7 @@ runs:
         PI_REVIEWER_MODEL: ${{ inputs.model }}
         PI_REVIEWER_THINKING: ${{ inputs.thinking }}
         MIN_SEVERITY: ${{ inputs.min-severity }}
+        REACT_ON_NO_FINDINGS: ${{ inputs.react-on-no-findings }}
         PI_REVIEWER_DOC_DIRS: ${{ inputs.doc-dirs }}
       run: node ${{ github.action_path }}/dist/src/ci/action-entry.js
 
