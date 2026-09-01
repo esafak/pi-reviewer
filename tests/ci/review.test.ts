@@ -47,7 +47,7 @@ import { resolveDiff } from "../../src/core/diff-resolver.js";
 import { loadDocContext } from "../../src/core/doc-context.js";
 import { sendOutput } from "../../src/core/output.js";
 import { createReviewTool } from "../../src/core/review-tool.js";
-import { ALLOWED_REACTIONS, buildReplyPrompt, defuseReplyMetadata, generateReplyResponse, parseReplyAction, review, parseDocDirs, parseThinkingLevel, REPLY_INPUT_LIMITS, truncateReplyInput } from "../../src/ci/review.js";
+import { ALLOWED_REACTIONS, buildReplyPrompt, defuseReplyMetadata, generateReplyResponse, parseReplyAction, resolveProviderApiKey, review, parseDocDirs, parseThinkingLevel, REPLY_INPUT_LIMITS, truncateReplyInput } from "../../src/ci/review.js";
 
 describe("reply prompt limits", () => {
   it("truncates untrusted reply inputs with an explicit marker", () => {
@@ -132,6 +132,9 @@ describe("review", () => {
     delete process.env.GITHUB_TOKEN;
     delete process.env.GITHUB_REPOSITORY;
     delete process.env.PI_API_KEY;
+    delete process.env.OPENAI_API_KEY;
+    delete process.env.ANTHROPIC_API_KEY;
+    delete process.env.ZAI_API_KEY;
     delete process.env.PI_REVIEWER_DOC_DIRS;
     // model is mandatory — provide a default for tests that don't exercise it
     process.env.PI_REVIEWER_MODEL = "anthropic/claude-opus-4-6";
@@ -291,6 +294,36 @@ describe("review", () => {
         }),
       }),
     );
+  });
+
+  it.each([
+    ["openai", "OPENAI_API_KEY"],
+    ["anthropic", "ANTHROPIC_API_KEY"],
+    ["zai", "ZAI_API_KEY"],
+  ] as const)("reads the provider-specific API key for %s", (provider, envName) => {
+    process.env[envName] = "provider-key";
+    expect(resolveProviderApiKey(provider)).toBe("provider-key");
+  });
+
+  it("prefers the explicit action key over provider-specific keys", () => {
+    process.env.OPENAI_API_KEY = "openai-key";
+    expect(resolveProviderApiKey("openai", "explicit-key")).toBe("explicit-key");
+  });
+
+  it("prefers the provider-specific key over PI_API_KEY", () => {
+    process.env.PI_API_KEY = "shared-key";
+    process.env.OPENAI_API_KEY = "openai-key";
+    expect(resolveProviderApiKey("openai")).toBe("openai-key");
+  });
+
+  it("falls back to PI_API_KEY for an unmapped provider", () => {
+    process.env.PI_API_KEY = "shared-key";
+    expect(resolveProviderApiKey("openrouter")).toBe("shared-key");
+  });
+
+  it("ignores an empty explicit key", () => {
+    process.env.OPENAI_API_KEY = "openai-key";
+    expect(resolveProviderApiKey("openai", "")).toBe("openai-key");
   });
 
   it("throws on an invalid model format", async () => {

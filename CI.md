@@ -71,8 +71,7 @@ jobs:
           # doc-dirs: '.pi/notes,docs/review'
 ```
 
-Commit it to your default branch, then add your API key to your repo secrets:
-- `PI_API_KEY` — the API key **for the provider in `model`**. The action forwards this key to that model's endpoint, so it must match the provider. For `openrouter/...` use an OpenRouter key (`sk-or-...`); for `anthropic/...` an Anthropic key; etc.
+Commit it to your default branch, then provide the API key for your selected provider in the action environment. For `openai/...`, `anthropic/...`, and `zai/...` models, use `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or `ZAI_API_KEY`, respectively. Other providers can use `PI_API_KEY` (or the explicit `pi-api-key` input). When more than one is available, the explicit `pi-api-key` input takes precedence, followed by the selected provider's variable, then `PI_API_KEY`.
 
 ## Usage
 
@@ -91,7 +90,7 @@ Draft pull requests are skipped by default, including manual dispatch and `/pi-r
 | Input | Required | Description |
 |---|---|---|
 | `github-token` | yes | GitHub token to post PR comments |
-| `pi-api-key` | yes | API key for the model's provider (forwarded to the model endpoint; e.g. an OpenRouter `sk-or-...` key for `openrouter/...` models) |
+| `pi-api-key` | no | Optional explicit API key for the model's provider. When omitted, the action uses the provider-specific environment variable (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or `ZAI_API_KEY`). |
 | `model` | yes | Model to use in `provider/modelId` format (e.g. `openrouter/openai/gpt-5.4-mini`) |
 | `thinking` | no | Thinking budget: `off`, `minimal`, `low`, `medium`, `high`, or `xhigh` (default: `off`) |
 | `min-severity` | no | Minimum severity: `info`, `warn`, or `critical` (default: `info`) |
