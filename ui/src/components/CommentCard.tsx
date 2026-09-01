@@ -11,6 +11,8 @@ interface Props {
   snapped?: boolean;
 }
 
+const AI_FIX_FOOTER = "For each issue above, determine whether it is valid. If so, fix it iteratively with one reviewer agent until convergence.";
+
 export function CommentCard({ comment, idx, decision, discussText = "", onDecide, snapped }: Props) {
   const sev = (comment.severity || "info").toLowerCase();
   const [pending, setPending] = useState(false);
@@ -59,7 +61,13 @@ export function CommentCard({ comment, idx, decision, discussText = "", onDecide
           }
         </button>
       </div>
-      <div className="cc-body" dangerouslySetInnerHTML={{ __html: renderMarkdown(comment.body) }} />
+      <details className="cc-response">
+        <summary>
+          <span className="cc-response-label">Prompt to fix with AI</span>
+        </summary>
+        <div className="cc-body" dangerouslySetInnerHTML={{ __html: renderMarkdown(comment.body) }} />
+        <div className="cc-response-footer">{AI_FIX_FOOTER}</div>
+      </details>
       <div className="cc-actions">
         <button
           className={`dbtn dbtn-accept${decision === "accept" ? " active" : ""}`}

@@ -781,6 +781,42 @@ td.sign-ctx { background: var(--ctx-bg); color: var(--text-muted); }
   flex-shrink: 0;
 }
 
+.cc-response { border-top: 1px solid var(--card-border); }
+.cc-response summary {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  padding: 7px 14px;
+  color: var(--text);
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+.cc-response summary::-webkit-details-marker { display: none; }
+.cc-response summary::before {
+  content: "▶";
+  flex: 0 0 auto;
+  color: var(--text-muted);
+  font-size: 10px;
+  transition: transform 0.15s ease;
+}
+.cc-response[open] summary::before { transform: rotate(90deg); }
+.cc-response summary:hover { background: var(--bg-inset); }
+.cc-response summary:focus-visible {
+  outline: 2px solid var(--link);
+  outline-offset: -2px;
+}
+.cc-response-label { font-size: 11px; font-weight: 600; }
+.cc-response-footer {
+  margin: 0 14px 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
 .cc-copy {
   margin-left: auto;
   display: inline-flex;
