@@ -1,0 +1,20 @@
+tests/ci/review.test.ts
+  h_ea91e2db23540f 50,135-137,299-328
+action.yml
+  h_ea91e2db23540f 11-12
+src/ci/review.ts
+  h_ea91e2db23540f 61-70,181-182,298-299
+CI.md
+  h_ea91e2db23540f 74,78,93
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "1a8372a35c69b46f0571b027c4229bb89d9bb2d8",
+  "prompts": {},
+  "humans": {
+    "h_ea91e2db23540f": {
+      "author": "Emre Şafak <3928300+esafak@users.noreply.github.com>"
+    }
+  }
+}
