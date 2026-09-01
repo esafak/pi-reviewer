@@ -65,12 +65,11 @@ flowchart TD
 
 ## Generated artifacts
 
-`dist/` and `dist-ui/index.html` are checked-in build outputs consumed by the
-GitHub Action and the local UI server. Run `mise exec -- pnpm build` after
-source changes; the build regenerates both outputs. The apparently unrelated
-changes in the generated UI file are intentional dependency-bundle output
-(the tracked artifact is reproducibly produced by the UI build), not a manual
-discard of a worktree change.
+The GitHub Action and CLI run the TypeScript sources directly through `tsx`;
+there is no checked-in TypeScript build output. The browser UI remains a
+single-file build at `dist-ui/index.html`, which is consumed by the local UI
+server. Run `mise exec -- pnpm build` after source changes; this type-checks the
+sources and regenerates the UI artifact.
 
 ### Local mode (`/review`)
 

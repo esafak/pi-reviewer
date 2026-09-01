@@ -3,11 +3,11 @@
   "version": "0.5.4",
   "private": true,
   "bin": {
-    "pi-reviewer": "./dist/src/ci/bin.js"
+    "pi-reviewer": "./src/ci/bin.ts"
   },
   "type": "module",
   "scripts": {
-    "build": "vp run build:ui && tsc -p tsconfig.json",
+    "build": "vp run build:ui && tsc --noEmit -p tsconfig.json",
     "build:ui": "vp build --config ui/vite.config.ts",
     "dev:ui": "vp dev --config ui/vite.config.ts",
     "lint": "vp lint && tsx scripts/lint-graphql.ts",
@@ -19,7 +19,8 @@
     "@earendil-works/pi-coding-agent": "^0.84.0",
     "@earendil-works/pi-tui": "^0.84.0",
     "dompurify": "^3.4.2",
-    "highlight.js": "^11.11.1"
+    "highlight.js": "^11.11.1",
+    "tsx": "^4.20.5"
   },
   "devDependencies": {
     "@octokit/graphql-schema": "15.26.1",
@@ -30,7 +31,6 @@
     "marked": "^18.0.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
-    "tsx": "^4.20.5",
     "typescript": "^7.0.0",
     "vite": "catalog:",
     "vite-plugin-singlefile": "^2.3.0",

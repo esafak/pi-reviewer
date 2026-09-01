@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env tsx
 import { init } from "./init.js";
 
 const command = process.argv[2];
