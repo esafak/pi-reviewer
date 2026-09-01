@@ -131,14 +131,39 @@ runs:
       with:
         node-version: "24"
 
+    - name: Prepare executable temporary directory
+      id: executable-temp
+      if: ${{ steps.toolchain.outputs.vite_plus_ready != 'true' }}
+      shell: bash
+      run: |
+        base="$HOME/.local/share"
+        if ! mkdir -p "$base"; then
+          echo "::error::Could not create executable Vite+ temporary directory parent: $base"
+          exit 1
+        fi
+        if ! tmpdir=$(mktemp -d "$base/pi-reviewer-XXXXXX"); then
+          echo "::error::Could not create executable Vite+ temporary directory under: $base"
+          exit 1
+        fi
+        chmod 700 "$tmpdir"
+        probe="$tmpdir/probe"
+        printf '#!/bin/sh\nexit 0\n' > "$probe"
+        chmod 700 "$probe"
+        if "$probe"; then
+          rm -f "$probe"
+          printf 'path=%s\n' "$tmpdir" >> "$GITHUB_OUTPUT"
+        else
+          status=$?
+          rm -rf "$tmpdir"
+          echo "::error::Vite+ temporary directory is not executable: $tmpdir (exit $status)"
+          exit 1
+        fi
+
     - name: Setup Vite+
       if: ${{ steps.toolchain.outputs.vite_plus_ready != 'true' }}
       uses: voidzero-dev/setup-vp@1b32467adbe183473499fd9d5d372c3ed9641754 # v1.18.0
       env:
-        # Some ARC runner images mount /tmp with noexec. setup-vp extracts
-        # the Vite+ binary there before launching it, so use the runner's
-        # executable temporary directory instead.
-        TMPDIR: ${{ runner.temp }}
+        TMPDIR: ${{ steps.executable-temp.outputs.path }}
       with:
         working-directory: ${{ github.action_path }}
         cache: false

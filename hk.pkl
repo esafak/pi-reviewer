@@ -8,8 +8,17 @@ local linters = new Mapping<String, Step> {
   }
 }
 
+local tests = new Mapping<String, Step> {
+  ["test-suite"] {
+    check = "mise run test"
+  }
+}
+
 hooks {
   ["pre-commit"] {
     steps = linters
+  }
+  ["pre-push"] {
+    steps = tests
   }
 }
