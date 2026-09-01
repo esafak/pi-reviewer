@@ -49,6 +49,17 @@ jobs:
         shell: bash
         run: git fetch origin '+refs/pull/*/head:refs/remotes/origin/pr/*' --no-tags
 
+      # Cache Vite+ against the repository checkout. The composite action keeps
+      # its own pnpm-store cache because setup-vp cannot reliably hash files
+      # from the action checkout.
+      - name: Setup Vite+ with cache
+        uses: voidzero-dev/setup-vp@1b32467adbe183473499fd9d5d372c3ed9641754 # v1.18.0
+        continue-on-error: true
+        with:
+          cache: true
+          run-install: false
+          node-manager: false
+
       - name: Select provider API key
         shell: bash
         env:
@@ -84,3 +95,4 @@ jobs:
           review-drafts: false
           react-on-no-findings: true
           min-severity: ${{ inputs.min-severity || 'warn' }}
+          cache: true
