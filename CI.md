@@ -89,10 +89,10 @@ Draft pull requests are skipped by default, including manual dispatch and `/pi-r
 | `min-severity` | no | Minimum severity: `info`, `warn`, or `critical` (default: `info`) |
 | `doc-dirs` | no | Comma-separated dirs to scan for docs to inject into the review (default: empty — inject nothing) |
 | `review-drafts` | no | Review draft PRs (default: `false`) |
-| `setup-node` | no | Set up Node 24 via `actions/setup-node` (default: `true`). Disable if the runner image already provides Node. |
+| `setup-node` | no | Set up Node 24 via `actions/setup-node` when a compatible Node is not already on `PATH` (default: `true`). Set to `false` to require the runner image to provide Node 24 or newer. |
 | `cache` | no | Cache the pnpm store across runs (default: `true`). Disable on runners where the cache service is unavailable or unwanted. |
 
-The action runs on Node 24 (LTS). The `vp` CLI is installed by the pinned `voidzero-dev/setup-vp` action, and dependencies are installed with pnpm delegated through `vp install`. The pnpm store is cached by a standalone `actions/cache` step keyed on a hash of `pnpm-lock.yaml`, so warm runs skip the download. The cache step uses `continue-on-error`, so a cache failure degrades to an uncached install rather than aborting the review. Consumer runners need network access to `viteplus.dev` for the Vite+ CLI installer in addition to the package registry.
+The action runs on Node 24 or newer (LTS when installed by the action). Before setup, it independently reuses compatible `node`, `pnpm`, and `vp` executables already on `PATH`; any subset can be preinstalled, and only missing or incompatible tools are installed. Node must be >=24, pnpm must match `package.json`, and Vite+ may match or be newer than the stable minimum version in `pnpm-workspace.yaml` (a prerelease of that minimum does not qualify). When Vite+ must be installed, its temporary executable files are placed under the runner's temporary directory to support ARC runners where `/tmp` is mounted `noexec`. Dependencies are installed with pnpm delegated through `vp install`. The pnpm store is cached by a standalone `actions/cache` step keyed on a hash of `pnpm-lock.yaml`, so warm runs skip the download. The cache step uses `continue-on-error`, so a cache failure degrades to an uncached install rather than aborting the review. Runners without a compatible preinstalled toolchain need network access to `viteplus.dev` for the Vite+ CLI installer in addition to the package registry.
 
 ## Doc context
 

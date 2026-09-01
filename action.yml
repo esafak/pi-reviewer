@@ -36,7 +36,7 @@ inputs:
     default: "false"
 
   setup-node:
-    description: "Set up Node via actions/setup-node. Set to false only if the runner already provides Node 24 or newer."
+    description: "Set up Node via actions/setup-node when a compatible Node is not already on PATH. Set to false to require the runner to provide Node 24 or newer."
     required: false
     default: "true"
 
@@ -48,20 +48,92 @@ inputs:
 runs:
   using: "composite"
   steps:
+    - name: Detect preinstalled toolchain
+      id: toolchain
+      shell: bash
+      working-directory: ${{ github.action_path }}
+      run: |
+        node_ready=false
+        if command -v node >/dev/null 2>&1; then
+          major=$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || true)
+          case "$major" in
+            ''|*[!0-9]*) ;;
+            *) [ "$major" -ge 24 ] && node_ready=true ;;
+          esac
+        fi
+
+        expected_pnpm=$(awk -F'"' '/"packageManager"/ { split($4, parts, "@"); print parts[2]; exit }' package.json)
+        pnpm_ready=false
+        if command -v pnpm >/dev/null 2>&1; then
+          actual_pnpm=$(pnpm --version 2>/dev/null || true)
+          [ "$actual_pnpm" = "$expected_pnpm" ] && pnpm_ready=true
+        fi
+
+        expected_vite_plus=$(awk '$1 == "vite-plus:" { print $2; exit }' pnpm-workspace.yaml)
+        vite_plus_ready=false
+        if command -v vp >/dev/null 2>&1; then
+          # vp currently reports `vp v<version>` on its first output line.
+          actual_vite_plus=$(vp --version 2>/dev/null | awk 'NR == 1 { sub(/^v/, "", $2); print $2; exit }' || true)
+          is_version_at_least() {
+            local actual="$1" minimum="$2"
+            local actual_core="${actual%%-*}" minimum_core="${minimum%%-*}"
+            local actual_major actual_minor actual_patch minimum_major minimum_minor minimum_patch
+            IFS=. read -r actual_major actual_minor actual_patch <<< "$actual_core"
+            IFS=. read -r minimum_major minimum_minor minimum_patch <<< "$minimum_core"
+            actual_major=${actual_major:-0}; actual_minor=${actual_minor:-0}; actual_patch=${actual_patch:-0}
+            minimum_major=${minimum_major:-0}; minimum_minor=${minimum_minor:-0}; minimum_patch=${minimum_patch:-0}
+            case "$actual_major.$actual_minor.$actual_patch.$minimum_major.$minimum_minor.$minimum_patch" in
+              *[!0-9.]*) return 1 ;;
+            esac
+            if [ "$actual_major" -gt "$minimum_major" ] || \
+              { [ "$actual_major" -eq "$minimum_major" ] && [ "$actual_minor" -gt "$minimum_minor" ]; } || \
+              { [ "$actual_major" -eq "$minimum_major" ] && [ "$actual_minor" -eq "$minimum_minor" ] && [ "$actual_patch" -gt "$minimum_patch" ]; }; then
+              return 0
+            fi
+            if [ "$actual_major" -ne "$minimum_major" ] || [ "$actual_minor" -ne "$minimum_minor" ] || [ "$actual_patch" -ne "$minimum_patch" ]; then
+              return 1
+            fi
+            # A prerelease has lower precedence than the corresponding stable
+            # release, so 0.3.0-beta must not satisfy a 0.3.0 minimum.
+            case "$actual" in
+              *-*) case "$minimum" in *-*) return 0 ;; *) return 1 ;; esac ;;
+              *) return 0 ;;
+            esac
+          }
+          if [ -n "$actual_vite_plus" ] && [ -n "$expected_vite_plus" ] && is_version_at_least "$actual_vite_plus" "$expected_vite_plus"; then
+            vite_plus_ready=true
+          fi
+        fi
+
+        printf 'Toolchain availability: node=%s pnpm=%s vite-plus=%s\n' \
+          "$node_ready" "$pnpm_ready" "$vite_plus_ready"
+        {
+          printf 'node_ready=%s\n' "$node_ready"
+          printf 'pnpm_ready=%s\n' "$pnpm_ready"
+          printf 'vite_plus_ready=%s\n' "$vite_plus_ready"
+        } >> "$GITHUB_OUTPUT"
+
     - name: Setup pnpm
+      if: ${{ steps.toolchain.outputs.pnpm_ready != 'true' }}
       uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
       with:
         version: 11.24.0
         run_install: false
 
     - name: Setup Node
-      if: ${{ inputs.setup-node == 'true' }}
+      if: ${{ inputs.setup-node == 'true' && steps.toolchain.outputs.node_ready != 'true' }}
       uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
       with:
         node-version: "24"
 
     - name: Setup Vite+
+      if: ${{ steps.toolchain.outputs.vite_plus_ready != 'true' }}
       uses: voidzero-dev/setup-vp@1b32467adbe183473499fd9d5d372c3ed9641754 # v1.18.0
+      env:
+        # Some ARC runner images mount /tmp with noexec. setup-vp extracts
+        # the Vite+ binary there before launching it, so use the runner's
+        # executable temporary directory instead.
+        TMPDIR: ${{ runner.temp }}
       with:
         working-directory: ${{ github.action_path }}
         cache: false
