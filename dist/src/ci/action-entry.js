@@ -23,6 +23,28 @@ function ancestor(from, to, cwd = process.cwd()) { try {
 catch {
     return false;
 } }
+function hasCommit(sha, cwd = process.cwd()) { try {
+    execFileSync("git", ["cat-file", "-e", `${sha}^{commit}`], { cwd, stdio: "ignore" });
+    return true;
+}
+catch {
+    return false;
+} }
+function ensureCommit(sha, ref, cwd = process.cwd()) {
+    if (hasCommit(sha, cwd))
+        return;
+    if (ref) {
+        try {
+            execFileSync("git", ["fetch", "--no-tags", "origin", ref], { cwd });
+        }
+        catch { /* try the authenticated SHA below */ }
+    }
+    if (!hasCommit(sha, cwd)) {
+        execFileSync("git", ["fetch", "--no-tags", "origin", `+${sha}`], { cwd });
+    }
+    if (!hasCommit(sha, cwd))
+        throw new Error(`Git commit ${sha} is unavailable after fetching`);
+}
 const payload = await readEvent();
 const event = normalizeEvent(payload);
 const repo = process.env.GITHUB_REPOSITORY;
@@ -79,6 +101,11 @@ if (pr.head.repo?.full_name !== repo) {
     console.log("[pi-reviewer] fork or deleted-head PRs are not reviewed");
     process.exit(0);
 }
+// The default-branch checkout used by issue-comment and dispatch events may
+// not have the PR ref in its fetch refspec. Fetch the authenticated head
+// explicitly before any merge-base, ancestry, or worktree operation.
+ensureCommit(head, `refs/pull/${event.pr}/head`);
+ensureCommit(pr.base.sha, undefined);
 if (event.targetHead && !ancestor(head, pr.head.sha)) {
     throw new Error("workflow target-head must be an ancestor of the current PR head");
 }
@@ -102,7 +129,7 @@ const marker = encodeBatchMarker({ fromSha: range.fromSha, toSha: range.toSha, k
 console.log(`[pi-reviewer] reviewing PR #${event.pr}: ${range.fromSha}..${range.toSha}`);
 const worktree = await mkdtemp(path.join(tmpdir(), "pi-reviewer-"));
 try {
-    execFileSync("git", ["worktree", "add", "--detach", worktree, head], { cwd: process.cwd(), stdio: "ignore" });
+    execFileSync("git", ["worktree", "add", "--detach", worktree, head], { cwd: process.cwd() });
     await review({ cwd: worktree, pr: event.pr, commitId: head, fromSha: range.fresh ? range.fromSha : head, allowEmptyDiff: !range.fresh, batchMarker: range.fresh ? marker : undefined, activeFindings, priorSummary, output: "comment", minSeverity, thinking: parseThinkingLevel(process.env.PI_REVIEWER_THINKING), githubToken: token, repo, reactOnNoFindings: process.env.REACT_ON_NO_FINDINGS === "true" });
 }
 finally {

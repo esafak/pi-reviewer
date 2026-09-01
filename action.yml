@@ -203,6 +203,15 @@ runs:
       run: vp install --frozen-lockfile
       working-directory: ${{ github.action_path }}
 
+    - name: Ensure review history
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      run: |
+        if [ -f .git/shallow ]; then
+          echo "[pi-reviewer] shallow checkout detected; fetching full history"
+          git fetch --unshallow --no-tags origin
+        fi
+
     - name: Run review
       shell: bash
       working-directory: ${{ github.workspace }}
