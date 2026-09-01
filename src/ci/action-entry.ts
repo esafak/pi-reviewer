@@ -62,7 +62,7 @@ const marker = encodeBatchMarker({ fromSha: range.fromSha, toSha: range.toSha, k
 console.log(`[pi-reviewer] reviewing PR #${event.pr}: ${range.fromSha}..${range.toSha}`);
 const worktree = await mkdtemp(path.join(tmpdir(), "pi-reviewer-") );
 try {
-  execFileSync("git", ["worktree", "add", "--detach", worktree, head], { cwd: process.cwd(), stdio: "ignore" });
+  execFileSync("git", ["worktree", "add", "--detach", worktree, head], { cwd: process.cwd() });
   await review({ cwd: worktree, pr: event.pr, commitId: head, fromSha: range.fresh ? range.fromSha : head, allowEmptyDiff: !range.fresh, batchMarker: range.fresh ? marker : undefined, activeFindings, priorSummary, output: "comment", minSeverity, thinking: parseThinkingLevel(process.env.PI_REVIEWER_THINKING), githubToken: token, repo, reactOnNoFindings: process.env.REACT_ON_NO_FINDINGS === "true" });
 } finally {
   try { execFileSync("git", ["worktree", "remove", "--force", worktree], { cwd: process.cwd(), stdio: "ignore" }); } catch { await rm(worktree, { recursive: true, force: true }); }
