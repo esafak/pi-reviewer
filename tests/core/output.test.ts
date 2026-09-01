@@ -1267,6 +1267,20 @@ describe("reconcileFindingUpdates", () => {
      await expect(reconcileFindingUpdates({ token: "t", repo: "o/r", prNumber: 1, targetSha: "head", updates: [{ comment_id: 3, status: "PARTIALLY_RESOLVED", explanation: "still needs work" }], findings: [{ commentId: 3, threadId: "thread" }] })).resolves.toEqual(new Set([3]));
     const body = JSON.parse((fetchMock.mock.calls[4][1] as { body: string }).body).body as string;
     expect(body).toContain('"status":"PARTIALLY_RESOLVED"');
+    expect(body).toContain("Partially addressed by head: still needs work");
+  });
+  it("uses exactly the first seven SHA characters in lifecycle wording", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, status: 200, text: vi.fn().mockResolvedValue(JSON.stringify({ login: "bot" })) })
+      .mockResolvedValueOnce({ ok: true, status: 200, text: vi.fn().mockResolvedValue(JSON.stringify({ head: { sha: "345879342abcdef" } })) })
+      .mockResolvedValueOnce({ ok: true, status: 200, text: vi.fn().mockResolvedValue(JSON.stringify([])) })
+      .mockResolvedValueOnce({ ok: true, status: 200, text: vi.fn().mockResolvedValue(JSON.stringify({ head: { sha: "345879342abcdef" } })) })
+      .mockResolvedValueOnce({ ok: true, status: 200, text: vi.fn().mockResolvedValue(JSON.stringify({ id: 10 })) })
+      .mockResolvedValueOnce({ ok: true, status: 200, text: vi.fn().mockResolvedValue(JSON.stringify({ head: { sha: "345879342abcdef" } })) })
+      .mockResolvedValueOnce({ ok: true, status: 200, text: vi.fn().mockResolvedValue(JSON.stringify({ data: { resolveReviewThread: { thread: { id: "thread", isResolved: true } } } })) });
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(reconcileFindingUpdates({ token: "t", repo: "o/r", prNumber: 1, targetSha: "345879342abcdef", updates: [{ comment_id: 3, status: "RESOLVED", explanation: "fixed" }], findings: [{ commentId: 3, threadId: "thread" }] })).resolves.toEqual(new Set());
+    expect(JSON.parse((fetchMock.mock.calls[4][1] as { body: string }).body).body).toContain("Resolved by 3458793: fixed");
   });
   it("leaves partial findings open and skips an already-posted reply", async () => {
     const fetchMock = vi.fn()

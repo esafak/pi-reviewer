@@ -36,6 +36,9 @@ describe("init", () => {
     const content = await readFile(workflowPath, "utf-8");
 
     expect(content).toContain("types: [opened, synchronize, reopened, ready_for_review]");
+    expect(content).toContain("pull_request_review_comment:\n    types: [created]");
+    expect(content).toContain("if: ${{ github.event_name != 'pull_request_review_comment' || github.event.comment.user.type != 'Bot' }}");
+    expect(content.match(/^\s*if:/gm)).toHaveLength(1);
     expect(content).toContain("issue_comment:");
     expect(content).toContain("fetch-depth: 0");
     expect(content).toContain("cancel-in-progress: false");

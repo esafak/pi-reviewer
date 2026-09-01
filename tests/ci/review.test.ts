@@ -47,7 +47,20 @@ import { resolveDiff } from "../../src/core/diff-resolver.js";
 import { loadDocContext } from "../../src/core/doc-context.js";
 import { sendOutput } from "../../src/core/output.js";
 import { createReviewTool } from "../../src/core/review-tool.js";
-import { review, parseDocDirs, parseThinkingLevel } from "../../src/ci/review.js";
+import { buildReplyPrompt, review, parseDocDirs, parseThinkingLevel, REPLY_INPUT_LIMITS, truncateReplyInput } from "../../src/ci/review.js";
+
+describe("reply prompt limits", () => {
+  it("truncates untrusted reply inputs with an explicit marker", () => {
+    expect(truncateReplyInput("12345", 4)).toBe("1234\n[truncated]");
+    expect(truncateReplyInput("1234", 4)).toBe("1234");
+  });
+  it("caps each separately delimited prompt input", () => {
+    const prompt = buildReplyPrompt({ parent: "p".repeat(5_000), userReply: "u".repeat(5_000), thread: "t".repeat(9_000) });
+    expect(prompt).toContain(`${"p".repeat(REPLY_INPUT_LIMITS.parent)}\n[truncated]\n</parent-finding>`);
+    expect(prompt).toContain(`${"u".repeat(REPLY_INPUT_LIMITS.userReply)}\n[truncated]\n</user-reply>`);
+    expect(prompt).toContain(`${"t".repeat(REPLY_INPUT_LIMITS.thread)}\n[truncated]\n</nearby-thread>`);
+  });
+});
 
 const resolveDiffMock = vi.mocked(resolveDiff);
 const loadContextMock = vi.mocked(loadContext);

@@ -1,4 +1,5 @@
 export type BatchKind = "opened" | "synchronize" | "manual";
+export type EventKind = BatchKind | "reply";
 export interface BatchMarker { version: 1; fromSha: string; toSha: string; kind: BatchKind; actor: string; reviewId: number }
 export interface FindingUpdate { comment_id: number; status: "RESOLVED" | "PARTIALLY_RESOLVED" | "STILL_OPEN"; explanation: string }
 export type BodyFindingStatus = "ACTIVE" | "PARTIALLY_RESOLVED" | "RESOLVED";
@@ -57,8 +58,27 @@ export function reconstructBodyFindings(reviews: Array<{ id: number; body?: stri
 }
 export function selectAuthenticatedBatchMarkers(reviews: Array<{ id: number; body?: string | null; user?: { login?: string } }>, login: string) { return reviews.filter(r => r.user?.login === login).map(r => decodeBatchMarker(r.body)).filter((m): m is BatchMarker => m !== undefined && m.actor === login); }
 export function selectBatchRange(mergeBase: string, head: string, latest?: BatchMarker, isAncestor?: (from: string, to: string) => boolean) { if (!latest || (isAncestor && !isAncestor(latest.toSha, head))) return { fromSha: mergeBase, toSha: head, fresh: true }; return { fromSha: latest.toSha, toSha: head, fresh: latest.toSha !== head }; }
-export interface Event { kind: BatchKind; pr?: number; headSha?: string; beforeSha?: string; afterSha?: string; targetHead?: string; command?: string; draft: boolean; fork: boolean; actor?: { login?: string; association?: string; type?: string } }
-export function normalizeEvent(payload: unknown): Event { const p = (payload ?? {}) as Record<string, any>; const pr = p.pull_request; if (pr) { if (!["opened", "synchronize", "reopened", "ready_for_review"].includes(p.action)) throw new Error(`Unsupported pull_request action: ${String(p.action)}`); return { kind: p.action === "opened" ? "opened" : "synchronize", pr: pr.number, headSha: pr.head?.sha, beforeSha: p.before, afterSha: p.after, draft: Boolean(pr.draft), fork: !pr.head?.repo || !pr.base?.repo || pr.head.repo.full_name !== pr.base.repo.full_name, actor: { login: p.sender?.login, type: p.sender?.type } }; } const issue = p.issue; if (issue?.pull_request) return { kind: "manual", pr: issue.number, command: p.comment?.body?.trim(), draft: Boolean(issue.draft), fork: false, actor: { login: p.comment?.user?.login, association: p.comment?.author_association, type: p.comment?.user?.type } }; const inputs = p.inputs ?? {}; const prNumber = Number(inputs["pr-number"] ?? inputs.pr_number); return { kind: "manual", pr: Number.isInteger(prNumber) && prNumber > 0 ? prNumber : undefined, targetHead: inputs["target-head"], draft: false, fork: false }; }
+export function isSafePullRequestNumber(value: unknown): value is number { return typeof value === "number" && Number.isSafeInteger(value) && value > 0; }
+function safeNumber(value: unknown): number | undefined {
+  try {
+    const number = typeof value === "number" ? value : Number(value);
+    return isSafePullRequestNumber(number) ? number : undefined;
+  } catch {
+    return undefined;
+  }
+}
+export interface Event { kind: EventKind; pr?: number; headSha?: string; beforeSha?: string; afterSha?: string; targetHead?: string; command?: string; draft: boolean; fork: boolean; commentId?: number; parentCommentId?: number; actor?: { login?: string; association?: string; type?: string } }
+export function normalizeEvent(payload: unknown): Event { const p = (payload ?? {}) as Record<string, any>; const pr = p.pull_request; if (p.action === "created" && p.comment && pr) return { kind: "reply", pr: safeNumber(pr.number), headSha: pr.head?.sha, commentId: safeNumber(p.comment.id), parentCommentId: safeNumber(p.comment.in_reply_to_id), draft: Boolean(pr.draft), fork: !pr.head?.repo || !pr.base?.repo || pr.head.repo.full_name !== pr.base.repo.full_name, actor: { login: p.comment.user?.login ?? p.sender?.login, association: p.comment.author_association, type: p.comment.user?.type ?? p.sender?.type } }; if (pr) { if (!["opened", "synchronize", "reopened", "ready_for_review"].includes(p.action)) throw new Error(`Unsupported pull_request action: ${String(p.action)}`); return { kind: p.action === "opened" ? "opened" : "synchronize", pr: safeNumber(pr.number), headSha: pr.head?.sha, beforeSha: p.before, afterSha: p.after, draft: Boolean(pr.draft), fork: !pr.head?.repo || !pr.base?.repo || pr.head.repo.full_name !== pr.base.repo.full_name, actor: { login: p.sender?.login, type: p.sender?.type } }; } const issue = p.issue; if (issue?.pull_request) return { kind: "manual", pr: safeNumber(issue.number), command: p.comment?.body?.trim(), draft: Boolean(issue.draft), fork: false, actor: { login: p.comment?.user?.login, association: p.comment?.author_association, type: p.comment?.user?.type } }; const inputs = p.inputs ?? {}; return { kind: "manual", pr: safeNumber(inputs["pr-number"] ?? inputs.pr_number), targetHead: inputs["target-head"], draft: false, fork: false }; }
 export function isEventHeadConsistent(event: Event, head: string) { return !event.afterSha || event.afterSha === head; }
 export function isEventRangeConsistent(event: Event, fromSha: string, head: string) { return isEventHeadConsistent(event, head) && (!event.beforeSha || event.beforeSha === fromSha); }
 export function isAuthorizedReviewCommand(event: Event) { return event.command === "/pi-review" && event.actor?.type !== "Bot" && ["OWNER", "MEMBER", "COLLABORATOR"].includes(event.actor?.association ?? ""); }
+export function isAuthorizedReply(event: Event) { return event.kind === "reply" && event.actor?.type !== "Bot" && ["OWNER", "MEMBER", "COLLABORATOR"].includes(event.actor?.association ?? ""); }
+
+export const replyMarker = (commentId: number, parentId: number, threadId: string) => `<!-- pi-reviewer:reply:v1 ${JSON.stringify({ version: 1, commentId, parentId, threadId })} -->`;
+export function decodeReplyMarker(body: string | null | undefined): { version: 1; commentId: number; parentId: number; threadId: string } | undefined {
+  const match = body?.match(/<!-- pi-reviewer:reply:v1 (\{[^\n]*\}) -->/); if (!match) return undefined;
+  try { const v = JSON.parse(match[1]); return v.version === 1 && Number.isSafeInteger(v.commentId) && Number.isSafeInteger(v.parentId) && typeof v.threadId === "string" ? v : undefined; } catch { return undefined; }
+}
+export function isPiReviewerRootComment(comment: { body?: string | null; in_reply_to_id?: number }): boolean {
+  return comment.in_reply_to_id == null && comment.body?.includes("<!-- pi-reviewer:finding:v1 -->") === true && !comment.body.includes("pi-reviewer:status:v1");
+}

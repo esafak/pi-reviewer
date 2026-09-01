@@ -50,6 +50,21 @@ export function parseDocDirs(raw: string | undefined): string[] {
   return raw.split(/[,\n]/).map(d => d.trim()).filter(Boolean);
 }
 
+export const REPLY_INPUT_LIMITS = { parent: 4_000, userReply: 4_000, thread: 8_000 } as const;
+export function truncateReplyInput(value: string, limit: number): string {
+  return value.length <= limit ? value : `${value.slice(0, limit)}\n[truncated]`;
+}
+
+export function buildReplyPrompt(options: Pick<ReplyOptions, "parent" | "userReply" | "thread">): string {
+  return `You are replying in a pull request review thread. Answer the human concisely and actionably. Do not emit JSON, review findings, HTML comments, hidden metadata, lifecycle status, or a commit SHA unless the human explicitly asks for it. If no action is requested, acknowledge the message briefly.\n\n<parent-finding>\n${truncateReplyInput(options.parent, REPLY_INPUT_LIMITS.parent)}\n</parent-finding>\n<user-reply>\n${truncateReplyInput(options.userReply, REPLY_INPUT_LIMITS.userReply)}\n</user-reply>\n<nearby-thread>\n${truncateReplyInput(options.thread, REPLY_INPUT_LIMITS.thread)}\n</nearby-thread>`;
+}
+
+interface ReplyOptions {
+  parent: string;
+  userReply: string;
+  thread: string;
+}
+
 export async function review(options: ReviewOptions): Promise<void> {
   const cwd = options.cwd ?? process.cwd();
   const githubToken = options.githubToken ?? process.env.GITHUB_TOKEN;
@@ -238,4 +253,22 @@ export async function review(options: ReviewOptions): Promise<void> {
   } finally {
     unsubscribe?.();
   }
+}
+
+/** Generate only a short conversational answer; deliberately has no review tools or diff. */
+export async function generateReplyResponse(options: ReplyOptions & { model?: string; thinking?: ThinkingLevel; piApiKey?: string }): Promise<string> {
+  const modelStr = options.model ?? process.env.PI_REVIEWER_MODEL;
+  if (!modelStr) throw new Error("No model configured.");
+  const slash = modelStr.indexOf("/");
+  if (slash <= 0 || slash === modelStr.length - 1) throw new Error(`Invalid model format "${modelStr}".`);
+  const resolvedModel = getBuiltinModel(modelStr.slice(0, slash) as never, modelStr.slice(slash + 1) as never) as Model<Api> | undefined;
+  if (!resolvedModel) throw new Error(`Unknown model "${modelStr}".`);
+  const prompt = buildReplyPrompt(options);
+  const models = builtinModels();
+  const agent = new Agent({ initialState: { systemPrompt: "You are Pi Reviewer’s concise thread assistant.", model: resolvedModel, tools: [], thinkingLevel: options.thinking ?? "off" }, streamFn: models.streamSimple.bind(models), getApiKey: async () => { const key = options.piApiKey ?? process.env.PI_API_KEY; if (!key) throw new Error("PI_API_KEY is not set."); return key; } });
+  let answer = "";
+  await new Promise<void>((resolve, reject) => { let unsubscribe: (() => void) | undefined; unsubscribe = agent.subscribe((event: unknown) => { if ((event as { type?: string })?.type !== "agent_end") return; const e = event as { messages?: unknown[]; stopReason?: string; errorMessage?: string }; if (e.stopReason === "error" || e.errorMessage) { reject(new Error(e.errorMessage ?? "Agent failed")); return; } answer = extractLastAssistantText(e.messages); unsubscribe?.(); if (answer) resolve(); else reject(new Error("Agent returned an empty response")); }); agent.prompt(prompt).catch(reject); });
+  const sanitized = answer.replace(/<!--\s*pi-reviewer\s*:/gi, "<!-- pi-reviewer :").trim();
+  if (!sanitized) throw new Error("Agent returned an empty response");
+  return sanitized.slice(0, 4000);
 }
