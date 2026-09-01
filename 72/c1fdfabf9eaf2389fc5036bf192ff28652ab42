@@ -1,0 +1,22 @@
+.github/workflows/pi-review.yml
+  h_ea91e2db23540f 89
+src/ci/reply.ts
+  h_ea91e2db23540f 6-7,57
+src/core/output.ts
+  h_ea91e2db23540f 85-89,194,196,200,221-222
+tests/ci/reply.test.ts
+  h_ea91e2db23540f 36
+tests/core/output.test.ts
+  h_ea91e2db23540f 1282
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "72c1fdfabf9eaf2389fc5036bf192ff28652ab42",
+  "prompts": {},
+  "humans": {
+    "h_ea91e2db23540f": {
+      "author": "Emre Şafak <3928300+esafak@users.noreply.github.com>"
+    }
+  }
+}
