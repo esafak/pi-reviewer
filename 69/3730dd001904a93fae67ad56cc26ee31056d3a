@@ -1,0 +1,16 @@
+CI.md
+  h_ea91e2db23540f 93
+tests/ci/init.test.ts
+  h_ea91e2db23540f 45-48
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "693730dd001904a93fae67ad56cc26ee31056d3a",
+  "prompts": {},
+  "humans": {
+    "h_ea91e2db23540f": {
+      "author": "Emre Şafak <3928300+esafak@users.noreply.github.com>"
+    }
+  }
+}
