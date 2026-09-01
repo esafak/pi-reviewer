@@ -75,18 +75,30 @@ runs:
           # vp currently reports `vp v<version>` on its first output line.
           actual_vite_plus=$(vp --version 2>/dev/null | awk 'NR == 1 { sub(/^v/, "", $2); print $2; exit }' || true)
           is_version_at_least() {
-            local actual="${1%%-*}" minimum="${2%%-*}"
+            local actual="$1" minimum="$2"
+            local actual_core="${actual%%-*}" minimum_core="${minimum%%-*}"
             local actual_major actual_minor actual_patch minimum_major minimum_minor minimum_patch
-            IFS=. read -r actual_major actual_minor actual_patch <<< "$actual"
-            IFS=. read -r minimum_major minimum_minor minimum_patch <<< "$minimum"
+            IFS=. read -r actual_major actual_minor actual_patch <<< "$actual_core"
+            IFS=. read -r minimum_major minimum_minor minimum_patch <<< "$minimum_core"
             actual_major=${actual_major:-0}; actual_minor=${actual_minor:-0}; actual_patch=${actual_patch:-0}
             minimum_major=${minimum_major:-0}; minimum_minor=${minimum_minor:-0}; minimum_patch=${minimum_patch:-0}
             case "$actual_major.$actual_minor.$actual_patch.$minimum_major.$minimum_minor.$minimum_patch" in
               *[!0-9.]*) return 1 ;;
             esac
-            [ "$actual_major" -gt "$minimum_major" ] || \
+            if [ "$actual_major" -gt "$minimum_major" ] || \
               { [ "$actual_major" -eq "$minimum_major" ] && [ "$actual_minor" -gt "$minimum_minor" ]; } || \
-              { [ "$actual_major" -eq "$minimum_major" ] && [ "$actual_minor" -eq "$minimum_minor" ] && [ "$actual_patch" -ge "$minimum_patch" ]; }
+              { [ "$actual_major" -eq "$minimum_major" ] && [ "$actual_minor" -eq "$minimum_minor" ] && [ "$actual_patch" -gt "$minimum_patch" ]; }; then
+              return 0
+            fi
+            if [ "$actual_major" -ne "$minimum_major" ] || [ "$actual_minor" -ne "$minimum_minor" ] || [ "$actual_patch" -ne "$minimum_patch" ]; then
+              return 1
+            fi
+            # A prerelease has lower precedence than the corresponding stable
+            # release, so 0.3.0-beta must not satisfy a 0.3.0 minimum.
+            case "$actual" in
+              *-*) case "$minimum" in *-*) return 0 ;; *) return 1 ;; esac ;;
+              *) return 0 ;;
+            esac
           }
           if [ -n "$actual_vite_plus" ] && [ -n "$expected_vite_plus" ] && is_version_at_least "$actual_vite_plus" "$expected_vite_plus"; then
             vite_plus_ready=true
