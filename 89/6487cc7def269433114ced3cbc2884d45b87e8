@@ -1,0 +1,16 @@
+CI.md
+  h_ea91e2db23540f 92,95
+action.yml
+  h_ea91e2db23540f 39,51-103,105,112,118,120-124
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "896487cc7def269433114ced3cbc2884d45b87e8",
+  "prompts": {},
+  "humans": {
+    "h_ea91e2db23540f": {
+      "author": "Emre Şafak <3928300+esafak@users.noreply.github.com>"
+    }
+  }
+}
