@@ -211,7 +211,8 @@ export async function reconcileFindingUpdates(options: { token: string; repo: st
     const finding = known.get(update.comment_id);
     if (!finding || update.status === "STILL_OPEN") continue;
     if (finding.bodyFinding && finding.reviewId && finding.reviewBody !== undefined) continue;
-    const body = `<!-- pi-reviewer:status:v1 ${JSON.stringify({ findingId: update.comment_id, targetSha: options.targetSha, status: update.status })} -->\n${update.status === "RESOLVED" ? `Resolved in ${options.targetSha.slice(0, 7)}` : "Partially addressed"}: ${update.explanation}`;
+    const linkedSha = options.targetSha.slice(0, 7);
+    const body = `<!-- pi-reviewer:status:v1 ${JSON.stringify({ findingId: update.comment_id, targetSha: options.targetSha, status: update.status })} -->\n${update.status === "RESOLVED" ? `Resolved by ${linkedSha}` : `Partially addressed by ${linkedSha}`}: ${update.explanation}`;
     const alreadyReplied = priorReplies.some(reply => reply.user?.login === identity?.login && reply.in_reply_to_id === finding.commentId && reply.body.includes(`"targetSha":"${options.targetSha}"`) && reply.body.includes(`"status":"${update.status}"`));
     try {
       if (!alreadyReplied) {

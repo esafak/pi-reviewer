@@ -14,6 +14,8 @@ function workflowContent(reviewDrafts = false): string { return `name: Pi Review
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
+  pull_request_review_comment:
+    types: [created]
   issue_comment:
     types: [created]
   workflow_dispatch:
@@ -38,11 +40,13 @@ on:
 
 jobs:
   review:
+    if: \${{ github.event_name != 'pull_request_review_comment' || github.event.comment.user.type != 'Bot' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
       pull-requests: write
       issues: write
+      reactions: write
 
     concurrency:
       group: pi-reviewer-\${{ github.repository }}-\${{ github.event.pull_request.number || github.event.issue.number || inputs.pr-number || github.run_id }}

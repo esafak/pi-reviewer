@@ -45,6 +45,12 @@ describe("GitHubClient", () => {
       expect.objectContaining({ method: "POST", body: JSON.stringify({ content: "+1" }) }),
     );
   });
+  it("creates a reaction on a specific review comment", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(response({ id: 8, content: "eyes" }));
+    vi.stubGlobal("fetch", fetchMock);
+    await new GitHubClient("token").createReviewCommentReaction("owner/repo", 42, 99, "eyes");
+    expect(fetchMock).toHaveBeenCalledWith("https://api.github.com/repos/owner/repo/pulls/42/comments/99/reactions", expect.objectContaining({ method: "POST", body: JSON.stringify({ content: "eyes" }) }));
+  });
   it("lists pull request issue comments separately from review comments", async () => {
     const fetchMock = vi.fn().mockResolvedValue(response([{ id: 1, body: "marker" }]));
     vi.stubGlobal("fetch", fetchMock);

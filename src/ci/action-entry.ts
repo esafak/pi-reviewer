@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { parseThinkingLevel, review } from "./review.js";
 import { GitHubClient } from "./github.js";
-import { decodeBatchMarker, encodeBatchMarker, isAuthorizedReviewCommand, isEventRangeConsistent, normalizeEvent, reconstructBodyFindings, selectAuthenticatedBatchMarkers, selectBatchRange } from "./batch.js";
+import { decodeBatchMarker, encodeBatchMarker, isAuthorizedReviewCommand, isEventRangeConsistent, isSafePullRequestNumber, normalizeEvent, reconstructBodyFindings, selectAuthenticatedBatchMarkers, selectBatchRange } from "./batch.js";
+import { handleReply } from "./reply.js";
 
 async function readEvent(): Promise<unknown> {
   const file = process.env.GITHUB_EVENT_PATH;
@@ -35,7 +36,7 @@ const event = normalizeEvent(payload);
 const repo = process.env.GITHUB_REPOSITORY;
 const token = process.env.GITHUB_TOKEN;
 if (!repo || !token) { console.error("[pi-reviewer] this action requires GITHUB_REPOSITORY and GITHUB_TOKEN"); process.exit(1); }
-if (typeof event.pr !== "number") { console.log("[pi-reviewer] ignoring event without a pull request"); process.exit(0); }
+if (!isSafePullRequestNumber(event.pr)) { console.log("[pi-reviewer] ignoring event without a pull request"); process.exit(0); }
 if (event.fork) { console.log("[pi-reviewer] fork PRs are not reviewed because secrets are unavailable"); process.exit(0); }
 if (event.command && !isAuthorizedReviewCommand(event)) { console.log("[pi-reviewer] ignoring unauthorized comment"); process.exit(0); }
 
@@ -44,6 +45,16 @@ const pr = await github.getPullRequest(repo, event.pr);
 if (event.kind === "manual" && event.command !== "/pi-review" && process.env.GITHUB_EVENT_NAME === "issue_comment") { process.exit(0); }
 if (pr.draft && process.env.REVIEW_DRAFTS !== "true") { console.log("[pi-reviewer] draft PR reviews are disabled"); process.exit(0); }
 const identity = await github.getUser();
+if (event.kind === "reply") {
+  // This branch intentionally precedes all batch-marker, diff, and review work.
+  // The payload's repository relationship was checked above, before comment API access.
+  try {
+    if (await handleReply({ event, repo, pullRequest: pr, identity, github, thinking: parseThinkingLevel(process.env.PI_REVIEWER_THINKING), piApiKey: process.env.PI_API_KEY })) console.log(`[pi-reviewer] replied to review comment ${event.commentId}`);
+  } catch (error) {
+    console.warn(`[pi-reviewer] reply skipped after error: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  process.exit(0);
+}
 const reviews = await github.listReviews(repo, event.pr);
 const [comments, issueComments, threads] = await Promise.all([github.listComments(repo, event.pr), github.listIssueComments(repo, event.pr), github.listThreads(repo, event.pr)]);
 // Issue-comment fallback markers are durable batch state too. Reviews and issue

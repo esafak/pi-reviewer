@@ -18,6 +18,8 @@ name: Pi Reviewer
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
+  pull_request_review_comment:
+    types: [created]
   issue_comment:
     types: [created]
   workflow_dispatch:
@@ -35,10 +37,12 @@ on:
 jobs:
   review:
     runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request_review_comment' || github.event.comment.user.type != 'Bot'
     permissions:
       contents: read
       pull-requests: write
       issues: write # Required when react-on-no-findings is enabled.
+      reactions: write # Required for review-comment acknowledgements.
     concurrency:
       group: pi-reviewer-${{ github.repository }}-${{ github.event.pull_request.number || github.event.issue.number || inputs.pr-number || github.run_id }}
       cancel-in-progress: false
@@ -72,11 +76,13 @@ Commit it to your default branch, then add your API key to your repo secrets:
 
 ## Usage
 
-Every eligible PR event produces at most one review for the range since the last successful marker. Existing agent findings are reconciled in their original threads; human-authored threads are never changed. `/pi-review` is restricted to authorized internal PR commenters. Fork PRs are skipped.
+Replies to Pi Reviewer findings use a strict assistant action: low-information acknowledgements, thanks, agreement, and completion notices receive one GitHub review-comment reaction; substantive questions, requests, disagreements, uncertainty, and technical information receive a concise root-targeted reply. The workflow therefore requires `reactions: write` in addition to the existing permissions. Reactions are deduplicated by GitHub per comment, user, and reaction content; replies use an authenticated marker.
+
+Every eligible PR event produces at most one review for the range since the last successful marker. A human reply from an OWNER, MEMBER, or COLLABORATOR to a Pi Reviewer inline finding receives the reaction or concise response selected by the assistant; threads rooted at human comments, bot-authored comments, status replies, or resolved threads are ignored. GitHub review-comment replies are root-targeted because GitHub exposes review threads as flat REST replies, so each authorized human message in an active finding thread can receive at most one response. Existing agent findings are reconciled in their original threads; human-authored threads are never changed. `/pi-review` is restricted to authorized internal PR commenters. Fork PRs are skipped. Replies are skipped if the PR head changes before processing, or if the PR is a draft while `review-drafts` is disabled.
 
 The marker is authenticated with the identity returned by `GET /user` and contains the reviewed `fromSha`, `toSha`, event kind, and review ID. It is the durable state for batching—not an LLM session, transcript replay, Actions cache, or provider cache. If several pushes arrive while a runner is pending, the next run recomputes the complete range from the latest marker.
 
-New findings are posted only for the current batch. Existing findings are returned as `finding_updates`: fully resolved findings receive one marked reply and are then resolved, partial findings receive one explanatory reply and remain open, and unchanged findings receive no reply. If a reply succeeds but resolution fails, the resolution remains independently retryable. Findings that cannot be positioned are kept in the review body with hidden, authenticated `body-finding:v1` markers and stable positive IDs; their lifecycle is reconciled by updating only the originating review body, preserving its visible text. The last-resort issue-comment fallback is intentionally not adopted as durable finding state, because issue comments do not have review-body lifecycle semantics.
+New findings are posted only for the current batch. Existing findings are returned as `finding_updates`: fully resolved findings receive one marked reply and are then resolved, partial findings receive one explanatory reply and remain open, and unchanged findings receive no reply. If a reply succeeds but resolution fails, the resolution remains independently retryable. Findings that cannot be positioned are kept in the review body with hidden, authenticated `body-finding:v1` markers and stable positive IDs; their lifecycle is reconciled by updating only the originating review body, preserving its visible text. The last-resort issue-comment fallback is intentionally not adopted as durable finding state, because issue comments do not have review-body lifecycle semantics. Lifecycle replies say `Resolved by <7-character SHA>` or `Partially addressed by <7-character SHA>`; conversational replies omit the SHA unless the user asks for it. Reply markers are authenticated by the posting bot and checked again immediately before posting. The per-PR concurrency group limits races, but check/POST is necessarily best-effort rather than atomic; a thread resolved during generation may still receive a response if resolution is not observed by the final check.
 
 Draft pull requests are skipped by default, including manual dispatch and `/pi-review`. Set `review-drafts: true` to review draft lifecycle events. When a draft becomes ready, the accumulated range is reviewed once. Manual dispatch accepts a PR number and optional ancestor target head; the target must belong to the current PR history.
 

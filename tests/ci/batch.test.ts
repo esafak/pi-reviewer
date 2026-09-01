@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
-import { decodeBatchMarker, encodeBatchMarker, isAuthorizedReviewCommand, isEventRangeConsistent, normalizeEvent, selectAuthenticatedBatchMarkers, selectBatchRange } from "../../src/ci/batch.js";
+import { decodeBatchMarker, encodeBatchMarker, isAuthorizedReply, isAuthorizedReviewCommand, isEventRangeConsistent, isPiReviewerRootComment, isSafePullRequestNumber, normalizeEvent, replyMarker, decodeReplyMarker, selectAuthenticatedBatchMarkers, selectBatchRange } from "../../src/ci/batch.js";
 
 describe("batch markers", () => {
   it("round trips a versioned authenticated marker", () => {
@@ -53,5 +53,26 @@ describe("event normalization", () => {
     const event = normalizeEvent({ action: "synchronize", before: "old", after: "new", pull_request: { number: 3, head: { sha: "new" }, base: {} } });
     expect(isEventRangeConsistent(event, "old", "new")).toBe(true);
     expect(isEventRangeConsistent(event, "wrong", "new")).toBe(false);
+  });
+  it("normalizes review-comment replies without treating them as reviews", () => {
+    expect(normalizeEvent({ action: "created", pull_request: { number: 3, head: { sha: "head", repo: { full_name: "o/r" } }, base: { repo: { full_name: "o/r" } } }, comment: { id: 9, in_reply_to_id: 8, body: "question", user: { login: "human", type: "User" } } })).toMatchObject({ kind: "reply", pr: 3, commentId: 9, parentCommentId: 8, fork: false });
+  });
+  it("requires a root finding and authenticates reply marker ownership at selection time", () => {
+    const root = { body: "<!-- pi-reviewer:finding:v1 --> finding" };
+    expect(isPiReviewerRootComment(root)).toBe(true);
+    expect(isPiReviewerRootComment({ ...root, in_reply_to_id: 3 })).toBe(false);
+    expect(decodeReplyMarker(replyMarker(9, 8, "thread-1"))).toEqual({ version: 1, commentId: 9, parentId: 8, threadId: "thread-1" });
+  });
+  it("gates replies to trusted human repository participants", () => {
+    expect(isAuthorizedReply({ kind: "reply", draft: false, fork: false, actor: { association: "MEMBER", type: "User" } })).toBe(true);
+    expect(isAuthorizedReply({ kind: "reply", draft: false, fork: false, actor: { association: "CONTRIBUTOR", type: "User" } })).toBe(false);
+    expect(isAuthorizedReply({ kind: "reply", draft: false, fork: false, actor: { association: "MEMBER", type: "Bot" } })).toBe(false);
+  });
+  it("accepts only positive safe PR numbers", () => {
+    expect(isSafePullRequestNumber(1)).toBe(true);
+    expect(isSafePullRequestNumber(Number.MAX_SAFE_INTEGER)).toBe(true);
+    expect(isSafePullRequestNumber(0)).toBe(false);
+    expect(isSafePullRequestNumber(Number.MAX_SAFE_INTEGER + 1)).toBe(false);
+    expect(normalizeEvent({ inputs: { "pr-number": "not-a-number" } }).pr).toBeUndefined();
   });
 });
