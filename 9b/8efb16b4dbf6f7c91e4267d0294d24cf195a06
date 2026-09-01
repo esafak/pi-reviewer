@@ -1,0 +1,19 @@
+dist/src/ci/action-entry.js
+  s_129e0fdbdd8c96::t_0f8afdc6b6ed25 26-44,101-105
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "9b8efb16b4dbf6f7c91e4267d0294d24cf195a06",
+  "prompts": {},
+  "sessions": {
+    "s_129e0fdbdd8c96": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fa4bf4abaffeSnxmOsdJrmM2rI",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "Emre Şafak <3928300+esafak@users.noreply.github.com>"
+    }
+  }
+}
