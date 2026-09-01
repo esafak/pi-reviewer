@@ -1,0 +1,86 @@
+name: Pi Reviewer
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  pull_request_review_comment:
+    types: [created]
+  issue_comment:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      min-severity:
+        description: Minimum severity to report
+        required: false
+        default: warn
+        type: choice
+        options: [info, warn, critical]
+      pr-number:
+        description: Pull request number to review
+        required: false
+        type: number
+      target-head:
+        description: Optional ancestor commit to review
+        required: false
+        type: string
+
+jobs:
+  review:
+    name: Review
+    if: (github.event_name != 'pull_request_review_comment' || github.event.comment.user.type != 'Bot') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
+    environment: review
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+    concurrency:
+      group: pi-reviewer-${{ github.repository }}-${{ github.event.pull_request.number || github.event.issue.number || inputs.pr-number || github.run_id }}
+      cancel-in-progress: false
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Fetch PR refs for comment and manual events
+        shell: bash
+        run: git fetch origin '+refs/pull/*/head:refs/remotes/origin/pr/*' --no-tags
+
+      - name: Select provider API key
+        shell: bash
+        env:
+          MODEL_NAME: ${{ vars.MODEL_NAME }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ZAI_API_KEY: ${{ secrets.ZAI_API_KEY }}
+        run: |
+          if [ -z "$MODEL_NAME" ]; then
+            echo "::error::Repository variable MODEL_NAME is required"
+            exit 1
+          fi
+          provider="${MODEL_NAME%%/*}"
+          case "$provider" in
+            openai) key="$OPENAI_API_KEY" ;;
+            anthropic) key="$ANTHROPIC_API_KEY" ;;
+            zai) key="$ZAI_API_KEY" ;;
+            *) echo "::error::Unsupported provider in MODEL_NAME: $provider"; exit 1 ;;
+          esac
+          if [ -z "$key" ]; then
+            echo "::error::No API key configured for provider: $provider"
+            exit 1
+          fi
+          printf 'PI_API_KEY=%s\n' "$key" >> "$GITHUB_ENV"
+
+      - name: Review
+        uses: esafak/pi-reviewer@a9ce915a68756e0fbb73d8b3fc72fb4e4696cb0a # merged main
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          pi-api-key: ${{ env.PI_API_KEY }}
+          model: ${{ vars.MODEL_NAME }}
+          thinking: off
+          review-drafts: false
+          react-on-no-findings: true
+          min-severity: ${{ inputs.min-severity || 'warn' }}
