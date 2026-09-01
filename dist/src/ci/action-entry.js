@@ -68,7 +68,7 @@ const marked = selectAuthenticatedBatchMarkers(markerSources, identity.login);
 const latest = marked.at(-1);
 const latestMarkerSource = latest ? [...markerSources].reverse().find(source => {
     const marker = decodeBatchMarker(source.body);
-    return marker?.version === latest.version && marker.fromSha === latest.fromSha && marker.toSha === latest.toSha && marker.kind === latest.kind && marker.actor === latest.actor && marker.reviewId === latest.reviewId;
+    return source.user?.login === identity.login && marker?.actor === identity.login && marker.version === latest.version && marker.fromSha === latest.fromSha && marker.toSha === latest.toSha && marker.kind === latest.kind && marker.actor === latest.actor && marker.reviewId === latest.reviewId;
 }) : undefined;
 const priorSummary = latestMarkerSource?.body?.replace(/<!-- pi-reviewer:batch:v1 [^>]+ -->/, "").trim() || undefined;
 const batchByReview = new Map(reviews.map(r => [r.id, decodeBatchMarker(r.body)]));
