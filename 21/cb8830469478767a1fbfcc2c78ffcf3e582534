@@ -1,0 +1,14 @@
+action.yml
+  h_ea91e2db23540f 232-234
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "21cb8830469478767a1fbfcc2c78ffcf3e582534",
+  "prompts": {},
+  "humans": {
+    "h_ea91e2db23540f": {
+      "author": "Emre Şafak <3928300+esafak@users.noreply.github.com>"
+    }
+  }
+}
