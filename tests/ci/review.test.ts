@@ -339,9 +339,40 @@ describe("review", () => {
 
     expect(sendOutputMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        content: JSON.stringify(toolReview),
+        structuredResult: toolReview,
       }),
     );
+  });
+
+  it("passes body-finding lifecycle metadata through to sendOutput", async () => {
+    const activeFinding = {
+      commentId: 12345,
+      threadId: undefined,
+      reviewId: 42,
+      bodyFinding: true,
+      reviewBody: "visible review body",
+      file: "src/a.ts",
+      line: 7,
+      side: "RIGHT",
+      body: "body finding",
+    };
+    const toolReview = {
+      summary: "Updated body finding",
+      comments: [],
+      finding_updates: [{ comment_id: activeFinding.commentId, status: "RESOLVED" as const, explanation: "fixed" }],
+    };
+    createReviewToolMock.mockReturnValue({
+      tool: { name: "submit_review", label: "submit_review", description: "test", parameters: {}, execute: vi.fn() },
+      getResult: () => toolReview,
+    });
+    AgentMock.mockImplementation(function () { return makeFakeAgent("") as any; });
+
+    await review({ cwd: "/repo", output: "comment", pr: 42, githubToken: "token", repo: "owner/repo", commitId: "head", activeFindings: [activeFinding] });
+
+    expect(sendOutputMock).toHaveBeenCalledWith(expect.objectContaining({
+      existingFindings: [{ commentId: 12345, threadId: undefined, reviewId: 42, bodyFinding: true, reviewBody: "visible review body" }],
+      allowedFindingIds: new Set([12345]),
+    }));
   });
 
   it("falls back to text extraction when the model did not call submit_review", async () => {

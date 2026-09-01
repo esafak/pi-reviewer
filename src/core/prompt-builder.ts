@@ -1,7 +1,7 @@
 import type { ContextFile, ContextResult } from "./context.js";
 
 export type MinSeverity = "CRITICAL" | "WARN" | "INFO";
-export interface ActiveFindingContext { commentId: number; threadId?: string; file?: string; line?: number; side?: string; body: string; sourceBatch?: string; latestStatus?: string }
+export interface ActiveFindingContext { commentId: number; threadId?: string; reviewId?: number; bodyFinding?: boolean; reviewBody?: string; file?: string; line?: number; side?: string; body: string; sourceBatch?: string; latestStatus?: string }
 
 const SEVERITY_RULE: Record<MinSeverity, string | null> = {
   INFO: null,

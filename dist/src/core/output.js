@@ -2,6 +2,7 @@ import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import { parseDiffPositions, partitionComments } from "./diff-positions.js";
 import { GitHubClient } from "../ci/github.js";
+import { bodyFindingId, decodeBodyFindingMarkers, encodeBodyFindingMarker, updateBodyFindingMarker } from "../ci/batch.js";
 const SEVERITY_RANK = { INFO: 0, WARN: 1, CRITICAL: 2 };
 const SEVERITY_EMOJI = { CRITICAL: "🔴", WARN: "🟡", INFO: "🔵" };
 async function responseJson(response) {
@@ -13,6 +14,66 @@ async function responseJson(response) {
     catch {
         return undefined;
     }
+}
+const FINDING_STATUSES = ["RESOLVED", "PARTIALLY_RESOLVED", "STILL_OPEN"];
+function findingUpdateRejection(update, allowedFindingIds) {
+    const value = update && typeof update === "object" ? update : {};
+    const commentId = value.comment_id;
+    const status = value.status;
+    if (!Number.isInteger(commentId))
+        return { reason: "comment_id is not an integer", commentId, status };
+    if (allowedFindingIds && !allowedFindingIds.has(commentId))
+        return { reason: "unknown active-finding ID", commentId, status };
+    if (!FINDING_STATUSES.includes(status))
+        return { reason: "invalid status", commentId, status };
+    if (typeof value.explanation !== "string")
+        return { reason: "explanation is not a string", commentId, status };
+    if (value.explanation.length > 2000)
+        return { reason: "explanation exceeds 2000 characters", commentId, status };
+    return { update: { comment_id: commentId, status: status, explanation: value.explanation }, reason: "", commentId, status };
+}
+function formatDiagnosticValue(value, kind) {
+    if (kind === "comment_id" && typeof value === "number" && Number.isFinite(value))
+        return String(value);
+    if (kind === "status" && typeof value === "string" && FINDING_STATUSES.includes(value))
+        return value;
+    return "invalid";
+}
+function structuredResultRejection(value) {
+    if (!value || typeof value !== "object")
+        return "invalid summary";
+    const result = value;
+    if (typeof result.summary !== "string")
+        return "invalid summary";
+    if (!Array.isArray(result.comments) || !result.comments.every(isReviewComment))
+        return "invalid comments";
+    if (result.finding_updates !== undefined && !Array.isArray(result.finding_updates))
+        return "invalid finding_updates";
+    return undefined;
+}
+/** Normalize tool output while isolating contextual finding validation from the review itself. */
+function normalizeReviewResult(result, options, warnInvalidUpdates) {
+    const minRank = SEVERITY_RANK[options.minSeverity ?? "INFO"];
+    const comments = result.comments
+        .map((comment) => ({ ...comment, severity: normalizeSeverity(comment.severity) }))
+        .filter((comment) => SEVERITY_RANK[comment.severity] >= minRank)
+        .filter((comment) => !options.existingFindingKeys?.has(normalizeFinding(comment)))
+        .map((comment) => {
+        const emoji = SEVERITY_EMOJI[comment.severity];
+        const prefix = ["🔴 ", "🟡 ", "🔵 "].find((value) => comment.body.startsWith(value));
+        const body = prefix ? comment.body.slice(prefix.length) : comment.body;
+        return { ...comment, body: `${emoji} ${body}` };
+    });
+    const updates = [];
+    for (const candidate of result.finding_updates ?? []) {
+        const checked = findingUpdateRejection(candidate, options.allowedFindingIds);
+        if (checked.update)
+            updates.push(checked.update);
+        else if (warnInvalidUpdates) {
+            console.warn(`[pi-reviewer] dropped finding update comment_id=${formatDiagnosticValue(checked.commentId, "comment_id")}${checked.status === undefined ? "" : ` status=${formatDiagnosticValue(checked.status, "status")}`} reason=${checked.reason}`);
+        }
+    }
+    return { summary: result.summary, comments, ...(updates.length ? { finding_updates: updates } : {}), ...(result.diff !== undefined ? { diff: result.diff } : {}) };
 }
 /** Applies model-approved transitions independently so a failed mutation can be retried safely. */
 export async function reconcileFindingUpdates(options) {
@@ -38,11 +99,66 @@ export async function reconcileFindingUpdates(options) {
             return false;
         }
     };
+    const bodyUpdates = new Map();
     for (const update of options.updates) {
         const finding = known.get(update.comment_id);
         if (!finding)
             continue;
         if (update.status === "STILL_OPEN")
+            continue;
+        if (finding.bodyFinding && finding.reviewId && finding.reviewBody !== undefined) {
+            const group = bodyUpdates.get(finding.reviewId) ?? { finding, updates: [] };
+            group.updates.push(update);
+            bodyUpdates.set(finding.reviewId, group);
+            continue;
+        }
+    }
+    for (const [reviewId, group] of bodyUpdates) {
+        let updatedBody;
+        try {
+            const freshReview = await client.getReview(options.repo, options.prNumber, reviewId);
+            if (typeof freshReview.body !== "string") {
+                console.warn(`[pi-reviewer] could not update body review ${reviewId}: fetched review has no body`);
+                continue;
+            }
+            updatedBody = freshReview.body;
+        }
+        catch (error) {
+            console.warn(`[pi-reviewer] could not fetch body review ${reviewId}: ${error instanceof Error ? error.message : String(error)}`);
+            continue;
+        }
+        const changedFindingIds = new Set();
+        for (const update of group.updates) {
+            const currentMarker = decodeBodyFindingMarkers(updatedBody).find(marker => marker.findingId === update.comment_id);
+            if (currentMarker?.targetSha === options.targetSha && currentMarker.status === update.status && currentMarker.explanation === update.explanation) {
+                if (update.status === "RESOLVED")
+                    outstanding.delete(update.comment_id);
+                continue;
+            }
+            const nextBody = updateBodyFindingMarker(updatedBody, update.comment_id, update.status, options.targetSha, update.explanation);
+            if (nextBody !== updatedBody) {
+                updatedBody = nextBody;
+                changedFindingIds.add(update.comment_id);
+            }
+        }
+        if (updatedBody === group.finding.reviewBody || !await isTargetHeadCurrent())
+            continue;
+        try {
+            await client.updateReview(options.repo, options.prNumber, reviewId, updatedBody);
+            for (const update of group.updates) {
+                if (update.status === "RESOLVED" && changedFindingIds.has(update.comment_id))
+                    outstanding.delete(update.comment_id);
+            }
+        }
+        catch (error) {
+            console.warn(`[pi-reviewer] could not update body review ${reviewId}: ${error instanceof Error ? error.message : String(error)}`);
+        }
+    }
+    for (const update of options.updates) {
+        const finding = known.get(update.comment_id);
+        if (!finding || update.status === "STILL_OPEN")
+            continue;
+        if (finding.bodyFinding && finding.reviewId && finding.reviewBody !== undefined)
             continue;
         const body = `<!-- pi-reviewer:status:v1 ${JSON.stringify({ findingId: update.comment_id, targetSha: options.targetSha, status: update.status })} -->\n${update.status === "RESOLVED" ? `Resolved in ${options.targetSha.slice(0, 7)}` : "Partially addressed"}: ${update.explanation}`;
         const alreadyReplied = priorReplies.some(reply => reply.user?.login === identity?.login && reply.in_reply_to_id === finding.commentId && reply.body.includes(`"targetSha":"${options.targetSha}"`) && reply.body.includes(`"status":"${update.status}"`));
@@ -254,43 +370,26 @@ export function parseAgentResponseWithStatus(text, minSeverity = "INFO", allowed
     // No early return: last-wins requires a full scan.
     let resultWithComments = null;
     let resultAny = null;
+    let rejectionReason = "malformed JSON";
     for (const { content } of candidates) {
         const parsed = tryParseJSON(content);
+        if (parsed) {
+            rejectionReason = typeof parsed.summary !== "string"
+                ? "invalid summary"
+                : !Array.isArray(parsed.comments) || !parsed.comments.every(isReviewComment)
+                    ? "invalid comments"
+                    : (parsed.finding_updates !== undefined && (!Array.isArray(parsed.finding_updates) || !parsed.finding_updates.every((u) => findingUpdateRejection(u, allowedFindingIds).update !== undefined)))
+                        ? "invalid finding_updates"
+                        : rejectionReason;
+        }
         const rawUpdates = parsed && Array.isArray(parsed.finding_updates) ? parsed.finding_updates : [];
-        const updatesValid = rawUpdates.every((u) => {
-            if (!u || typeof u !== "object")
-                return false;
-            const value = u;
-            return Number.isInteger(value.comment_id) && (!allowedFindingIds || allowedFindingIds.has(value.comment_id)) && ["RESOLVED", "PARTIALLY_RESOLVED", "STILL_OPEN"].includes(value.status) && typeof value.explanation === "string" && value.explanation.length <= 2000;
-        });
+        const updatesValid = rawUpdates.every((u) => findingUpdateRejection(u, allowedFindingIds).update !== undefined);
         if (parsed &&
             typeof parsed.summary === "string" &&
             Array.isArray(parsed.comments) &&
             parsed.comments.every(isReviewComment) && updatesValid) {
-            const minRank = SEVERITY_RANK[minSeverity];
-            const comments = parsed.comments
-                .map((c) => ({ ...c, severity: normalizeSeverity(c.severity) }))
-                .filter((c) => SEVERITY_RANK[c.severity] >= minRank)
-                .filter((c) => !existingFindingKeys?.has(normalizeFinding(c)))
-                .map((c) => {
-                const emoji = SEVERITY_EMOJI[c.severity];
-                const prefix = ["🔴 ", "🟡 ", "🔵 "].find((value) => c.body.startsWith(value));
-                const body = prefix ? c.body.slice(prefix.length) : c.body;
-                return { ...c, body: `${emoji} ${body}` };
-            });
             const diff = typeof parsed.diff === "string" ? parsed.diff : undefined;
-            const updates = Array.isArray(parsed.finding_updates)
-                ? parsed.finding_updates.filter((u) => {
-                    if (!u || typeof u !== "object")
-                        return false;
-                    const value = u;
-                    return Number.isInteger(value.comment_id) &&
-                        (!allowedFindingIds || allowedFindingIds.has(value.comment_id)) &&
-                        ["RESOLVED", "PARTIALLY_RESOLVED", "STILL_OPEN"].includes(value.status) &&
-                        typeof value.explanation === "string" && value.explanation.length <= 2000;
-                })
-                : [];
-            const review = { summary: parsed.summary, comments, ...(updates.length ? { finding_updates: updates } : {}), ...(diff !== undefined ? { diff } : {}) };
+            const review = normalizeReviewResult({ summary: parsed.summary, comments: parsed.comments, finding_updates: rawUpdates, ...(diff !== undefined ? { diff } : {}) }, { minSeverity, allowedFindingIds, existingFindingKeys }, false);
             resultAny = review;
             // Base the preference on what the model emitted, not on what remains
             // after minSeverity filtering. A genuine review whose findings are all
@@ -303,21 +402,27 @@ export function parseAgentResponseWithStatus(text, minSeverity = "INFO", allowed
     const result = resultWithComments ?? resultAny;
     if (result)
         return { result, parsed: true };
-    return { result: { summary: text, comments: [] }, parsed: false };
+    return { result: { summary: text, comments: [] }, parsed: false, rejectionReason };
 }
 /** Stable identity used to avoid reposting the same finding in a batch. */
 export function normalizeFinding(comment) {
-    return [comment.file, comment.line, comment.side, comment.body.replace(/^[🔴🟡🔵]\s*/u, "").trim().replace(/\n\s*\n+/g, "\n")].join("\0");
+    const storedBody = decodeBodyFindingMarkers(comment.body)[0]?.body;
+    const body = (storedBody ?? comment.body).replace(/<!--\s*pi-reviewer\s*:\s*[\s\S]*?-->/g, "").trim().replace(/^[🔴🟡🔵]\s*/u, "").trim().replace(/\n\s*\n+/g, "\n");
+    return [comment.file, comment.line, comment.side, body].join("\0");
+}
+/** Keep model-controlled text from becoming metadata when it is shown in a review body. */
+function sanitizeVisibleReviewText(text) {
+    return text.replace(/<!--\s*pi-reviewer\s*:/gi, "<!-- pi-reviewer :");
 }
 export function parseAgentResponse(text, minSeverity = "INFO") {
     return parseAgentResponseWithStatus(text, minSeverity).result;
 }
 function formatForGitHub(result) {
-    const lines = ["## Pi Reviewer", "", result.summary];
+    const lines = ["## Pi Reviewer", "", sanitizeVisibleReviewText(result.summary)];
     if (result.comments.length > 0) {
         lines.push("", "### Inline Comments");
         for (const comment of result.comments) {
-            lines.push("", `${SEVERITY_EMOJI[comment.severity]} **\`${comment.file}:${comment.line}\`** · ${comment.side}`, comment.body);
+            lines.push("", `${SEVERITY_EMOJI[comment.severity]} **\`${comment.file}:${comment.line}\`** · ${comment.side}`, sanitizeVisibleReviewText(comment.body));
         }
     }
     return lines.join("\n");
@@ -329,11 +434,13 @@ function formatForGitHub(result) {
  */
 function buildReviewBody(summary, moved) {
     if (moved.length === 0)
-        return summary;
-    const lines = [summary, "", "### Comments Not Attached to the Diff", ""];
+        return sanitizeVisibleReviewText(summary);
+    const lines = [sanitizeVisibleReviewText(summary), "", "### Comments Not Attached to the Diff", ""];
     lines.push("These comments could not be attached to a specific diff line, so the reported location is approximate — the line is not part of the diff:");
     for (const comment of moved) {
-        lines.push("", `> ${SEVERITY_EMOJI[comment.severity]} **\`${comment.file}:${comment.line}\`** · ${comment.side} — location could not be verified`, comment.body);
+        const visibleBody = sanitizeVisibleReviewText(comment.body);
+        const findingId = bodyFindingId(normalizeFinding(comment));
+        lines.push("", encodeBodyFindingMarker({ findingId, file: comment.file, line: comment.line, side: comment.side, severity: comment.severity, body: visibleBody }), `> ${SEVERITY_EMOJI[comment.severity]} **\`${comment.file}:${comment.line}\`** · ${comment.side} — location could not be verified`, visibleBody);
     }
     return lines.join("\n");
 }
@@ -351,7 +458,18 @@ export function formatForTerminal(result) {
     return lines.join("\n");
 }
 export async function sendOutput(options) {
-    const parsedResponse = parseAgentResponseWithStatus(options.content, options.minSeverity, options.allowedFindingIds, options.existingFindingKeys);
+    let parsedResponse;
+    if (options.structuredResult !== undefined) {
+        const rejectionReason = structuredResultRejection(options.structuredResult);
+        if (rejectionReason) {
+            console.warn(`[pi-reviewer] rejected structured result: ${rejectionReason}`);
+            throw new Error(`Agent output was not a valid structured review: ${rejectionReason}`);
+        }
+        parsedResponse = { result: normalizeReviewResult(options.structuredResult, options, true), parsed: true };
+    }
+    else {
+        parsedResponse = parseAgentResponseWithStatus(options.content ?? "", options.minSeverity, options.allowedFindingIds, options.existingFindingKeys);
+    }
     const result = parsedResponse.result;
     if (options.target === "terminal") {
         console.log(formatForTerminal(result));
@@ -368,6 +486,7 @@ export async function sendOutput(options) {
             throw new Error("Repository (owner/repo) is required to post a comment");
         }
         if (!parsedResponse.parsed) {
+            console.warn(`[pi-reviewer] rejected text fallback: ${parsedResponse.rejectionReason ?? "invalid structured review"}`);
             throw new Error("Agent output was not a valid structured review; refusing to post raw model output");
         }
         const headers = {

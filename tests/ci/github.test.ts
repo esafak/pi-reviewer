@@ -51,6 +51,12 @@ describe("GitHubClient", () => {
     await new GitHubClient("token").listIssueComments("owner/repo", 42);
     expect(fetchMock).toHaveBeenCalledWith("https://api.github.com/repos/owner/repo/issues/42/comments?per_page=100&page=1", expect.anything());
   });
+  it("fetches an individual review body", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(response({ id: 42, body: "fresh body" }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(new GitHubClient("token").getReview("owner/repo", 1, 42)).resolves.toMatchObject({ body: "fresh body" });
+    expect(fetchMock).toHaveBeenCalledWith("https://api.github.com/repos/owner/repo/pulls/1/reviews/42", expect.anything());
+  });
   it("follows GraphQL thread cursors", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(response({

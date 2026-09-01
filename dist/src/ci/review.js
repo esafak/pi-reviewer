@@ -101,6 +101,7 @@ export async function review(options) {
     let unsubscribe;
     try {
         let finalResponse = "";
+        let structuredResult;
         const ended = new Promise((resolve, reject) => {
             unsubscribe = agent.subscribe((event) => {
                 if (!event || typeof event !== "object")
@@ -126,7 +127,7 @@ export async function review(options) {
                 // call the tool.
                 const toolResult = getResult();
                 if (toolResult) {
-                    finalResponse = JSON.stringify(toolResult);
+                    structuredResult = toolResult;
                     console.log(`[pi-reviewer] agent completed via submit_review tool — ${toolResult.comments.length} comment(s)`);
                     resolve();
                     return;
@@ -164,6 +165,7 @@ export async function review(options) {
         await sendOutput({
             target,
             content: finalResponse,
+            structuredResult,
             cwd,
             githubToken,
             prNumber: options.pr,
@@ -172,7 +174,7 @@ export async function review(options) {
             minSeverity: options.minSeverity,
             diff,
             batchMarker: options.batchMarker,
-            existingFindings: options.activeFindings?.map(f => ({ commentId: f.commentId, threadId: f.threadId })),
+            existingFindings: options.activeFindings?.map(f => ({ commentId: f.commentId, threadId: f.threadId, reviewId: f.reviewId, bodyFinding: f.bodyFinding, reviewBody: f.reviewBody })),
             existingFindingKeys: new Set(options.activeFindings?.filter(f => f.file && f.line && f.side).map(f => normalizeFinding({ file: f.file, line: f.line, side: f.side, body: f.body }))),
             allowedFindingIds: new Set(options.activeFindings?.map(f => f.commentId)),
             reactOnNoFindings: options.reactOnNoFindings,
