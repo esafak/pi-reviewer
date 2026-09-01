@@ -1,0 +1,22 @@
+CI.md
+  h_ea91e2db23540f 98
+action.yml
+  h_ea91e2db23540f 134-161,166
+hk.pkl
+  h_ea91e2db23540f 11-16,21-23
+mise.toml
+  h_ea91e2db23540f 13-16
+tests/ci/action.test.ts
+  h_ea91e2db23540f 1-14
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "327c9035f03d43798aa8e97ebb685cdab80f54f5",
+  "prompts": {},
+  "humans": {
+    "h_ea91e2db23540f": {
+      "author": "Emre Şafak <3928300+esafak@users.noreply.github.com>"
+    }
+  }
+}
