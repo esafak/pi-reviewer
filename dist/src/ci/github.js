@@ -33,6 +33,7 @@ export class GitHubClient {
     } }
     listReviews(repo, number) { return this.list(`/repos/${repo}/pulls/${number}/reviews`); }
     listComments(repo, number) { return this.list(`/repos/${repo}/pulls/${number}/comments`); }
+    listIssueComments(repo, number) { return this.list(`/repos/${repo}/issues/${number}/comments`); }
     createReview(repo, number, body, commit_id, comments) { return this.request(`/repos/${repo}/pulls/${number}/reviews`, { method: "POST", body: JSON.stringify({ body, commit_id, event: "COMMENT", comments }) }); }
     updateReview(repo, number, review, body) { return this.request(`/repos/${repo}/pulls/${number}/reviews/${review}`, { method: "PUT", body: JSON.stringify({ body }) }); }
     reply(repo, number, comment, body) { return this.request(`/repos/${repo}/pulls/${number}/comments`, { method: "POST", body: JSON.stringify({ body, in_reply_to: comment }) }); }
