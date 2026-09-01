@@ -36,5 +36,8 @@ jobs:
       - name: Run tests
         run: vpr test
 
+      - name: Run lint
+        run: vpr lint
+
       - name: Build
-        run: vp run build
+        run: vpr build

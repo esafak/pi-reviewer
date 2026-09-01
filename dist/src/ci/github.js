@@ -7,6 +7,44 @@ export class GitHubError extends Error {
         this.details = details;
     }
 }
+function normalizeThreadComment(comment) {
+    return { id: Number(comment.id) };
+}
+export const githubGraphqlDocuments = {
+    viewer: "query Viewer { viewer { login id __typename } }",
+    listThreads: `query ListThreads($owner: String!, $name: String!, $number: Int!, $cursor: String) {
+    repository(owner: $owner, name: $name) {
+      pullRequest(number: $number) {
+        reviewThreads(first: 100, after: $cursor) {
+          nodes {
+            id
+            isResolved
+            comments(first: 100) {
+              nodes { id: fullDatabaseId }
+              pageInfo { hasNextPage endCursor }
+            }
+          }
+          pageInfo { hasNextPage endCursor }
+        }
+      }
+    }
+  }`,
+    listThreadComments: `query ListThreadComments($id: ID!, $cursor: String) {
+    node(id: $id) {
+      ... on PullRequestReviewThread {
+        comments(first: 100, after: $cursor) {
+          nodes { id: fullDatabaseId }
+          pageInfo { hasNextPage endCursor }
+        }
+      }
+    }
+  }`,
+    resolveThread: `mutation ResolveThread($id: ID!) {
+    resolveReviewThread(input: { threadId: $id }) {
+      thread { id isResolved }
+    }
+  }`,
+};
 export class GitHubClient {
     token;
     base;
@@ -30,7 +68,7 @@ export class GitHubClient {
         catch (error) {
             if (!(error instanceof GitHubError) || error.status !== 403 || !error.details.includes("Resource not accessible by integration"))
                 throw error;
-            const data = await this.graphql("query { viewer { login id __typename } }", {});
+            const data = await this.graphql(githubGraphqlDocuments.viewer, {});
             return { login: data.viewer.login, id: data.viewer.id, type: data.viewer.__typename };
         }
     }
@@ -51,21 +89,21 @@ export class GitHubClient {
     listReactions(repo, number) { return this.list(`/repos/${repo}/issues/${number}/reactions`); }
     async graphql(query, variables) { const result = await this.request("https://api.github.com/graphql", { method: "POST", body: JSON.stringify({ query, variables }) }); if (result.errors?.length)
         throw new Error(result.errors.map(e => e.message).join("; ")); return result.data; }
-    resolveThread(threadId) { return this.graphql("mutation($id:ID!){resolveReviewThread(input:{threadId:$id}){thread{id isResolved}}}", { id: threadId }); }
+    resolveThread(threadId) { return this.graphql(githubGraphqlDocuments.resolveThread, { id: threadId }); }
     async listThreads(repo, number) {
         const [owner, name] = repo.split("/");
         const all = [];
         let cursor;
         do {
-            const page = await this.graphql("query($owner:String!,$name:String!,$number:Int!,$cursor:String){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:100,after:$cursor){nodes{id isResolved comments(first:100){nodes{id:databaseId body path line side author{login __typename}} pageInfo{hasNextPage endCursor}}} pageInfo{hasNextPage endCursor}}}}}", { owner, name, number, cursor });
+            const page = await this.graphql(githubGraphqlDocuments.listThreads, { owner, name, number, cursor });
             const connection = page.repository.pullRequest.reviewThreads;
             for (const t of connection.nodes) {
-                const nodes = t.comments.nodes.map((c) => ({ ...c, user: c.author }));
+                const nodes = t.comments.nodes.map(normalizeThreadComment);
                 let commentCursor = t.comments.pageInfo.hasNextPage ? t.comments.pageInfo.endCursor : undefined;
                 while (commentCursor) {
-                    const next = await this.graphql("query($id:ID!,$cursor:String){node(id:$id){... on PullRequestReviewThread{comments(first:100,after:$cursor){nodes{id:databaseId body path line side author{login __typename}} pageInfo{hasNextPage endCursor}}}}}", { id: t.id, cursor: commentCursor });
+                    const next = await this.graphql(githubGraphqlDocuments.listThreadComments, { id: t.id, cursor: commentCursor });
                     const comments = next.node.comments;
-                    nodes.push(...comments.nodes.map((c) => ({ ...c, user: c.author })));
+                    nodes.push(...comments.nodes.map(normalizeThreadComment));
                     commentCursor = comments.pageInfo.hasNextPage ? comments.pageInfo.endCursor : undefined;
                 }
                 all.push({ id: t.id, isResolved: t.isResolved, comments: { nodes, pageInfo: { hasNextPage: false } } });
