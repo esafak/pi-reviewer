@@ -73,6 +73,22 @@ jobs:
 
 Commit it to your default branch, then provide the API key for your selected provider in the action environment. For `openai/...`, `anthropic/...`, and `zai/...` models, use `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or `ZAI_API_KEY`, respectively. Other providers can use `PI_API_KEY` (or the explicit `pi-api-key` input). When more than one is available, the explicit `pi-api-key` input takes precedence, followed by the selected provider's variable, then `PI_API_KEY`.
 
+## Repository self-review
+
+This repository's workflow uses the `review` environment and the required
+repository variable `MODEL_NAME` to select the provider. Add the matching
+provider secret to the `review` environment:
+
+| `MODEL_NAME` prefix | Secret |
+|---|---|
+| `openai/` | `OPENAI_API_KEY` |
+| `anthropic/` | `ANTHROPIC_API_KEY` |
+| `zai/` | `ZAI_API_KEY` |
+
+The workflow rejects unsupported providers and missing matching secrets
+without printing key material. It deliberately defaults all workflow runs to
+`warn`; the action's standalone default remains `info`.
+
 ## Usage
 
 Replies to Pi Reviewer findings use a strict assistant action: low-information acknowledgements, thanks, agreement, and completion notices receive one GitHub review-comment reaction; substantive questions, requests, disagreements, uncertainty, and technical information receive a concise root-targeted reply. The workflow therefore requires `reactions: write` in addition to the existing permissions. Reactions are deduplicated by GitHub per comment, user, and reaction content; replies use an authenticated marker.
