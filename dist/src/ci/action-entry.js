@@ -66,7 +66,11 @@ const markerSources = [
     .sort((a, b) => a.markerTime - b.markerTime || a.markerSource - b.markerSource || a.markerIndex - b.markerIndex);
 const marked = selectAuthenticatedBatchMarkers(markerSources, identity.login);
 const latest = marked.at(-1);
-const priorSummary = latest ? reviews.find(r => r.id === latest.reviewId)?.body?.replace(/<!-- pi-reviewer:batch:v1 [^>]+ -->/, "").trim() : undefined;
+const latestMarkerSource = latest ? [...markerSources].reverse().find(source => {
+    const marker = decodeBatchMarker(source.body);
+    return marker?.version === latest.version && marker.fromSha === latest.fromSha && marker.toSha === latest.toSha && marker.kind === latest.kind && marker.actor === latest.actor && marker.reviewId === latest.reviewId;
+}) : undefined;
+const priorSummary = latestMarkerSource?.body?.replace(/<!-- pi-reviewer:batch:v1 [^>]+ -->/, "").trim() || undefined;
 const batchByReview = new Map(reviews.map(r => [r.id, decodeBatchMarker(r.body)]));
 const threadByComment = new Map(threads.flatMap(t => t.comments.nodes.map(c => [c.id, { id: t.id, resolved: t.isResolved }])));
 const activeFindings = comments.filter(c => c.user?.login === identity.login && c.id > 0 && c.body.includes("<!-- pi-reviewer:finding:v1 -->") && !c.body.includes("pi-reviewer:status:v1") && !threadByComment.get(c.id)?.resolved).map(c => { const batch = c.pull_request_review_id ? batchByReview.get(c.pull_request_review_id) : undefined; const replies = comments.filter(reply => reply.in_reply_to_id === c.id && reply.user?.login === identity.login).sort((a, b) => a.id - b.id); return { commentId: c.id, threadId: threadByComment.get(c.id)?.id, file: c.path, line: c.line, side: c.side, body: c.body, sourceBatch: batch ? `${batch.fromSha}..${batch.toSha}` : undefined, latestStatus: replies.at(-1)?.body.match(/status:v1 \{[^}]*"status":"([^"]+)/)?.[1] }; });
