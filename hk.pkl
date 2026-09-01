@@ -8,9 +8,14 @@ local linters = new Mapping<String, Step> {
   }
 }
 
-local tests = new Mapping<String, Step> {
+local prepush = new Mapping<String, Step> {
   ["test-suite"] {
     check = "mise run test"
+  }
+  ["vite-plus-lint"] {
+    glob = List("**/*.js", "**/*.jsx", "**/*.ts", "**/*.tsx")
+    exclude = List("dist/**", "dist-ui/**")
+    check = "mise run lint"
   }
 }
 
@@ -19,6 +24,6 @@ hooks {
     steps = linters
   }
   ["pre-push"] {
-    steps = tests
+    steps = prepush
   }
 }

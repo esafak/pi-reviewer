@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
-import { GitHubClient, GitHubError } from "../../src/ci/github.js";
+import { GitHubClient, GitHubError, githubGraphqlDocuments } from "../../src/ci/github.js";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -34,7 +34,7 @@ describe("GitHubClient", () => {
       .mockResolvedValueOnce(response({ data: { viewer: { login: "review-app[bot]", id: "42", __typename: "Bot" } } }));
     vi.stubGlobal("fetch", fetchMock);
     await expect(new GitHubClient("token").getUser()).resolves.toMatchObject({ login: "review-app[bot]", type: "Bot" });
-    expect(fetchMock).toHaveBeenLastCalledWith("https://api.github.com/graphql", expect.objectContaining({ headers: expect.objectContaining({ authorization: "Bearer token" }), body: JSON.stringify({ query: "query { viewer { login id __typename } }", variables: {} }) }));
+    expect(fetchMock).toHaveBeenLastCalledWith("https://api.github.com/graphql", expect.objectContaining({ headers: expect.objectContaining({ authorization: "Bearer token" }), body: JSON.stringify({ query: githubGraphqlDocuments.viewer, variables: {} }) }));
   });
   it("creates a thumbs-up reaction on a pull request", async () => {
     const fetchMock = vi.fn().mockResolvedValue(response({ id: 7, content: "+1" }));
@@ -53,10 +53,26 @@ describe("GitHubClient", () => {
   });
   it("follows GraphQL thread cursors", async () => {
     const fetchMock = vi.fn()
-      .mockResolvedValueOnce(response({ data: { repository: { pullRequest: { reviewThreads: { nodes: [{ id: "t1", isResolved: false, comments: { nodes: [], pageInfo: { hasNextPage: false } } }], pageInfo: { hasNextPage: true, endCursor: "cursor-1" } } } } } }))
-      .mockResolvedValueOnce(response({ data: { repository: { pullRequest: { reviewThreads: { nodes: [{ id: "t2", isResolved: true, comments: { nodes: [], pageInfo: { hasNextPage: false } } }], pageInfo: { hasNextPage: false } } } } } }));
+      .mockResolvedValueOnce(response({
+        data: { repository: { pullRequest: { reviewThreads: {
+          nodes: [{ id: "t1", isResolved: false, comments: { nodes: [{ id: "101", author: { login: "bot" } }], pageInfo: { hasNextPage: true, endCursor: "comment-1" } } }],
+          pageInfo: { hasNextPage: true, endCursor: "cursor-1" },
+        } } }, },
+      }))
+      .mockResolvedValueOnce(response({
+        data: { node: { comments: { nodes: [{ id: "102", author: { login: "bot" } }], pageInfo: { hasNextPage: false } } } },
+      }))
+      .mockResolvedValueOnce(response({
+        data: { repository: { pullRequest: { reviewThreads: {
+          nodes: [{ id: "t2", isResolved: true, comments: { nodes: [], pageInfo: { hasNextPage: false } } }],
+          pageInfo: { hasNextPage: false },
+        } } }, },
+      }));
     vi.stubGlobal("fetch", fetchMock);
-    expect(await new GitHubClient("token").listThreads("owner/repo", 1)).toHaveLength(2);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const threads = await new GitHubClient("token").listThreads("owner/repo", 1);
+    expect(threads).toHaveLength(2);
+    expect(threads[0].comments.nodes.map(comment => comment.id)).toEqual([101, 102]);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock.mock.calls.every(([url, init]) => url === "https://api.github.com/graphql" && !JSON.parse((init as RequestInit).body as string).query.match(/\bdatabaseId\b|\bside\b/))).toBe(true);
   });
 });
