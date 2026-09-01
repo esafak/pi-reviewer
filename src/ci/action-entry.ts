@@ -13,13 +13,19 @@ async function readEvent(): Promise<unknown> {
 }
 function ancestor(from: string, to: string, cwd = process.cwd()): boolean { try { execFileSync("git", ["merge-base", "--is-ancestor", from, to], { cwd, stdio: "ignore" }); return true; } catch { return false; } }
 function hasCommit(sha: string, cwd = process.cwd()): boolean { try { execFileSync("git", ["cat-file", "-e", `${sha}^{commit}`], { cwd, stdio: "ignore" }); return true; } catch { return false; } }
+function gitAuthArgs(): string[] {
+  const token = process.env.GITHUB_TOKEN;
+  if (!token) return [];
+  const auth = Buffer.from(`x-access-token:${token}`).toString("base64");
+  return ["-c", "http.https://github.com/.extraheader=", "-c", `http.https://github.com/.extraheader=AUTHORIZATION: basic ${auth}`];
+}
 function ensureCommit(sha: string, ref: string | undefined, cwd = process.cwd()): void {
   if (hasCommit(sha, cwd)) return;
   if (ref) {
-    try { execFileSync("git", ["fetch", "--no-tags", "origin", ref], { cwd }); } catch { /* try the authenticated SHA below */ }
+    try { execFileSync("git", [...gitAuthArgs(), "fetch", "--no-tags", "origin", ref], { cwd }); } catch { /* try the authenticated SHA below */ }
   }
   if (!hasCommit(sha, cwd)) {
-    execFileSync("git", ["fetch", "--no-tags", "origin", `+${sha}`], { cwd });
+    execFileSync("git", [...gitAuthArgs(), "fetch", "--no-tags", "origin", `+${sha}`], { cwd });
   }
   if (!hasCommit(sha, cwd)) throw new Error(`Git commit ${sha} is unavailable after fetching`);
 }

@@ -20,8 +20,11 @@ describe("GitHub Action Vite+ setup", () => {
 
     expect(action).toContain("- name: Ensure review history");
     expect(action).toContain("working-directory: ${{ github.workspace }}");
+    expect(action).toContain("GITHUB_TOKEN: ${{ inputs.github-token }}");
     expect(action).toContain("if [ -f .git/shallow ]; then");
-    expect(action).toContain("git fetch --unshallow --no-tags origin");
+    expect(action).toContain("http.https://github.com/.extraheader");
+    expect(action).toContain('http.https://github.com/.extraheader="');
+    expect(action).toMatch(/fetch --unshallow --no-tags\s+origin/);
     expect(action.indexOf("- name: Ensure review history")).toBeLessThan(
       action.indexOf("- name: Run review"),
     );
