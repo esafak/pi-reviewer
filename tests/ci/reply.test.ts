@@ -15,24 +15,39 @@ function client(comments: ReviewComment[] = [root, triggering], current = pr) {
     all.push({ id: 10_000 + all.length, body, in_reply_to_id: id, user: { login: "reviewer[bot]", type: "Bot" } });
     return all.at(-1)!;
   });
+  const createReviewCommentReaction = vi.fn(async () => ({ id: 11, content: "+1" }));
   return {
     listComments: vi.fn(async () => [...all]),
     listThreads: vi.fn(async () => [thread]),
     getPullRequest: vi.fn(async () => current),
     reply,
+    createReviewCommentReaction,
   };
 }
 
 describe("review-comment reply action path", () => {
   it("posts one response rooted at the finding and remains idempotent", async () => {
     const github = client();
-    const generate = vi.fn(async () => "That is explained by the validation step.");
+    const generate = vi.fn(async () => ({ action: "reply", body: "That is explained by the validation step." }));
 
     expect(await handleReply({ event, repo: "owner/repo", pullRequest: pr, identity: { login: "reviewer[bot]" }, github, generate })).toBe(true);
     expect(await handleReply({ event, repo: "owner/repo", pullRequest: pr, identity: { login: "reviewer[bot]" }, github, generate })).toBe(false);
     expect(github.reply).toHaveBeenCalledTimes(1);
     expect(github.reply).toHaveBeenCalledWith("owner/repo", 42, 8, expect.stringContaining(replyMarker(9, 8, "thread-1")));
     expect(generate).toHaveBeenCalledTimes(1);
+  });
+  it("reacts to the triggering user comment, not the root finding", async () => {
+    const github = client();
+    const generate = vi.fn(async () => ({ action: "react", content: "heart" }));
+    expect(await handleReply({ event, repo: "owner/repo", pullRequest: pr, identity: { login: "reviewer[bot]" }, github, generate })).toBe(true);
+    expect(github.createReviewCommentReaction).toHaveBeenCalledWith("owner/repo", 42, 9, "heart");
+    expect(github.reply).not.toHaveBeenCalled();
+  });
+  it("posts nothing for a malformed action", async () => {
+    const github = client();
+    await handleReply({ event, repo: "owner/repo", pullRequest: pr, identity: { login: "reviewer[bot]" }, github, generate: vi.fn(async () => "plain text") });
+    expect(github.reply).not.toHaveBeenCalled();
+    expect(github.createReviewCommentReaction).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -45,13 +60,13 @@ describe("review-comment reply action path", () => {
     const github = client([parent as ReviewComment, replyComment as ReviewComment], name === "resolved" ? pr : pr);
     if (name === "resolved") github.listThreads.mockResolvedValue([{ ...thread, isResolved: true }]);
 
-    await handleReply({ event: replyEvent as Event, repo: "owner/repo", pullRequest: pr, identity: { login: "reviewer[bot]" }, github, generate: vi.fn(async () => "answer") });
+    await handleReply({ event: replyEvent as Event, repo: "owner/repo", pullRequest: pr, identity: { login: "reviewer[bot]" }, github, generate: vi.fn(async () => ({ action: "reply", body: "answer" })) });
     expect(github.reply).not.toHaveBeenCalled();
   });
 
   it("posts nothing when the authenticated duplicate marker already exists", async () => {
     const github = client([root, triggering, { id: 10, body: replyMarker(9, 8, "thread-1"), user: { login: "reviewer[bot]" } }]);
-    await handleReply({ event, repo: "owner/repo", pullRequest: pr, identity: { login: "reviewer[bot]" }, github, generate: vi.fn(async () => "answer") });
+    await handleReply({ event, repo: "owner/repo", pullRequest: pr, identity: { login: "reviewer[bot]" }, github, generate: vi.fn(async () => ({ action: "reply", body: "answer" })) });
     expect(github.reply).not.toHaveBeenCalled();
   });
 
@@ -61,13 +76,13 @@ describe("review-comment reply action path", () => {
     ["wrong thread", replyMarker(9, 8, "thread-forged")],
   ])("does not trust a tampered %s marker", async (_name, marker) => {
     const github = client([root, triggering, { id: 10, body: marker, user: { login: "reviewer[bot]" } }]);
-    await handleReply({ event, repo: "owner/repo", pullRequest: pr, identity: { login: "reviewer[bot]" }, github, generate: vi.fn(async () => "answer") });
+    await handleReply({ event, repo: "owner/repo", pullRequest: pr, identity: { login: "reviewer[bot]" }, github, generate: vi.fn(async () => ({ action: "reply", body: "answer" })) });
     expect(github.reply).toHaveBeenCalledTimes(1);
   });
 
   it("does not let a human-authored forged marker suppress a response", async () => {
     const github = client([root, triggering, { id: 10, body: replyMarker(9, 8, "thread-1"), user: { login: "human" } }]);
-    await handleReply({ event, repo: "owner/repo", pullRequest: pr, identity: { login: "reviewer[bot]" }, github, generate: vi.fn(async () => "answer") });
+    await handleReply({ event, repo: "owner/repo", pullRequest: pr, identity: { login: "reviewer[bot]" }, github, generate: vi.fn(async () => ({ action: "reply", body: "answer" })) });
     expect(github.reply).toHaveBeenCalledTimes(1);
   });
 });

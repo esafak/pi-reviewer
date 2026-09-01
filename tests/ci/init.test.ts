@@ -42,6 +42,7 @@ describe("init", () => {
     expect(content).toContain("issue_comment:");
     expect(content).toContain("fetch-depth: 0");
     expect(content).toContain("cancel-in-progress: false");
+    expect(content).toContain("reactions: write");
     expect(content).toContain("review-drafts: 'false'");
     expect(content).toContain("          react-on-no-findings: 'true'");
   });

@@ -46,6 +46,7 @@ jobs:
       contents: read
       pull-requests: write
       issues: write
+      reactions: write
 
     concurrency:
       group: pi-reviewer-\${{ github.repository }}-\${{ github.event.pull_request.number || github.event.issue.number || inputs.pr-number || github.run_id }}

@@ -42,6 +42,7 @@ jobs:
       contents: read
       pull-requests: write
       issues: write # Required when react-on-no-findings is enabled.
+      reactions: write # Required for review-comment acknowledgements.
     concurrency:
       group: pi-reviewer-${{ github.repository }}-${{ github.event.pull_request.number || github.event.issue.number || inputs.pr-number || github.run_id }}
       cancel-in-progress: false
@@ -75,7 +76,9 @@ Commit it to your default branch, then add your API key to your repo secrets:
 
 ## Usage
 
-Every eligible PR event produces at most one review for the range since the last successful marker. A human reply from an OWNER, MEMBER, or COLLABORATOR to a Pi Reviewer inline finding receives a concise response in the same thread; threads rooted at human comments, bot-authored comments, status replies, or resolved threads are ignored. GitHub review-comment replies are root-targeted because GitHub exposes review threads as flat REST replies, so each authorized human message in an active finding thread can receive at most one response. Existing agent findings are reconciled in their original threads; human-authored threads are never changed. `/pi-review` is restricted to authorized internal PR commenters. Fork PRs are skipped. Replies are skipped if the PR head changes before processing, or if the PR is a draft while `review-drafts` is disabled.
+Replies to Pi Reviewer findings use a strict assistant action: low-information acknowledgements, thanks, agreement, and completion notices receive one GitHub review-comment reaction; substantive questions, requests, disagreements, uncertainty, and technical information receive a concise root-targeted reply. The workflow therefore requires `reactions: write` in addition to the existing permissions. Reactions are deduplicated by GitHub per comment, user, and reaction content; replies use an authenticated marker.
+
+Every eligible PR event produces at most one review for the range since the last successful marker. A human reply from an OWNER, MEMBER, or COLLABORATOR to a Pi Reviewer inline finding receives the reaction or concise response selected by the assistant; threads rooted at human comments, bot-authored comments, status replies, or resolved threads are ignored. GitHub review-comment replies are root-targeted because GitHub exposes review threads as flat REST replies, so each authorized human message in an active finding thread can receive at most one response. Existing agent findings are reconciled in their original threads; human-authored threads are never changed. `/pi-review` is restricted to authorized internal PR commenters. Fork PRs are skipped. Replies are skipped if the PR head changes before processing, or if the PR is a draft while `review-drafts` is disabled.
 
 The marker is authenticated with the identity returned by `GET /user` and contains the reviewed `fromSha`, `toSha`, event kind, and review ID. It is the durable state for batching—not an LLM session, transcript replay, Actions cache, or provider cache. If several pushes arrive while a runner is pending, the next run recomputes the complete range from the latest marker.
 
