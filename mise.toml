@@ -10,6 +10,10 @@ HK_MISE = "1"
 description = "Lint the project with Vite+"
 run = "vp lint"
 
+[tasks.test]
+description = "Run the test suite with Vite+"
+run = "vp test"
+
 [tasks.fmt]
 description = "Format the project with Vite+"
 run = "vp fmt"
