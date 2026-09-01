@@ -1,0 +1,27 @@
+dist/src/ci/action-entry.js
+  s_da854f0d33f843::t_9fcb97e14b1a84 7,105-108
+dist/src/ci/batch.js
+  s_da854f0d33f843::t_de0c9f70fb0b91 2,12-61
+dist/src/ci/github.js
+  s_da854f0d33f843::t_efcda3a3c33dca 76
+dist/src/ci/review.js
+  s_da854f0d33f843::t_56a90e1c48fae2 177
+dist/src/core/output.js
+  s_da854f0d33f843::t_13b8af6c1c9f21 5,102,109-162,409-415,421,425,437-438,441-443
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "092d53943a97c5795517e58aa1a0eb5863579c64",
+  "prompts": {},
+  "sessions": {
+    "s_da854f0d33f843": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fa2f62f3effecaS1k2NBkDXEVT",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "Emre Şafak <3928300+esafak@users.noreply.github.com>"
+    }
+  }
+}
