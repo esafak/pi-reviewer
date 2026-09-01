@@ -433,15 +433,24 @@ export async function sendOutput(options) {
                 // Keep the authenticated batch marker without adding visible review text.
                 // Reactions have no metadata, so the hidden review marker remains the
                 // durable range state used by the lifecycle reconciler.
+                let markerCreated = true;
                 if (options.batchMarker && options.commitId) {
-                    const markerReview = await client.createReview(options.repo, options.prNumber, options.batchMarker, options.commitId, []);
-                    if (markerReview.id) {
-                        const finalized = options.batchMarker.replace(/("reviewId"\s*:\s*)0/, `$1${markerReview.id}`);
-                        if (finalized !== options.batchMarker)
-                            await client.updateReview(options.repo, options.prNumber, markerReview.id, finalized).catch(error => console.warn(`[pi-reviewer] could not finalize batch marker: ${error instanceof Error ? error.message : String(error)}`));
+                    try {
+                        const markerReview = await client.createReview(options.repo, options.prNumber, options.batchMarker, options.commitId, []);
+                        if (markerReview.id) {
+                            const finalized = options.batchMarker.replace(/("reviewId"\s*:\s*)0/, `$1${markerReview.id}`);
+                            if (finalized !== options.batchMarker)
+                                await client.updateReview(options.repo, options.prNumber, markerReview.id, finalized).catch(error => console.warn(`[pi-reviewer] could not finalize batch marker: ${error instanceof Error ? error.message : String(error)}`));
+                        }
+                    }
+                    catch (error) {
+                        markerCreated = false;
+                        console.warn(`[pi-reviewer] could not create batch marker: ${error instanceof Error ? error.message : String(error)}`);
                     }
                 }
-                return { commentIds: [], fallback: false };
+                if (markerCreated)
+                    return { commentIds: [], fallback: false };
+                console.warn("[pi-reviewer] falling back to the normal no-findings comment");
             }
         }
         // Try PR Reviews API first (supports inline comments and a body).

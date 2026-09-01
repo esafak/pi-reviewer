@@ -561,6 +561,32 @@ describe("sendOutput", () => {
     expect(fetchMock.mock.calls[1][0]).toContain("/issues/42/comments");
   });
 
+  it("falls back to the normal review when batch marker creation fails", async () => {
+    const marker = '<!-- pi-reviewer:batch:v1 {"version":1,"fromSha":"base","toSha":"head","kind":"synchronize","actor":"review-bot","reviewId":0} -->';
+    const successfulReview = { ok: true, text: vi.fn().mockResolvedValue(""), json: vi.fn().mockResolvedValue({ id: 2 }), clone() { return this; } };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue(JSON.stringify({ head: { sha: "head" } })) })
+      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue(JSON.stringify({ login: "review-bot" })) })
+      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue(JSON.stringify([])) })
+      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue(JSON.stringify({ id: 1, content: "+1" })) })
+      .mockResolvedValueOnce({ ok: false, status: 500, statusText: "Server Error", text: vi.fn().mockResolvedValue("") })
+      .mockResolvedValueOnce(successfulReview);
+    vi.stubGlobal("fetch", fetchMock);
+
+    await sendOutput({
+      target: "comment",
+      content: JSON.stringify({ summary: "LGTM", comments: [] }),
+      githubToken: "token123",
+      prNumber: 42,
+      repo: "owner/repo",
+      commitId: "head",
+      batchMarker: marker,
+      reactOnNoFindings: true,
+    });
+
+    expect(fetchMock.mock.calls[5][0]).toContain("/pulls/42/reviews");
+  });
+
   it("refuses to post when the PR head changed during review", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
