@@ -1,0 +1,20 @@
+.pi/notes/README.md
+  h_ea91e2db23540f 4
+TODO.md
+  h_ea91e2db23540f 34-35
+src/core/ai-fix-footer.ts
+  h_ea91e2db23540f 34
+tests/core/output.test.ts
+  h_ea91e2db23540f 697,707-708
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "1886809cdb9ecbd5866395277b6df7b91462dbf2",
+  "prompts": {},
+  "humans": {
+    "h_ea91e2db23540f": {
+      "author": "Emre Şafak <3928300+esafak@users.noreply.github.com>"
+    }
+  }
+}
