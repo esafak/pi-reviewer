@@ -117,6 +117,20 @@ describe("resolved finding history", () => {
     expect(result.activeFindings[0].latestStatus).toBe("PARTIALLY_RESOLVED");
   });
 
+  it("decodes status metadata regardless of JSON key order", () => {
+    const result = collectFindingHistory({
+      login: "review-bot",
+      reviews: [],
+      issueComments: [],
+      comments: [
+        { id: 1, body: "<!-- pi-reviewer:finding:v1 -->\nissue", user: { login: "review-bot" }, path: "src/a.ts", line: 1, side: "RIGHT", created_at: "2026-01-01T00:00:00Z" },
+        { id: 2, body: "<!-- pi-reviewer:status:v1 {\"status\":\"RESOLVED\",\"findingId\":1,\"targetSha\":\"sha1\"} -->\nResolved", user: { login: "review-bot" }, in_reply_to_id: 1, created_at: "2026-01-01T00:01:00Z" },
+      ],
+      threads: [{ id: "t1", isResolved: true, comments: { nodes: [{ id: 1 }, { id: 2 }] } }],
+    });
+    expect(result.resolvedFindings[0]).toMatchObject({ resolutionTargetSha: "sha1", resolutionExplanation: "Resolved" });
+  });
+
   it("regresses the synthetic PR #1604 unchanged Loki review and permits only proven reraises", () => {
     const fixture = JSON.parse(readFileSync(path.resolve(process.cwd(), "tests/fixtures/resolved-loki-pr-1604.json"), "utf8")) as { finding: { file: string; line: number; side: "LEFT" | "RIGHT"; body: string }; laterDiff: string };
     const history = [{ historicalFindingId: "inline:42", originalBody: fixture.finding.body, ...fixture.finding }];

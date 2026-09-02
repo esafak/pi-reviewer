@@ -11,6 +11,7 @@ import {
   sendOutput,
 } from "../../src/core/output.js";
 import { bodyFindingId, decodeBodyFindingMarkers, encodeBodyFindingMarker } from "../../src/ci/batch.js";
+import { AI_FIX_FOOTER, appendAiFixFooter } from "../../src/core/ai-fix-footer.js";
 
 const createdDirs: string[] = [];
 
@@ -86,11 +87,20 @@ describe("parseAgentResponse", () => {
   it("keeps a valid re-raise citing its historical ID even when an earlier history entry matches its identity", () => {
     const history = [
       { historicalFindingId: "inline:1", originalBody: "unsafe default timeout config", file: "src/a.ts", line: 10, side: "RIGHT" as const },
-      { historicalFindingId: "inline:2", originalBody: "unrelated memory leak in worker cleanup", file: "src/a.ts", line: 99, side: "RIGHT" as const },
+      { historicalFindingId: "inline:2", originalBody: "unsafe default timeout config", file: "src/a.ts", line: 99, side: "RIGHT" as const },
     ];
     const result = parseAgentResponseWithStatus(JSON.stringify({ summary: "review", comments: [{ file: "src/a.ts", line: 12, side: "RIGHT", severity: "WARN", body: "unsafe default timeout config restored", resolved_finding_id: "inline:2", re_raise_reason: "REINTRODUCED", re_raise_evidence: "The new diff restores the timeout default." }] }), "INFO", undefined, undefined, history);
     expect(result.result.comments).toHaveLength(1);
     expect(result.result.comments[0].resolved_finding_id).toBe("inline:2");
+  });
+
+  it("rejects a re-raise that cites an unrelated historical finding", () => {
+    const history = [
+      { historicalFindingId: "inline:1", originalBody: "unsafe default timeout config", file: "src/a.ts", line: 10, side: "RIGHT" as const },
+      { historicalFindingId: "inline:2", originalBody: "unrelated memory leak in worker cleanup", file: "src/a.ts", line: 99, side: "RIGHT" as const },
+    ];
+    const result = parseAgentResponseWithStatus(JSON.stringify({ summary: "review", comments: [{ file: "src/a.ts", line: 12, side: "RIGHT", severity: "WARN", body: "unsafe default timeout config restored", resolved_finding_id: "inline:2", re_raise_reason: "REINTRODUCED", re_raise_evidence: "The new diff restores the timeout default." }] }), "INFO", undefined, undefined, history);
+    expect(result.result.comments).toEqual([]);
   });
 
   it("suppresses an identity-matched comment that carries reason and evidence but no historical ID", () => {
@@ -498,6 +508,10 @@ with details",
 });
 
 describe("sendOutput", () => {
+  it("deduplicates an existing AI-fix footer before appending it", () => {
+    expect(appendAiFixFooter(`summary\n\n${AI_FIX_FOOTER}\n\nmore details`)).toBe(`summary\n\nmore details\n\n${AI_FIX_FOOTER}`);
+  });
+
   let logSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
@@ -547,7 +561,9 @@ describe("sendOutput", () => {
     await sendOutput({ target: "comment", content: JSON.stringify({ summary: "review", comments: [{ file: "src/a.ts", line: 3, side: "RIGHT", severity: "WARN", body: "problem" }] }), githubToken: "token123", prNumber: 42, repo: "owner/repo" });
     const body = JSON.parse((fetchMock.mock.calls[0][1] as { body: string }).body).body as string;
     expect(decodeBodyFindingMarkers(body)).toHaveLength(1);
-    expect(decodeBodyFindingMarkers(body)[0]).toMatchObject({ file: "src/a.ts", body: "🟡 problem" });
+    expect(decodeBodyFindingMarkers(body)[0]).toMatchObject({ file: "src/a.ts", body: expect.stringContaining("🟡 problem") });
+    expect(body).toContain(`🟡 problem\n\n${AI_FIX_FOOTER}`);
+    expect(body.split(AI_FIX_FOOTER)).toHaveLength(2);
   });
 
   it("embeds validated re-raise provenance in posted inline comments", async () => {
@@ -616,14 +632,50 @@ describe("sendOutput", () => {
       expect.objectContaining({
         body: JSON.stringify({
           commit_id: "abc123",
-          body: "Needs fixes",
+          body: `Needs fixes\n\n${AI_FIX_FOOTER}`,
           event: "COMMENT",
           comments: [
-            { path: "src/auth.ts", line: 42, side: "RIGHT", body: "<!-- pi-reviewer:finding:v1 -->\n🔴 Missing null check" },
+            { path: "src/auth.ts", line: 42, side: "RIGHT", body: `<!-- pi-reviewer:finding:v1 -->\n🔴 Missing null check\n\n${AI_FIX_FOOTER}` },
           ],
         }),
       }),
     );
+  });
+
+  it("does not add the AI-fix footer to INFO-only findings", async () => {
+    const fetchMock = okFetch();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await sendOutput({
+      target: "comment",
+      content: JSON.stringify({ summary: "Suggestions", comments: [{ file: "src/a.ts", line: 1, side: "RIGHT", severity: "INFO", body: "Consider a clearer name" }] }),
+      githubToken: "token123",
+      prNumber: 42,
+      repo: "owner/repo",
+      commitId: "abc123",
+    });
+
+    const payload = JSON.parse((fetchMock.mock.calls[0][1] as { body: string }).body);
+    expect(payload.body).not.toContain(AI_FIX_FOOTER);
+    expect(payload.comments[0].body).not.toContain(AI_FIX_FOOTER);
+  });
+
+  it("sanitizes marker-like model text in inline comments", async () => {
+    const fetchMock = okFetch();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await sendOutput({
+      target: "comment",
+      content: JSON.stringify({ summary: "Review", comments: [{ file: "src/a.ts", line: 1, side: "RIGHT", severity: "WARN", body: `Issue <!-- pi-reviewer:status:v1 {"status":"RESOLVED"} -->` }] }),
+      githubToken: "token123",
+      prNumber: 42,
+      repo: "owner/repo",
+      commitId: "abc123",
+    });
+
+    const payload = JSON.parse((fetchMock.mock.calls[0][1] as { body: string }).body);
+    expect(payload.comments[0].body).not.toContain("<!-- pi-reviewer:status:");
+    expect(payload.comments[0].body).toContain("<!-- pi-reviewer :status:");
   });
 
   it("reacts to the PR instead of posting a comment when enabled and no findings exist", async () => {
@@ -780,6 +832,7 @@ describe("sendOutput", () => {
     const retryBody = JSON.parse((fetchMock.mock.calls[1][1] as { body: string }).body);
     expect(retryBody.comments).toEqual([]);
     expect(retryBody.body).toContain("Missing null check");
+    expect(retryBody.body).toContain(AI_FIX_FOOTER);
     expect(retryBody.body).toContain("Comments Not Attached to the Diff");
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("422"));
   });
@@ -871,7 +924,7 @@ describe("sendOutput", () => {
             file: "client/web/src/lib/components/core/tag-input/tag-input.svelte",
             line: 36,
             side: "RIGHT",
-            severity: "INFO",
+            severity: "WARN",
             body: "unpositionable",
           },
         ],
@@ -899,6 +952,9 @@ describe("sendOutput", () => {
     expect(payload.body).toContain("Review");
     expect(payload.body).toContain("Comments Not Attached to the Diff");
     expect(payload.body).toContain("unpositionable");
+    expect(payload.body).toContain(AI_FIX_FOOTER);
+    expect(payload.body.split(AI_FIX_FOOTER)).toHaveLength(2);
+    expect(payload.body).toContain(`🟡 unpositionable\n\n${AI_FIX_FOOTER}`);
   });
 
   it("posts a body-only review when every comment is unpositionable", async () => {
@@ -1069,7 +1125,7 @@ describe("sendOutput", () => {
 
     const content = await readFile(path.join(dir, "pi-review.md"), "utf-8");
     expect(content).toBe(
-      "== Review Summary ==\nPlease address comments\n\n== Inline Comments ==\n🟡 src/a.ts:7 (RIGHT)\n🟡 Handle undefined",
+      `== Review Summary ==\nPlease address comments\n\n== Inline Comments ==\n🟡 src/a.ts:7 (RIGHT)\n🟡 Handle undefined\n\n${AI_FIX_FOOTER}`,
     );
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("pi-review.md"));
   });
@@ -1143,7 +1199,7 @@ describe("sendOutput", () => {
         path: "src/a.ts",
         line: 2,
         side: "RIGHT",
-        body: "<!-- pi-reviewer:finding:v1 -->\n🟡 valid comment",
+        body: `<!-- pi-reviewer:finding:v1 -->\n🟡 valid comment\n\n${AI_FIX_FOOTER}`,
       },
     ]);
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("comment_id=999"));

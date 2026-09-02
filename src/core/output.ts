@@ -4,6 +4,7 @@ import path from "node:path";
 import { parseDiffPositions, partitionComments } from "./diff-positions.js";
 import { GitHubClient } from "../ci/github.js";
 import { bodyFindingId, decodeBodyFindingMarkers, encodeBodyFindingMarker, updateBodyFindingMarker } from "../ci/batch.js";
+import { AI_FIX_FOOTER, appendAiFixFooter } from "./ai-fix-footer.js";
 
 export type OutputTarget = "terminal" | "comment" | "file";
 export type Severity = "CRITICAL" | "WARN" | "INFO";
@@ -128,16 +129,21 @@ function normalizeReviewResult(result: ReviewResult, options: Pick<OutputOptions
     .filter((comment) => {
       const history = options.resolvedFindings ?? [];
       if (comment.resolved_finding_id && !history.some(f => f.historicalFindingId === comment.resolved_finding_id)) {
-        if (warnInvalidUpdates) console.warn("[pi-reviewer] dropped re-raise: unknown historical finding ID");
+        console.warn("[pi-reviewer] dropped re-raise: unknown historical finding ID");
         return false;
       }
-      const match = (comment.resolved_finding_id ? history.find(f => f.historicalFindingId === comment.resolved_finding_id) : undefined)
+      const cited = comment.resolved_finding_id ? history.find(f => f.historicalFindingId === comment.resolved_finding_id) : undefined;
+      if (cited && !hasCompatibleHistoricalLink(comment, cited)) {
+        console.warn("[pi-reviewer] dropped re-raise: historical finding does not match candidate");
+        return false;
+      }
+      const match = cited
         ?? history.find(f => hasMatchingFindingIdentity(comment, f));
       if (!match) return true;
       // Identity matches without an explicit historical link stay suppressed,
       // so the ID equality check below is what enforces the provenance link.
       const valid = comment.resolved_finding_id === match.historicalFindingId && ["REINTRODUCED", "MATERIALLY_CHANGED", "CONTRADICTORY_EVIDENCE"].includes(comment.re_raise_reason ?? "") && typeof comment.re_raise_evidence === "string" && comment.re_raise_evidence.trim().length > 0 && comment.re_raise_evidence.length <= 2000;
-      if (!valid && warnInvalidUpdates) console.warn(`[pi-reviewer] dropped re-raise for historical finding ${match.historicalFindingId}: invalid provenance`);
+      if (!valid) console.warn("[pi-reviewer] dropped re-raise: invalid provenance");
       return valid;
     })
     .map((comment) => {
@@ -484,14 +490,16 @@ export function parseAgentResponseWithStatus(
 /** Stable identity used to avoid reposting the same finding in a batch. */
 export function normalizeFinding(comment: Pick<ReviewComment, "file" | "line" | "side" | "body">): string {
   const storedBody = decodeBodyFindingMarkers(comment.body)[0]?.body;
-  const body = (storedBody ?? comment.body).replace(/<!--\s*pi-reviewer\s*:\s*[\s\S]*?-->/g, "").trim().replace(/^[🔴🟡🔵]\s*/u, "").trim().replace(/\n\s*\n+/g, "\n");
+  const body = (storedBody ?? comment.body).replace(/<!--\s*pi-reviewer\s*:\s*[\s\S]*?-->/g, "").replace(AI_FIX_FOOTER, "").trim().replace(/^[🔴🟡🔵]\s*/u, "").trim().replace(/\n\s*\n+/g, "\n");
   return [comment.file, comment.line, comment.side, body].join("\0");
 }
 
+/** Normalizes visible finding prose for resilient historical identity matching. */
 function normalizedFindingBody(body: string): string {
-  return body.replace(/<!--\s*pi-reviewer\s*:\s*[\s\S]*?-->/g, "").replace(/^[🔴🟡🔵]\s*/u, "").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+  return body.replace(/<!--\s*pi-reviewer\s*:\s*[\s\S]*?-->/g, "").replace(AI_FIX_FOOTER, "").replace(/^[🔴🟡🔵]\s*/u, "").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
 }
 
+/** Checks the file, side, and normalized prose identity of two findings. */
 function hasMatchingFindingIdentity(candidate: ReviewComment, historical: ResolvedFinding): boolean {
   if (historical.file !== candidate.file || historical.side !== candidate.side) return false;
   const candidateBody = normalizedFindingBody(candidate.body);
@@ -502,6 +510,22 @@ function hasMatchingFindingIdentity(candidate: ReviewComment, historical: Resolv
   if (left.size === 0 || right.size === 0) return false;
   const overlap = [...left].filter(token => right.has(token)).length;
   return overlap / Math.max(left.size, right.size) >= 0.6;
+}
+
+/** Validates that a cited historical ID belongs to the candidate finding. */
+function hasCompatibleHistoricalLink(candidate: ReviewComment, historical: ResolvedFinding): boolean {
+  if (historical.file !== candidate.file || historical.side !== candidate.side) return false;
+  return historical.line === candidate.line || hasMatchingFindingIdentity(candidate, historical);
+}
+
+/** Returns whether a review contains a finding requiring an explicit fix. */
+function hasActionableFindings(comments: ReviewComment[]): boolean {
+  return comments.some(comment => comment.severity === "WARN" || comment.severity === "CRITICAL");
+}
+
+/** Adds the fix instruction only to actionable individual findings. */
+function appendFindingFooter(comment: ReviewComment, body: string): string {
+  return comment.severity === "WARN" || comment.severity === "CRITICAL" ? appendAiFixFooter(body) : body;
 }
 
 /** Keep model-controlled text from becoming metadata when it is shown in a review body. */
@@ -534,7 +558,7 @@ function formatForGitHub(result: ReviewResult, provenance: ReRaiseProvenanceOpti
   if (result.comments.length > 0) {
     lines.push("", "### Inline Comments");
     for (const comment of result.comments) {
-      const visibleBody = `${reRaiseMetadata(comment, provenance)}${sanitizeVisibleReviewText(comment.body)}`;
+      const visibleBody = appendFindingFooter(comment, `${reRaiseMetadata(comment, provenance)}${sanitizeVisibleReviewText(comment.body)}`);
       lines.push(
         "",
         encodeBodyFindingMarker({ findingId: bodyFindingId(normalizeFinding(comment)), file: comment.file, line: comment.line, side: comment.side, severity: comment.severity, body: visibleBody }),
@@ -544,7 +568,8 @@ function formatForGitHub(result: ReviewResult, provenance: ReRaiseProvenanceOpti
     }
   }
 
-  return lines.join("\n");
+  const body = lines.join("\n");
+  return hasActionableFindings(result.comments) ? appendAiFixFooter(body) : body;
 }
 
 /**
@@ -552,12 +577,12 @@ function formatForGitHub(result: ReviewResult, provenance: ReRaiseProvenanceOpti
  * comments that could not be attached to a diff line. GitHub shows the body as
  * the review's main text, so moved comments stay visible to the author.
  */
-function buildReviewBody(summary: string, moved: ReviewComment[], provenance: ReRaiseProvenanceOptions): string {
-  if (moved.length === 0) return sanitizeVisibleReviewText(summary);
+function buildReviewBody(summary: string, moved: ReviewComment[], provenance: ReRaiseProvenanceOptions, includeFooter: boolean): string {
+  if (moved.length === 0) return includeFooter ? appendAiFixFooter(sanitizeVisibleReviewText(summary)) : sanitizeVisibleReviewText(summary);
   const lines = [sanitizeVisibleReviewText(summary), "", "### Comments Not Attached to the Diff", ""];
   lines.push("These comments could not be attached to a specific diff line, so the reported location is approximate — the line is not part of the diff:");
   for (const comment of moved) {
-    const visibleBody = `${reRaiseMetadata(comment, provenance)}${sanitizeVisibleReviewText(comment.body)}`;
+    const visibleBody = appendFindingFooter(comment, `${reRaiseMetadata(comment, provenance)}${sanitizeVisibleReviewText(comment.body)}`);
     const findingId = bodyFindingId(normalizeFinding(comment));
     lines.push(
       "",
@@ -566,7 +591,8 @@ function buildReviewBody(summary: string, moved: ReviewComment[], provenance: Re
       visibleBody
     );
   }
-  return lines.join("\n");
+  const body = lines.join("\n");
+  return includeFooter ? appendAiFixFooter(body) : body;
 }
 
 export function formatForTerminal(result: ReviewResult): string {
@@ -575,9 +601,10 @@ export function formatForTerminal(result: ReviewResult): string {
   if (result.comments.length > 0) {
     lines.push("", "== Inline Comments ==");
     for (const comment of result.comments) {
+      const visibleBody = appendFindingFooter(comment, sanitizeVisibleReviewText(comment.body));
       lines.push(
         `${SEVERITY_EMOJI[comment.severity]} ${comment.file}:${comment.line} (${comment.side})`,
-        comment.body.replace(/<!--\s*pi-reviewer\s*:\s*[\s\S]*?-->/g, "").trim(),
+        visibleBody.replace(/<!--\s*pi-reviewer\s*:\s*[\s\S]*?-->/g, "").trim(),
         ""
       );
     }
@@ -587,7 +614,8 @@ export function formatForTerminal(result: ReviewResult): string {
     }
   }
 
-  return lines.join("\n");
+  const body = lines.join("\n");
+  return hasActionableFindings(result.comments) ? appendAiFixFooter(body) : body;
 }
 
 export async function sendOutput(options: OutputOptions): Promise<OutputMetadata> {
@@ -656,10 +684,10 @@ export async function sendOutput(options: OutputOptions): Promise<OutputMetadata
       path: comment.file,
       line: comment.line,
       side: comment.side,
-      body: `<!-- pi-reviewer:finding:v1 -->\n${reRaiseMetadata(comment, options)}${comment.body}`,
+      body: `<!-- pi-reviewer:finding:v1 -->\n${appendFindingFooter(comment, `${reRaiseMetadata(comment, options)}${sanitizeVisibleReviewText(comment.body)}`)}`,
     }));
 
-    const body = [options.batchMarker, buildReviewBody(result.summary, moved, options)].filter(Boolean).join("\n\n");
+    const body = [options.batchMarker, buildReviewBody(result.summary, moved, options, hasActionableFindings(result.comments))].filter(Boolean).join("\n\n");
 
     if (options.commitId && (options.batchMarker || (options.reactOnNoFindings && result.comments.length === 0))) {
       const current = await new GitHubClient(options.githubToken).getPullRequest(options.repo, options.prNumber);
@@ -738,7 +766,7 @@ export async function sendOutput(options: OutputOptions): Promise<OutputMetadata
           const posted = await reviewResponse.clone().json().catch(() => undefined) as { id?: number } | undefined;
           if (posted?.id) {
             const finalized = options.batchMarker.replace(/("reviewId"\s*:\s*)0/, `$1${posted.id}`);
-            if (finalized !== options.batchMarker) await new GitHubClient(options.githubToken).updateReview(options.repo, options.prNumber, posted.id, [finalized, buildReviewBody(result.summary, moved, options)].join("\n\n")).catch(error => console.warn(`[pi-reviewer] could not finalize batch marker: ${error instanceof Error ? error.message : String(error)}`));
+            if (finalized !== options.batchMarker) await new GitHubClient(options.githubToken).updateReview(options.repo, options.prNumber, posted.id, [finalized, buildReviewBody(result.summary, moved, options, hasActionableFindings(result.comments))].join("\n\n")).catch(error => console.warn(`[pi-reviewer] could not finalize batch marker: ${error instanceof Error ? error.message : String(error)}`));
           }
         }
         if (!findingUpdatesReconciled && result.finding_updates?.length && options.existingFindings && options.githubToken && options.repo && options.prNumber && options.commitId) {
@@ -756,7 +784,7 @@ export async function sendOutput(options: OutputOptions): Promise<OutputMetadata
       // valid (e.g. a force-push changed the diff between resolution and post).
       // Retry once as a body-only review, moving every comment into the body.
       if (reviewResponse.status === 422) {
-        const allMovedBody = [options.batchMarker, buildReviewBody(result.summary, comments, options)].filter(Boolean).join("\n\n");
+        const allMovedBody = [options.batchMarker, buildReviewBody(result.summary, comments, options, hasActionableFindings(result.comments))].filter(Boolean).join("\n\n");
         reviewResponse = await fetch(
           `https://api.github.com/repos/${options.repo}/pulls/${options.prNumber}/reviews`,
           {

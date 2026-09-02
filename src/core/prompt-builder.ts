@@ -17,6 +17,20 @@ const SEVERITY_RULE: Record<MinSeverity, string | null> = {
   CRITICAL: "- Only report CRITICAL issues — skip WARN and INFO",
 };
 export const RESOLVED_HISTORY_LIMIT = 120_000;
+export const RESOLVED_HISTORY_COUNT_LIMIT = 50;
+
+/** Selects the deterministic, bounded history supplied to the reviewer. */
+export function selectResolvedFindings(findings: ResolvedFindingContext[]): ResolvedFindingContext[] {
+  const selected: ResolvedFindingContext[] = [];
+  let used = 0;
+  for (const finding of findings.slice().sort((a, b) => a.historicalFindingId.localeCompare(b.historicalFindingId)).slice(0, RESOLVED_HISTORY_COUNT_LIMIT)) {
+    const record = JSON.stringify({ historical_finding_id: finding.historicalFindingId, kind: finding.kind, file: finding.file, line: finding.line, side: finding.side, original_body: finding.originalBody.slice(0, 2000), source_batch: finding.sourceBatch, resolution_target_sha: finding.resolutionTargetSha, resolution_explanation: finding.resolutionExplanation?.slice(0, 2000), conversation: finding.conversation?.slice(0, 6000) });
+    if (used + record.length + (selected.length ? 1 : 0) > RESOLVED_HISTORY_LIMIT) break;
+    selected.push(finding);
+    used += record.length + (selected.length > 1 ? 1 : 0);
+  }
+  return selected;
+}
 
 function mergeContent(files: ContextFile[]): string {
   return files.map(f => f.content).join("\n\n");
@@ -103,14 +117,10 @@ export function buildJSONSystemPrompt(
     sections.push(`<active_findings>\n${findings}\n</active_findings>\nDo not repost these findings in comments; report their changes in finding_updates using the supplied comment_id.`);
   }
   if (resolvedFindings.length > 0) {
-    const records: string[] = [];
-    let used = 0;
-    for (const f of resolvedFindings.slice(0, 50).sort((a, b) => a.historicalFindingId.localeCompare(b.historicalFindingId))) {
+    const records = selectResolvedFindings(resolvedFindings).map(f => {
       const record = JSON.stringify({ historical_finding_id: f.historicalFindingId, kind: f.kind, file: f.file, line: f.line, side: f.side, original_body: f.originalBody.slice(0, 2000), source_batch: f.sourceBatch, resolution_target_sha: f.resolutionTargetSha, resolution_explanation: f.resolutionExplanation?.slice(0, 2000), conversation: f.conversation?.slice(0, 6000) });
-      if (used + record.length + (records.length ? 1 : 0) > RESOLVED_HISTORY_LIMIT) break;
-      records.push(record);
-      used += record.length + (records.length > 1 ? 1 : 0);
-    }
+      return record;
+    });
     const findings = records.join("\n");
     sections.push(`<resolved_findings>\n${findings}\n</resolved_findings>\nResolved findings are review history, not active targets. Do not repost a matching finding unless the current diff reintroduces it, materially changes the relevant behavior, or provides contradictory evidence. A re-raised comment must include resolved_finding_id, re_raise_reason (REINTRODUCED, MATERIALLY_CHANGED, or CONTRADICTORY_EVIDENCE), and non-empty re_raise_evidence grounded in the current diff.`);
   }
