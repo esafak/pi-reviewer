@@ -49,6 +49,16 @@ jobs:
         shell: bash
         run: git fetch origin '+refs/pull/*/head:refs/remotes/origin/pr/*' --no-tags
 
+      - name: Generate GitHub App token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        id: bot-token
+        with:
+          client-id: ${{ secrets.PI_REVIEWER_CLIENT_ID }}
+          private-key: ${{ secrets.PI_REVIEWER_PK }}
+          permission-contents: write
+          permission-pull-requests: write
+          permission-issues: write
+
       # Cache Vite+ against the repository checkout. The composite action keeps
       # its own pnpm-store cache because setup-vp cannot reliably hash files
       # from the action checkout.
@@ -86,9 +96,9 @@ jobs:
           printf 'PI_API_KEY=%s\n' "$key" >> "$GITHUB_ENV"
 
       - name: Review
-        uses: esafak/pi-reviewer@f6970f72b9590abe1a52b5205d6c2254e8f68a7e # latest main
+        uses: esafak/pi-reviewer@e44dbb2904982dddf7af2d5eaa0699c82c3f08fc # latest main
         with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+          github-token: ${{ steps.bot-token.outputs.token }}
           pi-api-key: ${{ env.PI_API_KEY }}
           model: ${{ vars.MODEL_NAME }}
           thinking: off
