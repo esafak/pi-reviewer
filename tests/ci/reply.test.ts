@@ -33,7 +33,7 @@ describe("review-comment reply action path", () => {
     expect(await handleReply({ event, repo: "owner/repo", pullRequest: pr, identity: { login: "reviewer[bot]" }, github, generate })).toBe(true);
     expect(await handleReply({ event, repo: "owner/repo", pullRequest: pr, identity: { login: "reviewer[bot]" }, github, generate })).toBe(false);
     expect(github.reply).toHaveBeenCalledTimes(1);
-    expect(github.reply).toHaveBeenCalledWith("owner/repo", 42, 8, `${replyMarker(9, 8, "thread-1")}\n<details>\n<summary>Prompt to fix with AI</summary>\n\n**Context:** \`src/example.ts:12\` · RIGHT\n\nThat is explained by the validation step.\n\nFor each issue above, determine whether it is valid. If so, fix it iteratively with one reviewer agent until convergence.\n\n</details>`);
+    expect(github.reply).toHaveBeenCalledWith("owner/repo", 42, 8, `${replyMarker(9, 8, "thread-1")}\n<details>\n<summary>Prompt to fix with AI</summary>\n\n\`\`\`\nREPLY: src/example.ts:12\n\nThat is explained by the validation step.\n\nFor each issue above, determine whether it is valid. If so, fix it iteratively with one reviewer agent until convergence.\n\`\`\`\n\n</details>`);
     expect(generate).toHaveBeenCalledTimes(1);
   });
   it("reacts to the triggering user comment, not the root finding", async () => {
