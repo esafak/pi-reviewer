@@ -31,7 +31,7 @@ export function removeAiFixFooter(body: string): string {
  * space keeps the visible text unchanged.
  */
 function neutralizeDetailsTags(text: string): string {
-  return text.replace(/<(\/?)(details|summary)(\s[^>]*)?>/gi, (tag) => tag.replace(/^</, "<\u200b"));
+  return text.replace(/<(\/?)(details|summary)(?:\s[^>]*)?[/]?>/gi, (tag) => tag.replace(/^</, "<\u200b"));
 }
 
 /** Renders a copyable, self-contained prompt for one actionable finding. */

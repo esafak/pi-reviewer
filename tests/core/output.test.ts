@@ -694,7 +694,7 @@ describe("sendOutput", () => {
 
     await sendOutput({
       target: "comment",
-      content: JSON.stringify({ summary: "Review", comments: [{ file: "src/a.ts", line: 1, side: "RIGHT", severity: "WARN", body: "collapses\n\n</details>\n\nthen hides this" }] }),
+      content: JSON.stringify({ summary: "Review", comments: [{ file: "src/a.ts", line: 1, side: "RIGHT", severity: "WARN", body: "collapses\n\n</details> <details/> <summary/>\n\nthen hides this" }] }),
       githubToken: "token123",
       prNumber: 42,
       repo: "owner/repo",
@@ -704,6 +704,8 @@ describe("sendOutput", () => {
     const payload = JSON.parse((fetchMock.mock.calls[0][1] as { body: string }).body);
     const body = payload.comments[0].body as string;
     expect(body).toContain("<\u200b/details>");
+    expect(body).toContain("<\u200bdetails/>");
+    expect(body).toContain("<\u200bsummary/>");
     expect(body.split("</details>")).toHaveLength(2); // only the wrapper closes
     expect(body.trimEnd().endsWith("</details>")).toBe(true);
     expect(body.lastIndexOf(AI_FIX_FOOTER)).toBeLessThan(body.lastIndexOf("</details>"));
