@@ -1,0 +1,28 @@
+src/ci/batch.ts
+  h_ea91e2db23540f 22,60-69,80-81,87-88,90
+src/ci/reply.ts
+  h_ea91e2db23540f 5,56
+src/ci/review.ts
+  h_ea91e2db23540f 10,132-133,283
+src/core/ai-fix-footer.ts
+  h_ea91e2db23540f 1-7
+src/core/output.ts
+  h_ea91e2db23540f 7,132,135-140,146,493,497,499,502,515-530,561,571-572,580-581,585,594-595,604,607,617-618,687,690,769,787
+src/core/prompt-builder.ts
+  h_ea91e2db23540f 20-33,120,122-123
+tests/ci/batch.test.ts
+  h_ea91e2db23540f 120-133
+tests/core/output.test.ts
+  h_ea91e2db23540f 14,90,97-105,511-514,564-566,635,638,645-680,835,927,955-957,1128,1202
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "981455c3aeff82232b5032bd61ceebc1ad810158",
+  "prompts": {},
+  "humans": {
+    "h_ea91e2db23540f": {
+      "author": "Emre Şafak <3928300+esafak@users.noreply.github.com>"
+    }
+  }
+}
