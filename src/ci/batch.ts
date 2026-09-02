@@ -14,8 +14,13 @@ export interface BodyFinding {
   targetSha?: string;
   explanation?: string;
 }
+export interface FindingHistoryComment { id: number; body: string; user?: { login?: string }; path?: string; line?: number; side?: string; pull_request_review_id?: number; in_reply_to_id?: number; created_at?: string }
+export interface FindingHistorySource { id: number; body?: string | null; user?: { login?: string }; created_at?: string }
+export interface FindingHistoryThread { id: string; isResolved: boolean; comments: { nodes: Array<{ id: number }> } }
 const marker = /<!-- pi-reviewer:batch:v1 (\{[^\n]*\}) -->/;
 const bodyFindingMarker = /<!-- pi-reviewer:body-finding:v1 (\{[^\n]*\}) -->/g;
+const statusMarker = /<!--\s*pi-reviewer:status:v1\s+(\{[^\n]*\})\s*-->/;
+const piReviewerFindingMarker = "<!-- pi-reviewer:finding:v1 -->";
 export function encodeBatchMarker(value: Omit<BatchMarker, "version">) { return `<!-- pi-reviewer:batch:v1 ${JSON.stringify({ version: 1, ...value })} -->`; }
 export function decodeBatchMarker(body: string | null | undefined): BatchMarker | undefined { const match = body?.match(marker); if (!match) return undefined; try { const value = JSON.parse(match[1]); return value.version === 1 && typeof value.fromSha === "string" && typeof value.toSha === "string" && typeof value.actor === "string" && typeof value.reviewId === "number" ? value : undefined; } catch { return undefined; } }
 export function bodyFindingId(identity: string): number {
@@ -53,8 +58,41 @@ export function updateBodyFindingMarker(body: string, findingId: number, status:
     } catch { return raw; }
   });
 }
-export function reconstructBodyFindings(reviews: Array<{ id: number; body?: string | null; user?: { login?: string } }>, login: string) {
-  return reviews.flatMap(review => decodeBodyFindingMarkers(review.body).filter(f => review.user?.login === login && f.status !== "RESOLVED").map(f => ({ commentId: f.findingId, reviewId: review.id, bodyFinding: true, reviewBody: review.body ?? "", file: f.file, line: f.line, side: f.side, body: f.body, sourceBatch: undefined, latestStatus: f.status === "PARTIALLY_RESOLVED" ? "PARTIALLY_RESOLVED" : undefined })));
+/** Decodes bot lifecycle metadata without relying on JSON property ordering. */
+function decodeStatusMarker(body: string): { targetSha: string; status: FindingUpdate["status"] } | undefined {
+  const match = body.match(statusMarker);
+  if (!match) return undefined;
+  try {
+    const value = JSON.parse(match[1]) as Record<string, unknown>;
+    if (typeof value.targetSha !== "string" || !["RESOLVED", "PARTIALLY_RESOLVED", "STILL_OPEN"].includes(value.status as string)) return undefined;
+    return { targetSha: value.targetSha, status: value.status as FindingUpdate["status"] };
+  } catch { return undefined; }
+}
+/** Reconstructs active findings and immutable history from one PR snapshot. */
+export function collectFindingHistory(input: { reviews: FindingHistorySource[]; issueComments: FindingHistorySource[]; comments: FindingHistoryComment[]; threads: FindingHistoryThread[]; login: string }) {
+  const batchByReview = new Map(input.reviews.map(r => [r.id, decodeBatchMarker(r.body)]));
+  const threadByComment = new Map(input.threads.flatMap(t => t.comments.nodes.map(c => [c.id, { id: t.id, resolved: t.isResolved }] as const)));
+  const threadCommentIds = new Map(input.threads.map(t => [t.id, new Set(t.comments.nodes.map(c => c.id))]));
+  // Only the bot's own status replies are authoritative lifecycle state; human
+  // replies may quote or spoof marker text and must never influence it.
+  const roots = input.comments.filter(c => c.user?.login === input.login && c.id > 0 && isPiReviewerRootComment(c));
+  const inline = roots.filter(c => !threadByComment.get(c.id)?.resolved).map(c => {
+    const batch = c.pull_request_review_id ? batchByReview.get(c.pull_request_review_id) : undefined;
+    const statusReplies = input.comments.filter(reply => reply.in_reply_to_id === c.id && reply.user?.login === input.login && decodeStatusMarker(reply.body)).sort((a, b) => a.id - b.id);
+    return { commentId: c.id, threadId: threadByComment.get(c.id)?.id, file: c.path, line: c.line, side: c.side, body: c.body, sourceBatch: batch ? `${batch.fromSha}..${batch.toSha}` : undefined, latestStatus: statusReplies.at(-1) ? decodeStatusMarker(statusReplies.at(-1)!.body)?.status : undefined };
+  });
+  const resolved = roots.filter(c => threadByComment.get(c.id)?.resolved).map(c => {
+    const threadId = threadByComment.get(c.id)?.id;
+    const ids = threadId ? threadCommentIds.get(threadId) : undefined;
+    const conversation = input.comments.filter(reply => ids?.has(reply.id) || reply.id === c.id || reply.in_reply_to_id === c.id).sort((a, b) => (Date.parse(a.created_at ?? "") || 0) - (Date.parse(b.created_at ?? "") || 0) || a.id - b.id).map(reply => `${reply.user?.login ?? "unknown"}: ${reply.body}`).join("\n").slice(0, 8000);
+    const resolutionReply = input.comments.filter(reply => reply.in_reply_to_id === c.id && reply.user?.login === input.login && decodeStatusMarker(reply.body)).sort((a, b) => a.id - b.id).at(-1);
+    const resolution = resolutionReply ? decodeStatusMarker(resolutionReply.body) : undefined;
+    const batch = c.pull_request_review_id ? batchByReview.get(c.pull_request_review_id) : undefined;
+    return { historicalFindingId: `inline:${c.id}`, commentId: c.id, threadId, kind: "inline" as const, file: c.path, line: c.line, side: c.side, body: c.body, originalBody: c.body.replace(piReviewerFindingMarker, "").trim(), sourceBatch: batch ? `${batch.fromSha}..${batch.toSha}` : undefined, resolutionTargetSha: resolution?.targetSha, resolutionExplanation: resolutionReply?.body.replace(statusMarker, "").trim(), conversation };
+  });
+  const bodySources = [...input.reviews.filter(r => r.user?.login === input.login).map(r => ({ ...r, reviewId: r.id, issueCommentId: undefined })), ...input.issueComments.filter(r => r.user?.login === input.login).map(r => ({ ...r, reviewId: undefined, issueCommentId: r.id }))];
+  const body = bodySources.flatMap(r => decodeBodyFindingMarkers(r.body).map(f => { const batch = decodeBatchMarker(r.body); return { historicalFindingId: `body:${f.findingId}`, commentId: f.findingId, threadId: undefined, reviewId: r.reviewId, issueCommentId: r.issueCommentId, bodyFinding: true, kind: "body" as const, reviewBody: r.body ?? "", file: f.file, line: f.line, side: f.side, body: f.body, originalBody: f.body, status: f.status, latestStatus: f.status === "PARTIALLY_RESOLVED" ? "PARTIALLY_RESOLVED" : undefined, sourceBatch: batch ? `${batch.fromSha}..${batch.toSha}` : undefined, resolutionTargetSha: f.targetSha, resolutionExplanation: f.explanation, conversation: (r.body ?? "").slice(0, 8000) }; }));
+  return { activeFindings: [...inline, ...body.filter(f => f.status !== "RESOLVED")], resolvedFindings: [...resolved, ...body.filter(f => f.status === "RESOLVED")] };
 }
 export function selectAuthenticatedBatchMarkers(reviews: Array<{ id: number; body?: string | null; user?: { login?: string } }>, login: string) { return reviews.filter(r => r.user?.login === login).map(r => decodeBatchMarker(r.body)).filter((m): m is BatchMarker => m !== undefined && m.actor === login); }
 export function selectBatchRange(mergeBase: string, head: string, latest?: BatchMarker, isAncestor?: (from: string, to: string) => boolean) { if (!latest || (isAncestor && !isAncestor(latest.toSha, head))) return { fromSha: mergeBase, toSha: head, fresh: true }; return { fromSha: latest.toSha, toSha: head, fresh: latest.toSha !== head }; }
@@ -80,5 +118,5 @@ export function decodeReplyMarker(body: string | null | undefined): { version: 1
   try { const v = JSON.parse(match[1]); return v.version === 1 && Number.isSafeInteger(v.commentId) && Number.isSafeInteger(v.parentId) && typeof v.threadId === "string" ? v : undefined; } catch { return undefined; }
 }
 export function isPiReviewerRootComment(comment: { body?: string | null; in_reply_to_id?: number }): boolean {
-  return comment.in_reply_to_id == null && comment.body?.includes("<!-- pi-reviewer:finding:v1 -->") === true && !comment.body.includes("pi-reviewer:status:v1");
+  return comment.in_reply_to_id == null && comment.body?.startsWith(piReviewerFindingMarker) === true;
 }

@@ -7,7 +7,7 @@ import { loadContext, mergeContextFiles } from "../core/context.js";
 import { resolveDiff, extractDiffFiles } from "../core/diff-resolver.js";
 import { loadDocContext } from "../core/doc-context.js";
 import { sendOutput, extractLastAssistantText, normalizeFinding, type OutputTarget, type Severity } from "../core/output.js";
-import { buildJSONSystemPrompt, buildUserPrompt, type MinSeverity, type ActiveFindingContext } from "../core/prompt-builder.js";
+import { buildJSONSystemPrompt, buildUserPrompt, selectResolvedFindings, type MinSeverity, type ActiveFindingContext, type ResolvedFindingContext } from "../core/prompt-builder.js";
 import { createReviewTool } from "../core/review-tool.js";
 import type { ThinkingLevel } from "../core/config.js";
 
@@ -29,6 +29,7 @@ export interface ReviewOptions {
   fromSha?: string;
   batchMarker?: string;
   activeFindings?: ActiveFindingContext[];
+  resolvedFindings?: ResolvedFindingContext[];
   allowEmptyDiff?: boolean;
   priorSummary?: string;
   reactOnNoFindings?: boolean;
@@ -128,7 +129,8 @@ export async function review(options: ReviewOptions): Promise<void> {
     console.log(`[pi-reviewer] doc-context loaded: ${docContextFiles.map(f => f.path).join(", ")}`);
   }
 
-  const systemPrompt = buildJSONSystemPrompt(context, options.minSeverity, docContextFiles, options.activeFindings, options.priorSummary);
+  const resolvedFindings = selectResolvedFindings(options.resolvedFindings ?? []);
+  const systemPrompt = buildJSONSystemPrompt(context, options.minSeverity, docContextFiles, options.activeFindings, options.priorSummary, resolvedFindings);
   const userPrompt = buildUserPrompt(diff, skippedFiles);
 
   const target: OutputTarget =
@@ -275,9 +277,10 @@ export async function review(options: ReviewOptions): Promise<void> {
       minSeverity: options.minSeverity as Severity | undefined,
       diff,
       batchMarker: options.batchMarker,
-      existingFindings: options.activeFindings?.map(f => ({ commentId: f.commentId, threadId: f.threadId, reviewId: f.reviewId, bodyFinding: f.bodyFinding, reviewBody: f.reviewBody })),
+      existingFindings: options.activeFindings?.map(f => ({ commentId: f.commentId, threadId: f.threadId, reviewId: f.reviewId, issueCommentId: f.issueCommentId, bodyFinding: f.bodyFinding, reviewBody: f.reviewBody })),
       existingFindingKeys: new Set(options.activeFindings?.filter(f => f.file && f.line && f.side).map(f => normalizeFinding({ file: f.file!, line: f.line!, side: f.side as "LEFT" | "RIGHT", body: f.body }))),
       allowedFindingIds: new Set(options.activeFindings?.map(f => f.commentId)),
+      resolvedFindings,
       reactOnNoFindings: options.reactOnNoFindings,
     });
   } finally {

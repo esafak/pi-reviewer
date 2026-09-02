@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
-import { bodyFindingId, decodeBodyFindingMarkers, encodeBodyFindingMarker, reconstructBodyFindings, updateBodyFindingMarker } from "../../src/ci/batch.js";
+import { bodyFindingId, collectFindingHistory, decodeBodyFindingMarkers, encodeBodyFindingMarker, updateBodyFindingMarker } from "../../src/ci/batch.js";
 
 const finding = { findingId: bodyFindingId(["src/a.ts", 1, "RIGHT", "issue"].join("\0")), file: "src/a.ts", line: 1, side: "RIGHT" as const, severity: "WARN" as const, body: "issue" };
 
@@ -13,9 +13,11 @@ describe("body finding markers", () => {
     expect(bodyFindingId("other")).toBe(bodyFindingId("other"));
   });
 
-  it("reconstructs only active authenticated review-body findings", () => {
+  it("collects only active authenticated review-body findings and partitions resolved history", () => {
     const body = `summary\n${encodeBodyFindingMarker(finding)}\n${encodeBodyFindingMarker({ ...finding, findingId: bodyFindingId("resolved"), status: "RESOLVED" })}`;
-    expect(reconstructBodyFindings([{ id: 9, body, user: { login: "bot" } }, { id: 10, body, user: { login: "human" } }], "bot")).toEqual([expect.objectContaining({ commentId: finding.findingId, reviewId: 9, bodyFinding: true, body: "issue" })]);
+    const result = collectFindingHistory({ reviews: [{ id: 9, body, user: { login: "bot" } }, { id: 10, body, user: { login: "human" } }], issueComments: [], comments: [], threads: [], login: "bot" });
+    expect(result.activeFindings).toEqual([expect.objectContaining({ commentId: finding.findingId, reviewId: 9, bodyFinding: true, body: "issue" })]);
+    expect(result.resolvedFindings).toEqual([expect.objectContaining({ historicalFindingId: `body:${bodyFindingId("resolved")}`, reviewId: 9, resolutionTargetSha: undefined })]);
   });
 
   it("updates lifecycle metadata without changing visible review text", () => {

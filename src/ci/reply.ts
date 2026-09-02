@@ -2,8 +2,7 @@ import { generateReplyResponse, parseReplyAction } from "./review.js";
 import { decodeReplyMarker, isAuthorizedReply, isPiReviewerRootComment, replyMarker, type Event } from "./batch.js";
 import type { PullRequest, ReviewComment, ReviewThread } from "./github.js";
 import type { ThinkingLevel } from "../core/config.js";
-
-const AI_FIX_FOOTER = "For each issue above, determine whether it is valid. If so, fix it iteratively with one reviewer agent until convergence.";
+import { appendAiFixFooter } from "../core/ai-fix-footer.js";
 
 export interface ReplyClient {
   listComments(repo: string, number: number): Promise<ReviewComment[]>;
@@ -54,7 +53,7 @@ export async function handleReply(options: ReplyHandlerOptions): Promise<boolean
       await github.createReviewCommentReaction(repo, event.pr!, commentId, action.content);
     } else {
       if (hasMarker(freshComments)) return false;
-      await github.reply(repo, event.pr!, parentCommentId, `${replyMarker(commentId, parentCommentId, thread.id)}\n${action.body}\n\n${AI_FIX_FOOTER}`);
+      await github.reply(repo, event.pr!, parentCommentId, appendAiFixFooter(`${replyMarker(commentId, parentCommentId, thread.id)}\n${action.body}`));
     }
     return true;
   } catch (error) {

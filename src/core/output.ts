@@ -4,6 +4,7 @@ import path from "node:path";
 import { parseDiffPositions, partitionComments } from "./diff-positions.js";
 import { GitHubClient } from "../ci/github.js";
 import { bodyFindingId, decodeBodyFindingMarkers, encodeBodyFindingMarker, updateBodyFindingMarker } from "../ci/batch.js";
+import { AI_FIX_FOOTER, appendAiFixFooter } from "./ai-fix-footer.js";
 
 export type OutputTarget = "terminal" | "comment" | "file";
 export type Severity = "CRITICAL" | "WARN" | "INFO";
@@ -17,6 +18,11 @@ export interface ReviewComment {
   side: "LEFT" | "RIGHT";
   severity: Severity;
   body: string;
+  resolved_finding_id?: string;
+  re_raise_reason?: "REINTRODUCED" | "MATERIALLY_CHANGED" | "CONTRADICTORY_EVIDENCE";
+  re_raise_evidence?: string;
+  /** Server-validated re-raise provenance attached by normalizeReviewResult; model-supplied values are always overwritten. */
+  reRaiseProvenance?: { historicalFindingId: string; reason?: ReviewComment["re_raise_reason"]; evidence?: string };
 }
 
 export interface TokenUsage {
@@ -71,21 +77,18 @@ export interface OutputOptions {
   existingFindings?: ExistingFinding[];
   existingFindingKeys?: ReadonlySet<string>;
   allowedFindingIds?: ReadonlySet<number>;
+  resolvedFindings?: ResolvedFinding[];
   /** React to the pull request instead of posting a comment when no findings remain. */
   reactOnNoFindings?: boolean;
 }
+export interface ResolvedFinding { historicalFindingId: string; file?: string; line?: number; side?: string; originalBody: string; kind?: "inline" | "body"; }
 export interface OutputMetadata { reviewId?: number; commentIds: number[]; fallback: boolean }
 async function responseJson(response: Response): Promise<{ id?: number; comments?: Array<{ id?: number }> } | undefined> {
   if (typeof response.json !== "function") return undefined;
   try { return await response.json() as { id?: number; comments?: Array<{ id?: number }> }; } catch { return undefined; }
 }
 
-export interface ExistingFinding { commentId: number; threadId?: string; body?: string; reviewId?: number; bodyFinding?: boolean; reviewBody?: string; }
-
-function normalizeFindingExplanation(status: FindingUpdate["status"], explanation: string): string {
-  const prefix = status === "RESOLVED" ? /^Resolved:\s*/i : status === "PARTIALLY_RESOLVED" ? /^Partially addressed:\s*/i : undefined;
-  return prefix ? explanation.replace(prefix, "") : explanation;
-}
+export interface ExistingFinding { commentId: number; threadId?: string; body?: string; reviewId?: number; issueCommentId?: number; bodyFinding?: boolean; reviewBody?: string; }
 
 const FINDING_STATUSES = ["RESOLVED", "PARTIALLY_RESOLVED", "STILL_OPEN"] as const;
 
@@ -117,17 +120,41 @@ function structuredResultRejection(value: unknown): "invalid summary" | "invalid
 }
 
 /** Normalize tool output while isolating contextual finding validation from the review itself. */
-function normalizeReviewResult(result: ReviewResult, options: Pick<OutputOptions, "minSeverity" | "allowedFindingIds" | "existingFindingKeys">, warnInvalidUpdates: boolean): ReviewResult {
+function normalizeReviewResult(result: ReviewResult, options: Pick<OutputOptions, "minSeverity" | "allowedFindingIds" | "existingFindingKeys" | "resolvedFindings" | "commitId" | "batchMarker">, warnInvalidUpdates: boolean): ReviewResult {
   const minRank = SEVERITY_RANK[options.minSeverity ?? "INFO"];
   const comments = result.comments
     .map((comment) => ({ ...comment, severity: normalizeSeverity(comment.severity) }))
     .filter((comment) => SEVERITY_RANK[comment.severity] >= minRank)
     .filter((comment) => !options.existingFindingKeys?.has(normalizeFinding(comment)))
+    .filter((comment) => {
+      const history = options.resolvedFindings ?? [];
+      if (comment.resolved_finding_id && !history.some(f => f.historicalFindingId === comment.resolved_finding_id)) {
+        console.warn("[pi-reviewer] dropped re-raise: unknown historical finding ID");
+        return false;
+      }
+      const cited = comment.resolved_finding_id ? history.find(f => f.historicalFindingId === comment.resolved_finding_id) : undefined;
+      if (cited && !hasCompatibleHistoricalLink(comment, cited)) {
+        console.warn("[pi-reviewer] dropped re-raise: historical finding does not match candidate");
+        return false;
+      }
+      const match = cited
+        ?? history.find(f => hasMatchingFindingIdentity(comment, f));
+      if (!match) return true;
+      // Identity matches without an explicit historical link stay suppressed,
+      // so the ID equality check below is what enforces the provenance link.
+      const valid = comment.resolved_finding_id === match.historicalFindingId && ["REINTRODUCED", "MATERIALLY_CHANGED", "CONTRADICTORY_EVIDENCE"].includes(comment.re_raise_reason ?? "") && typeof comment.re_raise_evidence === "string" && comment.re_raise_evidence.trim().length > 0 && comment.re_raise_evidence.length <= 2000;
+      if (!valid) console.warn("[pi-reviewer] dropped re-raise: invalid provenance");
+      return valid;
+    })
     .map((comment) => {
       const emoji = SEVERITY_EMOJI[comment.severity];
       const prefix = ["🔴 ", "🟡 ", "🔵 "].find((value) => comment.body.startsWith(value));
       const body = prefix ? comment.body.slice(prefix.length) : comment.body;
-      return { ...comment, body: `${emoji} ${body}` };
+      // Provenance is derived only from fields validated by the filter above;
+      // reassigning the key here also drops any model-supplied value.
+      const historical = (options.resolvedFindings ?? []).find(f => f.historicalFindingId === comment.resolved_finding_id);
+      const reRaiseProvenance = historical ? { historicalFindingId: historical.historicalFindingId, reason: comment.re_raise_reason, evidence: comment.re_raise_evidence } : undefined;
+      return { ...comment, body: `${emoji} ${body}`, reRaiseProvenance };
     });
   const updates: FindingUpdate[] = [];
   for (const candidate of result.finding_updates ?? []) {
@@ -164,40 +191,42 @@ export async function reconcileFindingUpdates(options: { token: string; repo: st
     }
   };
   type BodyUpdate = FindingUpdate & { status: Exclude<FindingUpdate["status"], "STILL_OPEN"> };
-  const bodyUpdates = new Map<number, { finding: ExistingFinding; updates: BodyUpdate[] }>();
+  const bodyUpdates = new Map<string, { finding: ExistingFinding; updates: BodyUpdate[] }>();
   for (const update of options.updates) {
     const finding = known.get(update.comment_id);
     if (!finding) continue;
     if (update.status === "STILL_OPEN") continue;
-    if (finding.bodyFinding && finding.reviewId && finding.reviewBody !== undefined) {
-      const group = bodyUpdates.get(finding.reviewId) ?? { finding, updates: [] };
+    if (finding.bodyFinding && (finding.reviewId || finding.issueCommentId) && finding.reviewBody !== undefined) {
+      const key = finding.reviewId ? `review:${finding.reviewId}` : `issue:${finding.issueCommentId}`;
+      const group = bodyUpdates.get(key) ?? { finding, updates: [] };
       group.updates.push(update as BodyUpdate);
-      bodyUpdates.set(finding.reviewId, group);
+      bodyUpdates.set(key, group);
       continue;
     }
   }
-  for (const [reviewId, group] of bodyUpdates) {
+  for (const [reviewKey, group] of bodyUpdates) {
     let updatedBody: string;
     try {
-      const freshReview = await client.getReview(options.repo, options.prNumber, reviewId);
+      const freshReview = group.finding.issueCommentId
+        ? await client.request<{ body?: string }>(`/repos/${options.repo}/issues/comments/${group.finding.issueCommentId}`)
+        : await client.getReview(options.repo, options.prNumber, Number(reviewKey.slice("review:".length)));
       if (typeof freshReview.body !== "string") {
-        console.warn(`[pi-reviewer] could not update body review ${reviewId}: fetched review has no body`);
+        console.warn(`[pi-reviewer] could not update body source ${reviewKey}: fetched source has no body`);
         continue;
       }
       updatedBody = freshReview.body;
     } catch (error) {
-      console.warn(`[pi-reviewer] could not fetch body review ${reviewId}: ${error instanceof Error ? error.message : String(error)}`);
+      console.warn(`[pi-reviewer] could not fetch body source ${reviewKey}: ${error instanceof Error ? error.message : String(error)}`);
       continue;
     }
     const changedFindingIds = new Set<number>();
     for (const update of group.updates) {
-      const explanation = normalizeFindingExplanation(update.status, update.explanation);
       const currentMarker = decodeBodyFindingMarkers(updatedBody).find(marker => marker.findingId === update.comment_id);
-      if (currentMarker?.targetSha === options.targetSha && currentMarker.status === update.status && currentMarker.explanation === explanation) {
+      if (currentMarker?.targetSha === options.targetSha && currentMarker.status === update.status && currentMarker.explanation === update.explanation) {
         if (update.status === "RESOLVED") outstanding.delete(update.comment_id);
         continue;
       }
-      const nextBody = updateBodyFindingMarker(updatedBody, update.comment_id, update.status, options.targetSha, explanation);
+      const nextBody = updateBodyFindingMarker(updatedBody, update.comment_id, update.status, options.targetSha, update.explanation);
       if (nextBody !== updatedBody) {
         updatedBody = nextBody;
         changedFindingIds.add(update.comment_id);
@@ -205,21 +234,21 @@ export async function reconcileFindingUpdates(options: { token: string; repo: st
     }
     if (updatedBody === group.finding.reviewBody || !await isTargetHeadCurrent()) continue;
     try {
-      await client.updateReview(options.repo, options.prNumber, reviewId, updatedBody);
+      if (group.finding.issueCommentId) await client.updateIssueComment(options.repo, options.prNumber, group.finding.issueCommentId, updatedBody);
+      else await client.updateReview(options.repo, options.prNumber, Number(reviewKey.slice("review:".length)), updatedBody);
       for (const update of group.updates) {
         if (update.status === "RESOLVED" && changedFindingIds.has(update.comment_id)) outstanding.delete(update.comment_id);
       }
     } catch (error) {
-      console.warn(`[pi-reviewer] could not update body review ${reviewId}: ${error instanceof Error ? error.message : String(error)}`);
+      console.warn(`[pi-reviewer] could not update body source ${reviewKey}: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
   for (const update of options.updates) {
     const finding = known.get(update.comment_id);
     if (!finding || update.status === "STILL_OPEN") continue;
-    if (finding.bodyFinding && finding.reviewId && finding.reviewBody !== undefined) continue;
+    if (finding.bodyFinding && (finding.reviewId || finding.issueCommentId) && finding.reviewBody !== undefined) continue;
     const linkedSha = options.targetSha.slice(0, 7);
-    const explanation = normalizeFindingExplanation(update.status, update.explanation);
-    const body = `<!-- pi-reviewer:status:v1 ${JSON.stringify({ findingId: update.comment_id, targetSha: options.targetSha, status: update.status })} -->\n${update.status === "RESOLVED" ? `Resolved by ${linkedSha}` : `Partially addressed by ${linkedSha}`}: ${explanation}`;
+    const body = `<!-- pi-reviewer:status:v1 ${JSON.stringify({ findingId: update.comment_id, targetSha: options.targetSha, status: update.status })} -->\n${update.status === "RESOLVED" ? `Resolved by ${linkedSha}` : `Partially addressed by ${linkedSha}`}: ${update.explanation}`;
     const alreadyReplied = priorReplies.some(reply => reply.user?.login === identity?.login && reply.in_reply_to_id === finding.commentId && reply.body.includes(`"targetSha":"${options.targetSha}"`) && reply.body.includes(`"status":"${update.status}"`));
     try {
       if (!alreadyReplied) {
@@ -398,6 +427,8 @@ export function parseAgentResponseWithStatus(
   minSeverity: Severity = "INFO",
   allowedFindingIds?: ReadonlySet<number>,
   existingFindingKeys?: ReadonlySet<string>,
+  resolvedFindings?: ResolvedFinding[],
+  provenance?: Pick<OutputOptions, "commitId" | "batchMarker">,
 ): ParsedAgentResponse {
   // Build candidates sorted by source position. We return the **last** valid
   // candidate — this handles models that reason in prose before emitting the
@@ -440,7 +471,7 @@ export function parseAgentResponseWithStatus(
       parsed.comments.every(isReviewComment) && updatesValid
     ) {
       const diff = typeof parsed.diff === "string" ? parsed.diff : undefined;
-      const review = normalizeReviewResult({ summary: parsed.summary, comments: parsed.comments as ReviewComment[], finding_updates: rawUpdates as FindingUpdate[], ...(diff !== undefined ? { diff } : {}) }, { minSeverity, allowedFindingIds, existingFindingKeys }, false);
+      const review = normalizeReviewResult({ summary: parsed.summary, comments: parsed.comments as ReviewComment[], finding_updates: rawUpdates as FindingUpdate[], ...(diff !== undefined ? { diff } : {}) }, { minSeverity, allowedFindingIds, existingFindingKeys, resolvedFindings, ...provenance }, false);
       resultAny = review;
       // Base the preference on what the model emitted, not on what remains
       // after minSeverity filtering. A genuine review whose findings are all
@@ -459,8 +490,42 @@ export function parseAgentResponseWithStatus(
 /** Stable identity used to avoid reposting the same finding in a batch. */
 export function normalizeFinding(comment: Pick<ReviewComment, "file" | "line" | "side" | "body">): string {
   const storedBody = decodeBodyFindingMarkers(comment.body)[0]?.body;
-  const body = (storedBody ?? comment.body).replace(/<!--\s*pi-reviewer\s*:\s*[\s\S]*?-->/g, "").trim().replace(/^[🔴🟡🔵]\s*/u, "").trim().replace(/\n\s*\n+/g, "\n");
+  const body = (storedBody ?? comment.body).replace(/<!--\s*pi-reviewer\s*:\s*[\s\S]*?-->/g, "").replace(AI_FIX_FOOTER, "").trim().replace(/^[🔴🟡🔵]\s*/u, "").trim().replace(/\n\s*\n+/g, "\n");
   return [comment.file, comment.line, comment.side, body].join("\0");
+}
+
+/** Normalizes visible finding prose for resilient historical identity matching. */
+function normalizedFindingBody(body: string): string {
+  return body.replace(/<!--\s*pi-reviewer\s*:\s*[\s\S]*?-->/g, "").replace(AI_FIX_FOOTER, "").replace(/^[🔴🟡🔵]\s*/u, "").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+}
+
+/** Checks the file, side, and normalized prose identity of two findings. */
+function hasMatchingFindingIdentity(candidate: ReviewComment, historical: ResolvedFinding): boolean {
+  if (historical.file !== candidate.file || historical.side !== candidate.side) return false;
+  const candidateBody = normalizedFindingBody(candidate.body);
+  const historicalBody = normalizedFindingBody(historical.originalBody);
+  if (candidateBody === historicalBody) return true;
+  const left = new Set(candidateBody.split(/\s+/).filter(Boolean));
+  const right = new Set(historicalBody.split(/\s+/).filter(Boolean));
+  if (left.size === 0 || right.size === 0) return false;
+  const overlap = [...left].filter(token => right.has(token)).length;
+  return overlap / Math.max(left.size, right.size) >= 0.6;
+}
+
+/** Validates that a cited historical ID belongs to the candidate finding. */
+function hasCompatibleHistoricalLink(candidate: ReviewComment, historical: ResolvedFinding): boolean {
+  if (historical.file !== candidate.file || historical.side !== candidate.side) return false;
+  return historical.line === candidate.line || hasMatchingFindingIdentity(candidate, historical);
+}
+
+/** Returns whether a review contains a finding requiring an explicit fix. */
+function hasActionableFindings(comments: ReviewComment[]): boolean {
+  return comments.some(comment => comment.severity === "WARN" || comment.severity === "CRITICAL");
+}
+
+/** Adds the fix instruction only to actionable individual findings. */
+function appendFindingFooter(comment: ReviewComment, body: string): string {
+  return comment.severity === "WARN" || comment.severity === "CRITICAL" ? appendAiFixFooter(body) : body;
 }
 
 /** Keep model-controlled text from becoming metadata when it is shown in a review body. */
@@ -468,25 +533,43 @@ function sanitizeVisibleReviewText(text: string): string {
   return text.replace(/<!--\s*pi-reviewer\s*:/gi, "<!-- pi-reviewer :");
 }
 
+type ReRaiseProvenanceOptions = Pick<OutputOptions, "commitId" | "batchMarker">;
+
+/**
+ * Hidden provenance comment for a validated re-raise. Generated at posting
+ * time from server-validated fields so it stays byte-exact in every posting
+ * path (inline, moved-to-body, and issue-comment fallback); `-->` is escaped
+ * so model-controlled evidence cannot terminate the comment early.
+ */
+function reRaiseMetadata(comment: ReviewComment, options: ReRaiseProvenanceOptions): string {
+  const provenance = comment.reRaiseProvenance;
+  if (!provenance) return "";
+  const json = JSON.stringify({ historicalFindingId: provenance.historicalFindingId, reason: provenance.reason, evidence: provenance.evidence, newFindingId: normalizeFinding(comment), targetSha: options.commitId, batch: options.batchMarker }).replace(/-->/g, "--\\u003e");
+  return `<!-- pi-reviewer:re-raise:v1 ${json} -->\n`;
+}
+
 export function parseAgentResponse(text: string, minSeverity: Severity = "INFO"): ReviewResult {
   return parseAgentResponseWithStatus(text, minSeverity).result;
 }
 
-function formatForGitHub(result: ReviewResult): string {
+function formatForGitHub(result: ReviewResult, provenance: ReRaiseProvenanceOptions): string {
   const lines = ["## Pi Reviewer", "", sanitizeVisibleReviewText(result.summary)];
 
   if (result.comments.length > 0) {
     lines.push("", "### Inline Comments");
     for (const comment of result.comments) {
+      const visibleBody = appendFindingFooter(comment, `${reRaiseMetadata(comment, provenance)}${sanitizeVisibleReviewText(comment.body)}`);
       lines.push(
         "",
+        encodeBodyFindingMarker({ findingId: bodyFindingId(normalizeFinding(comment)), file: comment.file, line: comment.line, side: comment.side, severity: comment.severity, body: visibleBody }),
         `${SEVERITY_EMOJI[comment.severity]} **\`${comment.file}:${comment.line}\`** · ${comment.side}`,
-        sanitizeVisibleReviewText(comment.body)
+        visibleBody
       );
     }
   }
 
-  return lines.join("\n");
+  const body = lines.join("\n");
+  return hasActionableFindings(result.comments) ? appendAiFixFooter(body) : body;
 }
 
 /**
@@ -494,12 +577,12 @@ function formatForGitHub(result: ReviewResult): string {
  * comments that could not be attached to a diff line. GitHub shows the body as
  * the review's main text, so moved comments stay visible to the author.
  */
-function buildReviewBody(summary: string, moved: ReviewComment[]): string {
-  if (moved.length === 0) return sanitizeVisibleReviewText(summary);
+function buildReviewBody(summary: string, moved: ReviewComment[], provenance: ReRaiseProvenanceOptions, includeFooter: boolean): string {
+  if (moved.length === 0) return includeFooter ? appendAiFixFooter(sanitizeVisibleReviewText(summary)) : sanitizeVisibleReviewText(summary);
   const lines = [sanitizeVisibleReviewText(summary), "", "### Comments Not Attached to the Diff", ""];
   lines.push("These comments could not be attached to a specific diff line, so the reported location is approximate — the line is not part of the diff:");
   for (const comment of moved) {
-    const visibleBody = sanitizeVisibleReviewText(comment.body);
+    const visibleBody = appendFindingFooter(comment, `${reRaiseMetadata(comment, provenance)}${sanitizeVisibleReviewText(comment.body)}`);
     const findingId = bodyFindingId(normalizeFinding(comment));
     lines.push(
       "",
@@ -508,7 +591,8 @@ function buildReviewBody(summary: string, moved: ReviewComment[]): string {
       visibleBody
     );
   }
-  return lines.join("\n");
+  const body = lines.join("\n");
+  return includeFooter ? appendAiFixFooter(body) : body;
 }
 
 export function formatForTerminal(result: ReviewResult): string {
@@ -517,9 +601,10 @@ export function formatForTerminal(result: ReviewResult): string {
   if (result.comments.length > 0) {
     lines.push("", "== Inline Comments ==");
     for (const comment of result.comments) {
+      const visibleBody = appendFindingFooter(comment, sanitizeVisibleReviewText(comment.body));
       lines.push(
         `${SEVERITY_EMOJI[comment.severity]} ${comment.file}:${comment.line} (${comment.side})`,
-        comment.body,
+        visibleBody.replace(/<!--\s*pi-reviewer\s*:\s*[\s\S]*?-->/g, "").trim(),
         ""
       );
     }
@@ -529,7 +614,8 @@ export function formatForTerminal(result: ReviewResult): string {
     }
   }
 
-  return lines.join("\n");
+  const body = lines.join("\n");
+  return hasActionableFindings(result.comments) ? appendAiFixFooter(body) : body;
 }
 
 export async function sendOutput(options: OutputOptions): Promise<OutputMetadata> {
@@ -542,7 +628,7 @@ export async function sendOutput(options: OutputOptions): Promise<OutputMetadata
     }
     parsedResponse = { result: normalizeReviewResult(options.structuredResult, options, true), parsed: true };
   } else {
-    parsedResponse = parseAgentResponseWithStatus(options.content ?? "", options.minSeverity, options.allowedFindingIds, options.existingFindingKeys);
+    parsedResponse = parseAgentResponseWithStatus(options.content ?? "", options.minSeverity, options.allowedFindingIds, options.existingFindingKeys, options.resolvedFindings, options);
   }
   const result = parsedResponse.result;
 
@@ -598,10 +684,10 @@ export async function sendOutput(options: OutputOptions): Promise<OutputMetadata
       path: comment.file,
       line: comment.line,
       side: comment.side,
-      body: `<!-- pi-reviewer:finding:v1 -->\n${comment.body}`,
+      body: `<!-- pi-reviewer:finding:v1 -->\n${appendFindingFooter(comment, `${reRaiseMetadata(comment, options)}${sanitizeVisibleReviewText(comment.body)}`)}`,
     }));
 
-    const body = [options.batchMarker, buildReviewBody(result.summary, moved)].filter(Boolean).join("\n\n");
+    const body = [options.batchMarker, buildReviewBody(result.summary, moved, options, hasActionableFindings(result.comments))].filter(Boolean).join("\n\n");
 
     if (options.commitId && (options.batchMarker || (options.reactOnNoFindings && result.comments.length === 0))) {
       const current = await new GitHubClient(options.githubToken).getPullRequest(options.repo, options.prNumber);
@@ -680,7 +766,7 @@ export async function sendOutput(options: OutputOptions): Promise<OutputMetadata
           const posted = await reviewResponse.clone().json().catch(() => undefined) as { id?: number } | undefined;
           if (posted?.id) {
             const finalized = options.batchMarker.replace(/("reviewId"\s*:\s*)0/, `$1${posted.id}`);
-            if (finalized !== options.batchMarker) await new GitHubClient(options.githubToken).updateReview(options.repo, options.prNumber, posted.id, [finalized, buildReviewBody(result.summary, moved)].join("\n\n")).catch(error => console.warn(`[pi-reviewer] could not finalize batch marker: ${error instanceof Error ? error.message : String(error)}`));
+            if (finalized !== options.batchMarker) await new GitHubClient(options.githubToken).updateReview(options.repo, options.prNumber, posted.id, [finalized, buildReviewBody(result.summary, moved, options, hasActionableFindings(result.comments))].join("\n\n")).catch(error => console.warn(`[pi-reviewer] could not finalize batch marker: ${error instanceof Error ? error.message : String(error)}`));
           }
         }
         if (!findingUpdatesReconciled && result.finding_updates?.length && options.existingFindings && options.githubToken && options.repo && options.prNumber && options.commitId) {
@@ -698,7 +784,7 @@ export async function sendOutput(options: OutputOptions): Promise<OutputMetadata
       // valid (e.g. a force-push changed the diff between resolution and post).
       // Retry once as a body-only review, moving every comment into the body.
       if (reviewResponse.status === 422) {
-        const allMovedBody = [options.batchMarker, buildReviewBody(result.summary, comments)].filter(Boolean).join("\n\n");
+        const allMovedBody = [options.batchMarker, buildReviewBody(result.summary, comments, options, hasActionableFindings(result.comments))].filter(Boolean).join("\n\n");
         reviewResponse = await fetch(
           `https://api.github.com/repos/${options.repo}/pulls/${options.prNumber}/reviews`,
           {
@@ -739,7 +825,7 @@ export async function sendOutput(options: OutputOptions): Promise<OutputMetadata
       {
         method: "POST",
         headers,
-        body: JSON.stringify({ body: [options.batchMarker, formatForGitHub(result)].filter(Boolean).join("\n\n") }),
+        body: JSON.stringify({ body: [options.batchMarker, formatForGitHub(result, options)].filter(Boolean).join("\n\n") }),
       }
     );
 

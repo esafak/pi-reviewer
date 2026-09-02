@@ -454,6 +454,28 @@ describe("review", () => {
     }));
   });
 
+  it("passes resolved-finding history through to sendOutput for suppression", async () => {
+    const resolvedFindings = [{
+      historicalFindingId: "inline:42",
+      commentId: 42,
+      kind: "inline" as const,
+      file: "src/a.ts",
+      line: 7,
+      side: "RIGHT" as const,
+      body: "old finding",
+      originalBody: "old finding",
+    }];
+    createReviewToolMock.mockReturnValue({
+      tool: { name: "submit_review", label: "submit_review", description: "test", parameters: {}, execute: vi.fn() },
+      getResult: () => ({ summary: "Tool-based review", comments: [] }),
+    });
+    AgentMock.mockImplementation(function () { return makeFakeAgent("") as any; });
+
+    await review({ cwd: "/repo", resolvedFindings });
+
+    expect(sendOutputMock).toHaveBeenCalledWith(expect.objectContaining({ resolvedFindings }));
+  });
+
   it("falls back to text extraction when the model did not call submit_review", async () => {
     createReviewToolMock.mockReturnValue({
       tool: {
