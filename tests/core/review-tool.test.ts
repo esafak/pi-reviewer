@@ -120,10 +120,16 @@ describe("createReviewTool", () => {
     expect(() => validateToolArguments(tool, toolCall(args))).toThrow(/Validation failed/);
   });
 
-  it.each(["", "   ", "\n\t"]) ("schema rejects an empty finding body (%j)", (body) => {
+  it.each(["", "   ", "\n\t", "🟡"]) ("schema rejects a non-meaningful finding body (%j)", (body) => {
     const { tool } = createReviewTool();
     const args = { ...validArgs(), comments: [{ ...validArgs().comments[0], body }] };
     expect(() => validateToolArguments(tool, toolCall(args))).toThrow(/Validation failed/);
+  });
+
+  it("runtime rejects an emoji-only finding body", async () => {
+    const { tool } = createReviewTool();
+    const args = { ...validArgs(), comments: [{ ...validArgs().comments[0], body: "🟡" }] };
+    await expect(tool.execute("tc-1", args)).rejects.toThrow(/meaningful prose/);
   });
 
   it("schema validates finding updates", () => {

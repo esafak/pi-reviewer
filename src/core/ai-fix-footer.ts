@@ -14,6 +14,9 @@ export interface AiFixFinding {
 
 const AI_FIX_DETAILS = /<details>\s*<summary>Prompt to fix(?: all issues)? with AI<\/summary>[\s\S]*?<\/details>\s*$/;
 const AI_FIX_CONTEXT = /^\*\*Context:\*\*[^\n]*\n\s*\n?/;
+/** JSON-Schema-compatible requirement for prose beyond presentation emoji. */
+export const MEANINGFUL_PROSE_PATTERN = "[\\p{L}\\p{N}]";
+const MEANINGFUL_PROSE = /[\p{L}\p{N}]/u;
 
 const SEVERITY_EMOJI: Record<string, string> = { CRITICAL: "🔴", WARN: "🟡", INFO: "🔵" };
 
@@ -23,7 +26,7 @@ function withoutSeverityEmoji(body: string): string {
 
 /** Checks the same canonical body rule used by normalizeAiFixBody. */
 export function hasAiFixProse(body: string): boolean {
-  return withoutSeverityEmoji(body).length > 0;
+  return MEANINGFUL_PROSE.test(withoutSeverityEmoji(body));
 }
 
 /** Converts model prose into the canonical body used by all renderers. */

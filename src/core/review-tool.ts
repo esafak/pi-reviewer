@@ -2,6 +2,7 @@ import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { Type, type Static } from "@earendil-works/pi-ai";
 
 import type { ReviewResult } from "./output.js";
+import { hasAiFixProse, MEANINGFUL_PROSE_PATTERN } from "./ai-fix-footer.js";
 
 /**
  * TypeBox schema for the `submit_review` tool parameters.
@@ -34,7 +35,7 @@ const reviewSchema = Type.Object(
             [Type.Literal("CRITICAL"), Type.Literal("WARN"), Type.Literal("INFO")],
             { description: "Issue severity tier." },
           ),
-          body: Type.String({ minLength: 1, pattern: "\\S", description: "Non-empty inline comment text, may use Markdown." }),
+          body: Type.String({ minLength: 1, pattern: MEANINGFUL_PROSE_PATTERN, description: "Non-empty inline comment text containing meaningful prose, may use Markdown." }),
           resolved_finding_id: Type.Optional(Type.String({ maxLength: 200 })),
           re_raise_reason: Type.Optional(Type.Union([Type.Literal("REINTRODUCED"), Type.Literal("MATERIALLY_CHANGED"), Type.Literal("CONTRADICTORY_EVIDENCE")])),
           re_raise_evidence: Type.Optional(Type.String({ minLength: 1, maxLength: 2000 })),
@@ -82,6 +83,9 @@ export function createReviewTool(): ReviewTool {
       "Submit the final code review. Call this as your final action after reviewing the diff. Pass the complete review as structured data — do not also emit it as text.",
     parameters: reviewSchema,
     async execute(_toolCallId: string, params: ReviewParams) {
+      if (params.comments.some(comment => !hasAiFixProse(comment.body))) {
+        throw new Error("Finding body must contain meaningful prose");
+      }
       captured = params;
       return {
         content: [{ type: "text" as const, text: "Review submitted." }],
