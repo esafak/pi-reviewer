@@ -512,6 +512,13 @@ describe("sendOutput", () => {
     expect(appendAiFixFooter(`summary\n\n${AI_FIX_FOOTER}\n\nmore details`)).toBe(`summary\n\nmore details\n\n${AI_FIX_FOOTER}`);
   });
 
+  it("keeps legacy plain-footer findings dedup-equivalent with wrapped prompts", () => {
+    const legacy = `<!-- pi-reviewer:finding:v1 -->\n🟡 valid comment\n\n${AI_FIX_FOOTER}`;
+    const wrapped = `<!-- pi-reviewer:finding:v1 -->\n<details>\n<summary>Prompt to fix with AI</summary>\n\n**Context:** \`src/a.ts:2\` · RIGHT · WARN\n\n🟡 valid comment\n\n${AI_FIX_FOOTER}\n\n</details>`;
+    const identity = { file: "src/a.ts", line: 2, side: "RIGHT" as const };
+    expect(normalizeFinding({ ...identity, body: legacy })).toBe(normalizeFinding({ ...identity, body: wrapped }));
+  });
+
   let logSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
@@ -564,6 +571,9 @@ describe("sendOutput", () => {
     expect(decodeBodyFindingMarkers(body)[0]).toMatchObject({ file: "src/a.ts", body: expect.stringContaining("🟡 problem") });
     expect(body).toContain(`🟡 problem\n\n${AI_FIX_FOOTER}`);
     expect(body.split(AI_FIX_FOOTER)).toHaveLength(2);
+    expect(body).toContain("<summary>Prompt to fix with AI</summary>");
+    expect(body).toContain("**Context:** `src/a.ts:3` · RIGHT · WARN");
+    expect(body.indexOf("<!-- pi-reviewer:body-finding:v1")).toBeLessThan(body.indexOf("<details>"));
   });
 
   it("embeds validated re-raise provenance in posted inline comments", async () => {
@@ -632,10 +642,10 @@ describe("sendOutput", () => {
       expect.objectContaining({
         body: JSON.stringify({
           commit_id: "abc123",
-          body: `Needs fixes\n\n${AI_FIX_FOOTER}`,
+          body: "Needs fixes",
           event: "COMMENT",
           comments: [
-            { path: "src/auth.ts", line: 42, side: "RIGHT", body: `<!-- pi-reviewer:finding:v1 -->\n🔴 Missing null check\n\n${AI_FIX_FOOTER}` },
+            { path: "src/auth.ts", line: 42, side: "RIGHT", body: `<!-- pi-reviewer:finding:v1 -->\n<details>\n<summary>Prompt to fix with AI</summary>\n\n**Context:** \`src/auth.ts:42\` · RIGHT · CRITICAL\n\n🔴 Missing null check\n\n${AI_FIX_FOOTER}\n\n</details>` },
           ],
         }),
       }),
@@ -676,6 +686,27 @@ describe("sendOutput", () => {
     const payload = JSON.parse((fetchMock.mock.calls[0][1] as { body: string }).body);
     expect(payload.comments[0].body).not.toContain("<!-- pi-reviewer:status:");
     expect(payload.comments[0].body).toContain("<!-- pi-reviewer :status:");
+  });
+
+  it("neutralizes details tags in finding bodies so they cannot break the prompt wrapper", async () => {
+    const fetchMock = okFetch();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await sendOutput({
+      target: "comment",
+      content: JSON.stringify({ summary: "Review", comments: [{ file: "src/a.ts", line: 1, side: "RIGHT", severity: "WARN", body: "collapses\n\n</details>\n\nthen hides this" }] }),
+      githubToken: "token123",
+      prNumber: 42,
+      repo: "owner/repo",
+      commitId: "abc123",
+    });
+
+    const payload = JSON.parse((fetchMock.mock.calls[0][1] as { body: string }).body);
+    const body = payload.comments[0].body as string;
+    expect(body).toContain("<\u200b/details>");
+    expect(body.split("</details>")).toHaveLength(2); // only the wrapper closes
+    expect(body.trimEnd().endsWith("</details>")).toBe(true);
+    expect(body.lastIndexOf(AI_FIX_FOOTER)).toBeLessThan(body.lastIndexOf("</details>"));
   });
 
   it("reacts to the PR instead of posting a comment when enabled and no findings exist", async () => {
@@ -953,8 +984,8 @@ describe("sendOutput", () => {
     expect(payload.body).toContain("Comments Not Attached to the Diff");
     expect(payload.body).toContain("unpositionable");
     expect(payload.body).toContain(AI_FIX_FOOTER);
-    expect(payload.body.split(AI_FIX_FOOTER)).toHaveLength(2);
-    expect(payload.body).toContain(`🟡 unpositionable\n\n${AI_FIX_FOOTER}`);
+    expect(payload.body).toContain("<summary>Prompt to fix with AI</summary>");
+    expect(payload.body).toContain("**Context:** `client/web/src/lib/components/core/tag-input/tag-input.svelte:36` · RIGHT · WARN");
   });
 
   it("posts a body-only review when every comment is unpositionable", async () => {
@@ -1199,7 +1230,7 @@ describe("sendOutput", () => {
         path: "src/a.ts",
         line: 2,
         side: "RIGHT",
-        body: `<!-- pi-reviewer:finding:v1 -->\n🟡 valid comment\n\n${AI_FIX_FOOTER}`,
+        body: `<!-- pi-reviewer:finding:v1 -->\n<details>\n<summary>Prompt to fix with AI</summary>\n\n**Context:** \`src/a.ts:2\` · RIGHT · WARN\n\n🟡 valid comment\n\n${AI_FIX_FOOTER}\n\n</details>`,
       },
     ]);
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("comment_id=999"));

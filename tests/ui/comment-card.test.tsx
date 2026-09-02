@@ -2,6 +2,7 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vite-plus/test";
+import { AI_FIX_FOOTER } from "../../src/core/ai-fix-footer.js";
 import { CommentCard } from "../../ui/src/components/CommentCard.js";
 import { FileDiff } from "../../ui/src/components/diff/FileDiff.js";
 import { OrphanComments } from "../../ui/src/components/diff/OrphanComments.js";
@@ -79,5 +80,22 @@ describe("CommentCard response disclosure", () => {
     );
 
     expect(document.querySelector("#cmt-4 details")).toBeTruthy();
+  });
+
+  it("copies the complete self-contained prompt shown in the disclosure", async () => {
+    const user = userEvent.setup();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    const onDecide = vi.fn();
+    const view = render(<CommentCard comment={{ ...comment, side: "RIGHT" }} idx={6} onDecide={onDecide} />);
+
+    const disclosure = view.container.querySelector(".cc-body");
+    expect(disclosure?.textContent).toContain("Context:");
+    expect(disclosure?.textContent).toContain("src/example.ts:12");
+
+    await user.click(view.container.querySelector(".cc-copy") as HTMLElement);
+    expect(writeText).toHaveBeenCalledWith(
+      `**Context:** \`src/example.ts:12\` · RIGHT · WARN\n\n${comment.body}\n\n${AI_FIX_FOOTER}`,
+    );
   });
 });
