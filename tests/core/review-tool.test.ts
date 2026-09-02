@@ -120,6 +120,24 @@ describe("createReviewTool", () => {
     expect(() => validateToolArguments(tool, toolCall(args))).toThrow(/Validation failed/);
   });
 
+  it.each(["", "   ", "\n\t", "🟡", "🟡 🔴", "😀", "🧪"]) ("schema rejects a non-meaningful finding body (%j)", (body) => {
+    const { tool } = createReviewTool();
+    const args = { ...validArgs(), comments: [{ ...validArgs().comments[0], body }] };
+    expect(() => validateToolArguments(tool, toolCall(args))).toThrow(/Validation failed/);
+  });
+
+  it.each(["日本語の問題", "Проблема требует исправления"]) ("schema accepts non-Latin meaningful prose (%j)", (body) => {
+    const { tool } = createReviewTool();
+    const args = { ...validArgs(), comments: [{ ...validArgs().comments[0], body }] };
+    expect(() => validateToolArguments(tool, toolCall(args))).not.toThrow();
+  });
+
+  it.each(["🟡", "🟡 🔴", "😀", "🧪"]) ("runtime rejects an emoji-only finding body (%j)", async (body) => {
+    const { tool } = createReviewTool();
+    const args = { ...validArgs(), comments: [{ ...validArgs().comments[0], body }] };
+    await expect(tool.execute("tc-1", args)).rejects.toThrow(/meaningful prose/);
+  });
+
   it("schema validates finding updates", () => {
     const { tool } = createReviewTool();
     const args = { ...validArgs(), finding_updates: [{ comment_id: 7, status: "PARTIALLY_RESOLVED", explanation: "Changed validation; logging remains." }] };

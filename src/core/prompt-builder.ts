@@ -109,7 +109,7 @@ export function buildJSONSystemPrompt(
     "- line: line number of a changed or context line within a diff hunk (only lines shown in the diff can receive comments — never pick an arbitrary line outside the diff)",
     '- side: "RIGHT" for added/context lines, "LEFT" for removed lines',
     '- severity: "CRITICAL" | "WARN" | "INFO"',
-    "- body: inline comment text, may use Markdown",
+    "- body: non-empty inline comment text, may use Markdown",
     "- finding_updates: optional updates to existing findings supplied below. Use RESOLVED only when fully addressed, PARTIALLY_RESOLVED when some concern remains, and STILL_OPEN when unchanged.",
   ];
   if (resolvedFindings.length > 0) {

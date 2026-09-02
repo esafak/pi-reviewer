@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { ReviewComment } from "../types";
 import { renderMarkdown } from "../utils/renderMarkdown";
-import { AI_FIX_FOOTER } from "../../../src/core/ai-fix-footer.js";
+import { renderAiFixPromptText } from "../../../src/core/ai-fix-footer.js";
 
 interface Props {
   comment: ReviewComment;
@@ -18,8 +18,7 @@ export function CommentCard({ comment, idx, decision, discussText = "", onDecide
   const [localText, setLocalText] = useState("");
   const [copied, setCopied] = useState(false);
 
-  const context = `**Context:** \`${comment.file}:${comment.line}\`${comment.side ? ` · ${comment.side}` : ""} · ${(comment.severity || "info").toUpperCase()}`;
-  const aiFixPrompt = `${context}\n\n${comment.body}\n\n${AI_FIX_FOOTER}`;
+  const aiFixPrompt = renderAiFixPromptText({ file: comment.file, line: comment.line, side: comment.side, severity: (comment.severity || "info").toUpperCase() }, comment.body);
 
   function copyComment() {
     navigator.clipboard.writeText(aiFixPrompt).then(() => {
@@ -67,8 +66,7 @@ export function CommentCard({ comment, idx, decision, discussText = "", onDecide
         <summary>
           <span className="cc-response-label">Prompt to fix with AI</span>
         </summary>
-        <div className="cc-body" dangerouslySetInnerHTML={{ __html: renderMarkdown(`${context}\n\n${comment.body}`) }} />
-        <div className="cc-response-footer">{AI_FIX_FOOTER}</div>
+        <div className="cc-body" dangerouslySetInnerHTML={{ __html: renderMarkdown(aiFixPrompt) }} />
       </details>
       <div className="cc-actions">
         <button

@@ -4,7 +4,7 @@ import path from "node:path";
 import { parseDiffPositions, partitionComments } from "./diff-positions.js";
 import { GitHubClient } from "../ci/github.js";
 import { bodyFindingId, decodeBodyFindingMarkers, encodeBodyFindingMarker, updateBodyFindingMarker } from "../ci/batch.js";
-import { AI_FIX_FOOTER, appendAiFixFooter, neutralizeDetailsTags, renderAiFixPrompt, renderAiFixPromptList, removeAiFixFooter } from "./ai-fix-footer.js";
+import { AI_FIX_FOOTER, appendAiFixFooter, hasAiFixProse, neutralizeDetailsTags, normalizeAiFixBody, renderAiFixPrompt, renderAiFixPromptList, renderFindingSummary, removeAiFixFooter } from "./ai-fix-footer.js";
 
 export type OutputTarget = "terminal" | "comment" | "file";
 export type Severity = "CRITICAL" | "WARN" | "INFO";
@@ -123,7 +123,7 @@ function structuredResultRejection(value: unknown): "invalid summary" | "invalid
 function normalizeReviewResult(result: ReviewResult, options: Pick<OutputOptions, "minSeverity" | "allowedFindingIds" | "existingFindingKeys" | "resolvedFindings" | "commitId" | "batchMarker">, warnInvalidUpdates: boolean): ReviewResult {
   const minRank = SEVERITY_RANK[options.minSeverity ?? "INFO"];
   const comments = result.comments
-    .map((comment) => ({ ...comment, severity: normalizeSeverity(comment.severity) }))
+    .map((comment) => ({ ...comment, body: normalizeAiFixBody(sanitizeVisibleReviewText(comment.body)), severity: normalizeSeverity(comment.severity) }))
     .filter((comment) => SEVERITY_RANK[comment.severity] >= minRank)
     .filter((comment) => !options.existingFindingKeys?.has(normalizeFinding(comment)))
     .filter((comment) => {
@@ -147,14 +147,11 @@ function normalizeReviewResult(result: ReviewResult, options: Pick<OutputOptions
       return valid;
     })
     .map((comment) => {
-      const emoji = SEVERITY_EMOJI[comment.severity];
-      const prefix = ["🔴 ", "🟡 ", "🔵 "].find((value) => comment.body.startsWith(value));
-      const body = prefix ? comment.body.slice(prefix.length) : comment.body;
       // Provenance is derived only from fields validated by the filter above;
       // reassigning the key here also drops any model-supplied value.
       const historical = (options.resolvedFindings ?? []).find(f => f.historicalFindingId === comment.resolved_finding_id);
       const reRaiseProvenance = historical ? { historicalFindingId: historical.historicalFindingId, reason: comment.re_raise_reason, evidence: comment.re_raise_evidence } : undefined;
-      return { ...comment, body: `${emoji} ${body}`, reRaiseProvenance };
+      return { ...comment, ...(reRaiseProvenance ? { reRaiseProvenance } : {}) };
     });
   const updates: FindingUpdate[] = [];
   for (const candidate of result.finding_updates ?? []) {
@@ -324,7 +321,8 @@ function isReviewComment(value: unknown): value is ReviewComment {
     typeof comment.line === "number" &&
     Number.isFinite(comment.line) &&
     (comment.side === "LEFT" || comment.side === "RIGHT") &&
-    typeof comment.body === "string"
+    typeof comment.body === "string" &&
+    hasAiFixProse(comment.body)
   );
 }
 
@@ -525,10 +523,13 @@ function hasActionableFindings(comments: ReviewComment[]): boolean {
 
 /** Adds the fix instruction only to actionable individual findings. */
 function appendFindingFooter(comment: ReviewComment, body: string): string {
-  if (comment.severity !== "WARN" && comment.severity !== "CRITICAL") return body;
   const metadata = body.match(/^(?:(?:<!--\s*pi-reviewer\s*:[\s\S]*?-->\n?)*)/)?.[0] ?? "";
-  const visibleBody = neutralizeDetailsTags(removeAiFixFooter(body.slice(metadata.length))).trim();
-  return `${metadata}${visibleBody}\n\n${renderAiFixPrompt(comment, visibleBody)}`;
+  const findingBody = normalizeAiFixBody(body.slice(metadata.length));
+  const visibleBody = renderFindingSummary(comment, findingBody);
+  const fixit = comment.severity === "WARN" || comment.severity === "CRITICAL"
+    ? `\n\n${renderAiFixPrompt(comment, findingBody)}`
+    : "";
+  return `${metadata}${visibleBody}${fixit}`;
 }
 
 /** Keep model-controlled text from becoming metadata when it is shown in a review body. */
@@ -559,17 +560,17 @@ function formatForGitHub(result: ReviewResult, provenance: ReRaiseProvenanceOpti
   const lines = ["## Pi Reviewer", "", sanitizeVisibleReviewText(result.summary)];
 
   const actionable = result.comments.filter(comment => comment.severity === "WARN" || comment.severity === "CRITICAL");
-  const prompt = renderAiFixPromptList(actionable.map(comment => ({ context: comment, body: comment.body })));
+  const prompt = renderAiFixPromptList(actionable.map(comment => ({ context: comment, body: sanitizeVisibleReviewText(comment.body) })));
   if (prompt) lines.push("", prompt);
 
   if (result.comments.length > 0) {
     lines.push("", "### Inline Comments");
     for (const comment of result.comments) {
-      const visibleBody = `${reRaiseMetadata(comment, provenance)}${sanitizeVisibleReviewText(comment.body)}`;
+      const findingBody = normalizeAiFixBody(comment.body);
+      const visibleBody = `${reRaiseMetadata(comment, provenance)}${renderFindingSummary(comment, findingBody)}`;
       lines.push(
         "",
-        encodeBodyFindingMarker({ findingId: bodyFindingId(normalizeFinding(comment)), file: comment.file, line: comment.line, side: comment.side, severity: comment.severity, body: removeAiFixFooter(visibleBody) }),
-        `${SEVERITY_EMOJI[comment.severity]} **\`${comment.file}:${comment.line}\`** · ${comment.side}`,
+        encodeBodyFindingMarker({ findingId: bodyFindingId(normalizeFinding(comment)), file: comment.file, line: comment.line, side: comment.side, severity: comment.severity, body: `${reRaiseMetadata(comment, provenance)}${findingBody}` }),
         visibleBody
       );
     }
@@ -587,17 +588,18 @@ function formatForGitHub(result: ReviewResult, provenance: ReRaiseProvenanceOpti
 function buildReviewBody(summary: string, moved: ReviewComment[], allComments: ReviewComment[], provenance: ReRaiseProvenanceOptions): string {
   const lines = [sanitizeVisibleReviewText(summary)];
   const actionable = allComments.filter(comment => comment.severity === "WARN" || comment.severity === "CRITICAL");
-  const prompt = renderAiFixPromptList(actionable.map(comment => ({ context: comment, body: comment.body })));
+  const prompt = renderAiFixPromptList(actionable.map(comment => ({ context: comment, body: sanitizeVisibleReviewText(comment.body) })));
   if (prompt) lines.push("", prompt);
   if (moved.length === 0) return lines.join("\n");
   lines.push("", "### Comments Not Attached to the Diff", "");
   lines.push("These comments could not be attached to a specific diff line, so the reported location is approximate — the line is not part of the diff:");
   for (const comment of moved) {
-    const visibleBody = appendFindingFooter(comment, `${reRaiseMetadata(comment, provenance)}${sanitizeVisibleReviewText(comment.body)}`);
+    const findingBody = sanitizeVisibleReviewText(normalizeAiFixBody(comment.body));
+    const visibleBody = `${reRaiseMetadata(comment, provenance)}${renderFindingSummary(comment, findingBody)}${comment.severity === "WARN" || comment.severity === "CRITICAL" ? `\n\n${renderAiFixPrompt(comment, findingBody)}` : ""}`;
     const findingId = bodyFindingId(normalizeFinding(comment));
     lines.push(
       "",
-      encodeBodyFindingMarker({ findingId, file: comment.file, line: comment.line, side: comment.side, severity: comment.severity, body: removeAiFixFooter(visibleBody) }),
+      encodeBodyFindingMarker({ findingId, file: comment.file, line: comment.line, side: comment.side, severity: comment.severity, body: `${reRaiseMetadata(comment, provenance)}${findingBody}` }),
       `> ${SEVERITY_EMOJI[comment.severity]} **\`${comment.file}:${comment.line}\`** · ${comment.side} — location could not be verified`,
       visibleBody
     );

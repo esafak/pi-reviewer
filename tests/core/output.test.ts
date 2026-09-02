@@ -11,7 +11,7 @@ import {
   sendOutput,
 } from "../../src/core/output.js";
 import { bodyFindingId, decodeBodyFindingMarkers, encodeBodyFindingMarker } from "../../src/ci/batch.js";
-import { AI_FIX_FOOTER, appendAiFixFooter, renderAiFixPrompt } from "../../src/core/ai-fix-footer.js";
+import { AI_FIX_FOOTER, appendAiFixFooter, renderAiFixPrompt, renderAiFixPromptText, renderFindingSummary } from "../../src/core/ai-fix-footer.js";
 
 const createdDirs: string[] = [];
 
@@ -136,7 +136,7 @@ describe("parseAgentResponse", () => {
           line: 10,
           side: "RIGHT",
           severity: "WARN",
-          body: "🟡 Nice improvement",
+          body: "Nice improvement",
         },
       ],
     });
@@ -146,6 +146,12 @@ describe("parseAgentResponse", () => {
     const result = parseAgentResponse("not-json");
 
     expect(result).toEqual({ summary: "not-json", comments: [] });
+  });
+
+  it.each(["", "   ", "🟡"]) ("rejects an empty finding body (%j)", (body) => {
+    const response = parseAgentResponseWithStatus(JSON.stringify({ summary: "review", comments: [{ file: "src/a.ts", line: 1, side: "RIGHT", severity: "WARN", body }] }));
+    expect(response.parsed).toBe(false);
+    expect(response.rejectionReason).toBe("invalid comments");
   });
 
   it("marks invalid JSON as unparsed", () => {
@@ -413,10 +419,10 @@ with details",
       "INFO",
       "CRITICAL",
     ]);
-    // Severity emoji prefix is applied
-    expect(result.comments[0].body).toMatch(/^🔴 /);
-    expect(result.comments[3].body).toMatch(/^🟡 /);
-    expect(result.comments[4].body).toMatch(/^🔵 /);
+    // Finding bodies remain canonical prose; severity is rendered at output boundaries.
+    expect(result.comments[0].body).toContain("resolve(body?.data as T)");
+    expect(result.comments[3].body).toBe("Only GET is exported.");
+    expect(result.comments[4].body).toBe("`INLINE_MAX_BYTES` mirrors backend.");
   });
 
   it("nested ```json fence inside a comment body is not treated as a block boundary", () => {
@@ -508,8 +514,24 @@ with details",
 });
 
 describe("sendOutput", () => {
-  it("deduplicates an existing AI-fix footer before appending it", () => {
-    expect(appendAiFixFooter(`summary\n\n${AI_FIX_FOOTER}\n\nmore details`)).toBe(`summary\n\nmore details\n\n${AI_FIX_FOOTER}`);
+  it("rejects the PR 1623 empty actionable finding before posting", async () => {
+    const fetchMock = okFetch();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(sendOutput({
+      target: "comment",
+      structuredResult: { summary: "The change has a concern", comments: [{ file: "argocd/apps/fresnel_backend/production-warehouse.yaml", line: 18, side: "RIGHT", severity: "WARN", body: "" }] },
+      githubToken: "token123",
+      prNumber: 1623,
+      repo: "archipelagoAI/configs",
+      commitId: "head",
+    })).rejects.toThrow(/invalid comments/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("preserves finding prose that quotes the footer and avoids a trailing duplicate", () => {
+    expect(appendAiFixFooter(`summary\n\n${AI_FIX_FOOTER}\n\nmore details`)).toBe(`summary\n\n${AI_FIX_FOOTER}\n\nmore details\n\n${AI_FIX_FOOTER}`);
+    expect(appendAiFixFooter(`summary\n\n${AI_FIX_FOOTER}`)).toBe(`summary\n\n${AI_FIX_FOOTER}`);
   });
 
   it("keeps legacy plain-footer findings dedup-equivalent with wrapped prompts", () => {
@@ -530,6 +552,13 @@ describe("sendOutput", () => {
     expect(prompt).toContain("\n\nCheck this:");
     expect(prompt).not.toContain("Context");
     expect(prompt).not.toContain("RIGHT");
+  });
+
+  it("renders summary and Fixit payloads independently from canonical prose", () => {
+    const context = { file: "src/a.ts", line: 2, side: "RIGHT", severity: "WARN" };
+    const body = "Check this:\n\n```ts\nreturn value;\n```";
+    expect(renderFindingSummary(context, body)).toBe("🟡 **`src/a.ts:2 · RIGHT`**\n\nCheck this:\n\n```ts\nreturn value;\n```");
+    expect(renderAiFixPromptText(context, body)).toBe(`WARN: src/a.ts:2\n\n${body}\n\n${AI_FIX_FOOTER}`);
   });
 
   it("keeps reply text that happens to start with a level-looking line", () => {
@@ -586,13 +615,13 @@ describe("sendOutput", () => {
     await sendOutput({ target: "comment", content: JSON.stringify({ summary: "review", comments: [{ file: "src/a.ts", line: 3, side: "RIGHT", severity: "WARN", body: "problem" }] }), githubToken: "token123", prNumber: 42, repo: "owner/repo" });
     const body = JSON.parse((fetchMock.mock.calls[0][1] as { body: string }).body).body as string;
     expect(decodeBodyFindingMarkers(body)).toHaveLength(1);
-    expect(decodeBodyFindingMarkers(body)[0]).toMatchObject({ file: "src/a.ts", body: expect.stringContaining("🟡 problem") });
-    expect(body).toContain("🟡 problem");
+    expect(decodeBodyFindingMarkers(body)[0]).toMatchObject({ file: "src/a.ts", body: "problem" });
+    expect(body).toContain("🟡 **`src/a.ts:3 · RIGHT`**");
     expect(body.split(AI_FIX_FOOTER)).toHaveLength(2);
     expect(body).toContain("<summary>Prompt to fix all issues with AI</summary>");
     expect(body).toContain("WARN: src/a.ts:3");
     expect(body.match(/<summary>/g)).toHaveLength(1);
-    expect(body.indexOf("<!-- pi-reviewer:body-finding:v1")).toBeLessThan(body.indexOf("🟡 problem"));
+    expect(body.indexOf("<!-- pi-reviewer:body-finding:v1")).toBeLessThan(body.indexOf("🟡 **`src/a.ts:3"));
   });
 
   it("embeds validated re-raise provenance in posted inline comments", async () => {
@@ -605,7 +634,8 @@ describe("sendOutput", () => {
     expect(payload.comments[0].body).toMatch(/^<!-- pi-reviewer:finding:v1 -->\n<!-- pi-reviewer:re-raise:v1 \{/);
     const metadata = JSON.parse(payload.comments[0].body.match(/<!-- pi-reviewer:re-raise:v1 (\{[\s\S]*?\}) -->/)?.[1] ?? "{}");
     expect(metadata).toMatchObject({ historicalFindingId: "inline:42", reason: "REINTRODUCED", evidence: "The new diff restores it.", targetSha: "head" });
-    expect(payload.comments[0].body).toContain("🟡 old issue");
+    expect(payload.comments[0].body).toContain("🟡 **`src/a.ts:1 · RIGHT`**");
+    expect(payload.comments[0].body).toContain("old issue");
   });
 
   it("keeps re-raise provenance intact when a comment moves to the review body", async () => {
@@ -618,7 +648,8 @@ describe("sendOutput", () => {
     expect(marker?.body).toContain('"reason":"MATERIALLY_CHANGED"');
     expect(marker?.body).toContain("behavior changed --\\u003e in diff");
     expect(payload.body).not.toContain("pi-reviewer :re-raise");
-    expect(payload.body).toContain("🟡 old issue");
+    expect(payload.body).toContain("🟡 **`src/a.ts:99 · RIGHT`**");
+    expect(payload.body).toContain("old issue");
   });
 
   it("keeps re-raise provenance intact in issue-comment fallback findings", async () => {
@@ -659,7 +690,7 @@ describe("sendOutput", () => {
     const payload = JSON.parse((fetchMock.mock.calls[0][1] as { body: string }).body);
     expect(payload.body).toBe(`Needs fixes\n\n<details>\n<summary>Prompt to fix all issues with AI</summary>\n\n\`\`\`\nCRITICAL: src/auth.ts:42\n\nMissing null check\n\n${AI_FIX_FOOTER}\n\`\`\`\n\n</details>`);
     expect(payload.comments).toEqual([
-      { path: "src/auth.ts", line: 42, side: "RIGHT", body: `<!-- pi-reviewer:finding:v1 -->\n🔴 Missing null check\n\n<details>\n<summary>Prompt to fix with AI</summary>\n\n\`\`\`\nCRITICAL: src/auth.ts:42\n\nMissing null check\n\n${AI_FIX_FOOTER}\n\`\`\`\n\n</details>` },
+      { path: "src/auth.ts", line: 42, side: "RIGHT", body: `<!-- pi-reviewer:finding:v1 -->\n🔴 **\`src/auth.ts:42 · RIGHT\`**\n\nMissing null check\n\n<details>\n<summary>Prompt to fix with AI</summary>\n\n\`\`\`\nCRITICAL: src/auth.ts:42\n\nMissing null check\n\n${AI_FIX_FOOTER}\n\`\`\`\n\n</details>` },
     ]);
   });
 
@@ -689,8 +720,8 @@ describe("sendOutput", () => {
     expect(payload.body).toContain("CRITICAL: src/b.ts:4\n\nPrevent the crash");
     expect(payload.body).not.toContain("INFO: src/c.ts:6");
     expect(payload.comments).toHaveLength(3);
-    expect(payload.comments[0].body).toContain("🟡 Handle the error\n\n<details>");
-    expect(payload.comments[1].body).toContain("🔴 Prevent the crash\n\n<details>");
+    expect(payload.comments[0].body).toContain("🟡 **`src/a.ts:2 · RIGHT`**\n\nHandle the error\n\n<details>");
+    expect(payload.comments[1].body).toContain("🔴 **`src/b.ts:4 · RIGHT`**\n\nPrevent the crash\n\n<details>");
     expect(payload.comments[2].body).not.toContain("<details>");
   });
 
@@ -1022,7 +1053,7 @@ describe("sendOutput", () => {
         path: "client/web/src/lib/components/core/tag-input/tag-input.svelte",
         line: 20,
         side: "RIGHT",
-        body: `<!-- pi-reviewer:finding:v1 -->\n🟡 positionable\n\n<details>\n<summary>Prompt to fix with AI</summary>\n\n\`\`\`\nWARN: client/web/src/lib/components/core/tag-input/tag-input.svelte:20\n\npositionable\n\n${AI_FIX_FOOTER}\n\`\`\`\n\n</details>`,
+        body: `<!-- pi-reviewer:finding:v1 -->\n🟡 **\`client/web/src/lib/components/core/tag-input/tag-input.svelte:20 · RIGHT\`**\n\npositionable\n\n<details>\n<summary>Prompt to fix with AI</summary>\n\n\`\`\`\nWARN: client/web/src/lib/components/core/tag-input/tag-input.svelte:20\n\npositionable\n\n${AI_FIX_FOOTER}\n\`\`\`\n\n</details>`,
       },
     ]);
     expect(payload.body).toContain("Review");
@@ -1203,7 +1234,7 @@ describe("sendOutput", () => {
 
     const content = await readFile(path.join(dir, "pi-review.md"), "utf-8");
     expect(content).toBe(
-      `== Review Summary ==\nPlease address comments\n\n== Inline Comments ==\n🟡 src/a.ts:7 (RIGHT)\n🟡 Handle undefined\n\n${AI_FIX_FOOTER}`,
+      `== Review Summary ==\nPlease address comments\n\n== Inline Comments ==\n🟡 src/a.ts:7 (RIGHT)\nHandle undefined\n\n${AI_FIX_FOOTER}`,
     );
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("pi-review.md"));
   });
@@ -1277,7 +1308,7 @@ describe("sendOutput", () => {
         path: "src/a.ts",
         line: 2,
         side: "RIGHT",
-        body: `<!-- pi-reviewer:finding:v1 -->\n🟡 valid comment\n\n<details>\n<summary>Prompt to fix with AI</summary>\n\n\`\`\`\nWARN: src/a.ts:2\n\nvalid comment\n\n${AI_FIX_FOOTER}\n\`\`\`\n\n</details>`,
+        body: `<!-- pi-reviewer:finding:v1 -->\n🟡 **\`src/a.ts:2 · RIGHT\`**\n\nvalid comment\n\n<details>\n<summary>Prompt to fix with AI</summary>\n\n\`\`\`\nWARN: src/a.ts:2\n\nvalid comment\n\n${AI_FIX_FOOTER}\n\`\`\`\n\n</details>`,
       },
     ]);
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("comment_id=999"));
@@ -1370,6 +1401,18 @@ describe("sendOutput", () => {
     expect(normalizeFinding({ file: "a.ts", line: 1, side: "RIGHT", body: encodeBodyFindingMarker({ findingId: 7, file: "a.ts", line: 1, side: "RIGHT", severity: "WARN", body: "🟡 issue" }) })).toBe(normalizeFinding({ file: "a.ts", line: 1, side: "RIGHT", body: "issue" }));
     expect(normalizeFinding({ file: "a.ts", line: 1, side: "RIGHT", body: "<!-- pi-reviewer:finding:v1 -->\n🔴 issue" })).toBe(normalizeFinding({ file: "a.ts", line: 1, side: "RIGHT", body: "issue" }));
     expect(normalizeFinding({ file: "a.ts", line: 1, side: "RIGHT", body: "before <!-- pi-reviewer: body-finding:v1 ignored --> after" })).toBe(normalizeFinding({ file: "a.ts", line: 1, side: "RIGHT", body: "before <!-- pi-reviewer : body-finding:v1 ignored --> after" }));
+  });
+
+  it("keeps body-finding IDs stable between canonical and deployed legacy bodies", () => {
+    const canonical = { file: "src/a.ts", line: 1, side: "RIGHT" as const, body: "issue" };
+    const legacy = { ...canonical, body: `<!-- pi-reviewer:finding:v1 -->\n🟡 issue\n\n${AI_FIX_FOOTER}` };
+    expect(bodyFindingId(normalizeFinding(canonical))).toBe(bodyFindingId(normalizeFinding(legacy)));
+  });
+
+  it("can read the deployed PR 1623 orphan without changing its historical identity", () => {
+    const orphan = { file: "argocd/apps/fresnel_backend/production-warehouse.yaml", line: 18, side: "RIGHT" as const, body: `<!-- pi-reviewer:finding:v1 -->\n🟡\n\n<details>\n<summary>Prompt to fix with AI</summary>\n\n\`\`\`\nWARN: argocd/apps/fresnel_backend/production-warehouse.yaml:18\n\n\n\n${AI_FIX_FOOTER}\n\`\`\`\n\n</details>` };
+    const empty = { ...orphan, body: "" };
+    expect(bodyFindingId(normalizeFinding(orphan))).toBe(bodyFindingId(normalizeFinding(empty)));
   });
 });
 

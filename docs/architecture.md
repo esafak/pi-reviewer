@@ -204,6 +204,16 @@ User prompts:
 - **`buildUserPrompt(diff, skippedFiles)`** — diff only; conventions already in system prompt (local mode).
 - **`buildSSHUserPrompt(diffCommand)`** — instructs the agent to run the given diff command, then read `AGENTS.md`/`CLAUDE.md`, then review. Used by both SSH modes since the agent fetches everything at runtime.
 
+### Finding output contract
+
+Review findings are normalized once at the model boundary into canonical prose
+plus structured location/severity fields. Severity emoji, GitHub metadata,
+`<details>` wrappers, fences, and the AI Fixit footer are presentation only.
+The summary renderer and Fixit renderer consume the canonical finding
+independently; current output is never stripped and reparsed. A small legacy
+decoder remains only for reading already-posted GitHub findings during
+deduplication and lifecycle reconciliation.
+
 ### SSH-only vs SSH+UI divergence
 
 Both modes share identical setup (`buildSSHDiffCommand` + `buildSSHUserPrompt`). They diverge only on:

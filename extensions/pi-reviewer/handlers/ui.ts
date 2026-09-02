@@ -2,6 +2,7 @@ import { writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { type ReviewResult } from "../../../src/core/output.js";
+import { renderAiFixPromptText, renderFindingSummary } from "../../../src/core/ai-fix-footer.js";
 import { startUIServer, type CommentDecision, type ModelInfo, type ContextGroup } from "../../../src/core/ui-server.js";
 
 export interface UIHandlerOptions {
@@ -75,7 +76,7 @@ function buildDecisionsMarkdown(result: ReviewResult, decisions: CommentDecision
       const c = result.comments[d.index];
       if (!c) continue;
       const label = d.decision === "discuss" ? "💬 Discuss" : "✅ Accept";
-      lines.push(`**${label}** \`${c.file}:${c.line}\` [${c.severity}]`, c.body, "");
+      lines.push(`**${label}**`, renderFindingSummary({ file: c.file, line: c.line, side: c.side, severity: c.severity }, c.body), "");
       if (d.decision === "discuss" && d.discussText) {
         lines.push(`> ${d.discussText}`, "");
       }
@@ -87,7 +88,7 @@ function buildDecisionsMarkdown(result: ReviewResult, decisions: CommentDecision
     lines.push("## Rejected", "");
     for (const d of rejected) {
       const c = result.comments[d.index];
-      if (c) lines.push(`- ❌ \`${c.file}:${c.line}\` ${c.body}`);
+      if (c) lines.push(`- ❌ ${renderFindingSummary({ file: c.file, line: c.line, side: c.side, severity: c.severity }, c.body)}`);
     }
     lines.push("");
   }
@@ -104,7 +105,7 @@ function buildInjectionMessage(result: ReviewResult, decisions: CommentDecision[
   for (const d of accepted) {
     const c = result.comments[d.index];
     if (!c) continue;
-    parts.push(`**\`${c.file}:${c.line}\`** [${c.severity}]`, c.body);
+    parts.push(renderAiFixPromptText({ file: c.file, line: c.line, side: c.side, severity: c.severity }, c.body));
     if (d.decision === "discuss" && d.discussText) parts.push(`My note: ${d.discussText}`);
     parts.push("");
   }
