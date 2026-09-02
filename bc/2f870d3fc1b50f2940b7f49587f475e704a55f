@@ -1,0 +1,18 @@
+src/core/ai-fix-footer.ts
+  h_ea91e2db23540f 17-19,29
+src/core/review-tool.ts
+  h_ea91e2db23540f 5,38,86-88
+tests/core/review-tool.test.ts
+  h_ea91e2db23540f 123,129-134
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "bc2f870d3fc1b50f2940b7f49587f475e704a55f",
+  "prompts": {},
+  "humans": {
+    "h_ea91e2db23540f": {
+      "author": "Emre Şafak <3928300+esafak@users.noreply.github.com>"
+    }
+  }
+}
