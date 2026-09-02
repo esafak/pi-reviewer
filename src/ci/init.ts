@@ -61,7 +61,7 @@ jobs:
         shell: bash
         run: git fetch origin '+refs/pull/*/head:refs/remotes/origin/pr/*' --no-tags
 
-      - uses: zeflq/pi-reviewer@main
+      - uses: esafak/pi-reviewer@main
         with:
           github-token: \${{ secrets.GITHUB_TOKEN }}
           pi-api-key: \${{ secrets.PI_API_KEY }}

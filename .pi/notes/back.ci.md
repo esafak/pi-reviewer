@@ -16,7 +16,7 @@ description: Load when working on the GitHub Action entrypoint, workflow bootstr
 
 <posting>
   <rule><requirement>`review()` in CI uses the comment output target, not terminal or file output.</requirement><example>`GITHUB_ACTIONS=true` plus a PR context posts back to GitHub instead of writing `pi-review.md` locally.</example></rule>
-  <rule><requirement>The workflow installs dependencies with `npm ci` before running the compiled entrypoint.</requirement><example>`action.yml` runs `npm ci` in the action workspace, then executes the compiled script.</example></rule>
+  <rule><requirement>The workflow installs dependencies with `vp install --frozen-lockfile` before running the compiled entrypoint.</requirement><example>`action.yml` runs `vp install --frozen-lockfile` in the action workspace, then executes the compiled script.</example></rule>
 </posting>
 
 <self-verification>

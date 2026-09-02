@@ -51,7 +51,7 @@ Same model. Same diff. Completely different review.
 Not every finding deserves equal weight. `pi-reviewer` lets you filter by severity — so you can focus on what matters.
 
 ```yaml
-- uses: zeflq/pi-reviewer@main
+- uses: esafak/pi-reviewer@main
   with:
     github-token: ${{ secrets.GITHUB_TOKEN }}
     pi-api-key: ${{ secrets.PI_API_KEY }}
@@ -87,7 +87,7 @@ Both tools read your `CLAUDE.md` and `REVIEW.md`. The difference is where they r
 ## Set it up once, forget about it
 
 ```bash
-npx github:zeflq/pi-reviewer init
+npx github:esafak/pi-reviewer init
 ```
 
 That generates a workflow file. Add your `PI_API_KEY` secret. Every PR from that point on gets a review that knows your project.
@@ -102,7 +102,7 @@ The review that matters is the one that knows *why* your codebase looks the way 
 
 That's the layer that's been missing.
 
-**[github.com/zeflq/pi-reviewer](https://github.com/zeflq/pi-reviewer)**
+**[github.com/esafak/pi-reviewer](https://github.com/esafak/pi-reviewer)**
 
 ---
 
