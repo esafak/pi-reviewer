@@ -31,7 +31,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: review
     permissions:
-      contents: read
+      contents: write
       pull-requests: write
       issues: write
     concurrency:
@@ -48,6 +48,18 @@ jobs:
       - name: Fetch PR refs for comment and manual events
         shell: bash
         run: git fetch origin '+refs/pull/*/head:refs/remotes/origin/pr/*' --no-tags
+
+      - name: Diagnose review-thread permissions
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number || inputs.pr-number }}
+          REPO_OWNER: ${{ github.repository_owner }}
+          REPO_NAME: ${{ github.event.repository.name || github.repository }}
+        run: |
+          query='query($owner: String!, $name: String!, $number: Int!) { viewer { login id __typename } repository(owner: $owner, name: $name) { pullRequest(number: $number) { reviewThreads(first: 100) { nodes { id isResolved viewerCanResolve comments(first: 1) { nodes { databaseId } } } } } } }'
+          gh api graphql -f query="$query" -f owner="$REPO_OWNER" -f name="$REPO_NAME" -F number="$PR_NUMBER" \
+            --jq '.data | {viewer, unresolved_threads: [.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false) | {id, viewerCanResolve, comment_ids: [.comments.nodes[].databaseId]}]}'
 
       # Cache Vite+ against the repository checkout. The composite action keeps
       # its own pnpm-store cache because setup-vp cannot reliably hash files
