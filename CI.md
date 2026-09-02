@@ -149,8 +149,8 @@ By default, comments appear under `github-actions[bot]`. To post under a custom 
 
 1. Go to `github.com/settings/apps/new`, set **Pull requests** and **Issues** permissions to **Write**, and disable the webhook
 2. Install the app on your repository
-3. Generate a **private key** and note the **App ID**
-4. Add `PI_REVIEWER_APP_ID` and `PI_REVIEWER_PK` to your repo secrets
+3. Generate a **private key** and note the **Client ID** (not the numeric App ID)
+4. Add the Client ID as `PI_REVIEWER_APP_ID` and the key as `PI_REVIEWER_PK` to your repo secrets
 
 Then update your workflow:
 
@@ -161,7 +161,7 @@ steps:
   - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
     id: bot-token
     with:
-      app-id: ${{ secrets.PI_REVIEWER_APP_ID }}
+       client-id: ${{ secrets.PI_REVIEWER_APP_ID }}
       private-key: ${{ secrets.PI_REVIEWER_PK }}
       permission-pull-requests: write
       permission-issues: write
