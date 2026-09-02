@@ -31,7 +31,7 @@ jobs:
   review:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v8
+      - uses: actions/checkout@v7
       - uses: esafak/pi-reviewer@main
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
