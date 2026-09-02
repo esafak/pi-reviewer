@@ -65,7 +65,7 @@ Runs on PR lifecycle events via GitHub Actions. Reviews are grouped by event bat
 Install the extension once:
 
 ```bash
-pi install https://github.com/zeflq/pi-reviewer
+pi install https://github.com/esafak/pi-reviewer
 ```
 
 Then inside the pi TUI:

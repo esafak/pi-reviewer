@@ -396,7 +396,7 @@ with details",
       "```",
       "",
       "---",
-      "*Review by [pi-reviewer](https://github.com/zeflq/pi-reviewer)*",
+      "*Review by [pi-reviewer](https://github.com/esafak/pi-reviewer)*",
     ].join("\n");
 
     const result = parseAgentResponse(body);
@@ -904,7 +904,7 @@ describe("sendOutput", () => {
          errorTags,
 +        customValidation,
      }: TagInputProps = $props();
- 
+
      $effect(() => {
 `;
 

@@ -20,7 +20,7 @@ pi-reviewer/
 
 project-x/
 └── .github/workflows/
-    └── pi-review.yml   ← triggers on PR, calls zeflq/pi-reviewer@v1
+    └── pi-review.yml   ← triggers on PR, calls esafak/pi-reviewer@v1
 ```
 
 **Project X workflow:**
@@ -32,7 +32,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: zeflq/pi-reviewer@v1
+      - uses: esafak/pi-reviewer@v1
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           pi-api-key: ${{ secrets.PI_API_KEY }}
@@ -59,7 +59,7 @@ pi install ~/projects/pi-reviewer
 
 Install from GitHub:
 ```bash
-pi install https://github.com/zeflq/pi-reviewer
+pi install https://github.com/esafak/pi-reviewer
 ```
 
 ---
@@ -133,7 +133,7 @@ tests/
 
 - [x] Run TypeScript sources directly with `tsx`
 - [x] Keep the UI bundle at `dist-ui/index.html` as the only generated runtime artifact
-- [x] Publish to GitHub Marketplace as `zeflq/pi-reviewer`
+- [x] Publish to GitHub Marketplace as `esafak/pi-reviewer`
 
 ### ✅ 6. Multi-provider API key support
 

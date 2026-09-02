@@ -7,7 +7,7 @@ Runs on PR lifecycle events via GitHub Actions. Each invocation reviews one accu
 Run once in your project root:
 
 ```bash
-npx github:zeflq/pi-reviewer init
+pnpx github:esafak/pi-reviewer init
 ```
 
 This generates `.github/workflows/pi-review.yml`:
@@ -53,7 +53,7 @@ jobs:
       - name: Fetch PR refs for comment and manual events
         shell: bash
         run: git fetch origin '+refs/pull/*/head:refs/remotes/origin/pr/*' --no-tags
-      - uses: zeflq/pi-reviewer@main
+      - uses: esafak/pi-reviewer@main
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           pi-api-key: ${{ secrets.PI_API_KEY }}
@@ -122,7 +122,7 @@ The action runs on Node 24 or newer (LTS when installed by the action). Before s
 The reviewer can pull relevant project documentation into the review prompt based on which files changed in the diff. It is **opt-in** in CI: nothing is injected unless you set `doc-dirs`.
 
 ```yaml
-      - uses: zeflq/pi-reviewer@main
+      - uses: esafak/pi-reviewer@main
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           pi-api-key: ${{ secrets.PI_API_KEY }}
@@ -164,7 +164,7 @@ steps:
       app_id: ${{ secrets.BOT_APP_ID }}
       private_key: ${{ secrets.BOT_PRIVATE_KEY }}
 
-  - uses: zeflq/pi-reviewer@main
+  - uses: esafak/pi-reviewer@main
     with:
       github-token: ${{ steps.bot-token.outputs.token }}
       pi-api-key: ${{ secrets.PI_API_KEY }}

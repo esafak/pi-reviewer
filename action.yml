@@ -1,6 +1,6 @@
 name: "pi-reviewer"
 description: "AI-powered PR reviewer using the pi agent — model-agnostic"
-author: "zeflq"
+author: "esafak"
 
 inputs:
   github-token:
