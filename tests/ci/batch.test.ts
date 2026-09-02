@@ -69,6 +69,20 @@ describe("resolved finding history", () => {
     expect(result.resolvedFindings[0].resolutionTargetSha).toBe("resolved-sha");
   });
 
+  it("uses thread structure instead of quoted marker text to identify roots", () => {
+    const result = collectFindingHistory({
+      login: "review-bot",
+      reviews: [],
+      issueComments: [],
+      comments: [
+        { id: 1, body: "<!-- pi-reviewer:finding:v1 --> issue mentions pi-reviewer:status:v1", user: { login: "review-bot" }, path: "src/a.ts", line: 1, side: "RIGHT" },
+        { id: 2, body: "Quoted <!-- pi-reviewer:finding:v1 -->", user: { login: "review-bot" }, in_reply_to_id: 1, path: "src/a.ts", line: 1, side: "RIGHT" },
+      ],
+      threads: [],
+    });
+    expect(result.activeFindings.map(f => f.commentId)).toEqual([1]);
+  });
+
   it("keeps identical text at different locations distinguishable", () => {
     const comments = [1, 2].map((id, i) => ({ id, body: "<!-- pi-reviewer:finding:v1 -->\nsame", user: { login: "bot" }, path: "src/a.ts", line: i + 1, side: "RIGHT", created_at: `2026-01-0${i + 1}` }));
     const result = collectFindingHistory({ login: "bot", reviews: [], issueComments: [], comments, threads: [{ id: "t1", isResolved: true, comments: { nodes: [{ id: 1 }] } }, { id: "t2", isResolved: true, comments: { nodes: [{ id: 2 }] } }] });
@@ -171,6 +185,9 @@ describe("event normalization", () => {
     const root = { body: "<!-- pi-reviewer:finding:v1 --> finding" };
     expect(isPiReviewerRootComment(root)).toBe(true);
     expect(isPiReviewerRootComment({ ...root, in_reply_to_id: 3 })).toBe(false);
+    expect(isPiReviewerRootComment({ body: "Quoted <!-- pi-reviewer:finding:v1 --> finding" })).toBe(false);
+    expect(isPiReviewerRootComment({ body: "<!--pi-reviewer:finding:v1--> finding" })).toBe(false);
+    expect(isPiReviewerRootComment({ body: "<!-- pi-reviewer :finding:v1 --> finding" })).toBe(false);
     expect(decodeReplyMarker(replyMarker(9, 8, "thread-1"))).toEqual({ version: 1, commentId: 9, parentId: 8, threadId: "thread-1" });
   });
   it("gates replies to trusted human repository participants", () => {

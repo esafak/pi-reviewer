@@ -52,6 +52,8 @@ describe("review-comment reply action path", () => {
 
   it.each([
     ["human-rooted", { ...root, user: { login: "human" }, body: "human finding" }, triggering, event],
+    ["quoted-marker-root", { ...root, body: "Quoted <!-- pi-reviewer:finding:v1 --> finding" }, triggering, event],
+    ["variant-marker-root", { ...root, body: "<!-- pi-reviewer :finding:v1 --> finding" }, triggering, event],
     ["bot-authored", root, { ...triggering, user: { login: "other-bot", type: "Bot" } }, { ...event, actor: { login: "other-bot", association: "MEMBER", type: "Bot" } }],
     ["unauthorized", root, triggering, { ...event, actor: { login: "human", association: "CONTRIBUTOR", type: "User" } }],
     ["resolved", root, triggering, event],

@@ -20,6 +20,7 @@ export interface FindingHistoryThread { id: string; isResolved: boolean; comment
 const marker = /<!-- pi-reviewer:batch:v1 (\{[^\n]*\}) -->/;
 const bodyFindingMarker = /<!-- pi-reviewer:body-finding:v1 (\{[^\n]*\}) -->/g;
 const statusMarker = /<!--\s*pi-reviewer:status:v1\s+(\{[^\n]*\})\s*-->/;
+const piReviewerFindingMarker = "<!-- pi-reviewer:finding:v1 -->";
 export function encodeBatchMarker(value: Omit<BatchMarker, "version">) { return `<!-- pi-reviewer:batch:v1 ${JSON.stringify({ version: 1, ...value })} -->`; }
 export function decodeBatchMarker(body: string | null | undefined): BatchMarker | undefined { const match = body?.match(marker); if (!match) return undefined; try { const value = JSON.parse(match[1]); return value.version === 1 && typeof value.fromSha === "string" && typeof value.toSha === "string" && typeof value.actor === "string" && typeof value.reviewId === "number" ? value : undefined; } catch { return undefined; } }
 export function bodyFindingId(identity: string): number {
@@ -74,7 +75,7 @@ export function collectFindingHistory(input: { reviews: FindingHistorySource[]; 
   const threadCommentIds = new Map(input.threads.map(t => [t.id, new Set(t.comments.nodes.map(c => c.id))]));
   // Only the bot's own status replies are authoritative lifecycle state; human
   // replies may quote or spoof marker text and must never influence it.
-  const roots = input.comments.filter(c => c.user?.login === input.login && c.id > 0 && c.body.includes("<!-- pi-reviewer:finding:v1 -->") && !c.body.includes("pi-reviewer:status:v1"));
+  const roots = input.comments.filter(c => c.user?.login === input.login && c.id > 0 && isPiReviewerRootComment(c));
   const inline = roots.filter(c => !threadByComment.get(c.id)?.resolved).map(c => {
     const batch = c.pull_request_review_id ? batchByReview.get(c.pull_request_review_id) : undefined;
     const statusReplies = input.comments.filter(reply => reply.in_reply_to_id === c.id && reply.user?.login === input.login && decodeStatusMarker(reply.body)).sort((a, b) => a.id - b.id);
@@ -87,7 +88,7 @@ export function collectFindingHistory(input: { reviews: FindingHistorySource[]; 
     const resolutionReply = input.comments.filter(reply => reply.in_reply_to_id === c.id && reply.user?.login === input.login && decodeStatusMarker(reply.body)).sort((a, b) => a.id - b.id).at(-1);
     const resolution = resolutionReply ? decodeStatusMarker(resolutionReply.body) : undefined;
     const batch = c.pull_request_review_id ? batchByReview.get(c.pull_request_review_id) : undefined;
-    return { historicalFindingId: `inline:${c.id}`, commentId: c.id, threadId, kind: "inline" as const, file: c.path, line: c.line, side: c.side, body: c.body, originalBody: c.body.replace("<!-- pi-reviewer:finding:v1 -->", "").trim(), sourceBatch: batch ? `${batch.fromSha}..${batch.toSha}` : undefined, resolutionTargetSha: resolution?.targetSha, resolutionExplanation: resolutionReply?.body.replace(statusMarker, "").trim(), conversation };
+    return { historicalFindingId: `inline:${c.id}`, commentId: c.id, threadId, kind: "inline" as const, file: c.path, line: c.line, side: c.side, body: c.body, originalBody: c.body.replace(piReviewerFindingMarker, "").trim(), sourceBatch: batch ? `${batch.fromSha}..${batch.toSha}` : undefined, resolutionTargetSha: resolution?.targetSha, resolutionExplanation: resolutionReply?.body.replace(statusMarker, "").trim(), conversation };
   });
   const bodySources = [...input.reviews.filter(r => r.user?.login === input.login).map(r => ({ ...r, reviewId: r.id, issueCommentId: undefined })), ...input.issueComments.filter(r => r.user?.login === input.login).map(r => ({ ...r, reviewId: undefined, issueCommentId: r.id }))];
   const body = bodySources.flatMap(r => decodeBodyFindingMarkers(r.body).map(f => { const batch = decodeBatchMarker(r.body); return { historicalFindingId: `body:${f.findingId}`, commentId: f.findingId, threadId: undefined, reviewId: r.reviewId, issueCommentId: r.issueCommentId, bodyFinding: true, kind: "body" as const, reviewBody: r.body ?? "", file: f.file, line: f.line, side: f.side, body: f.body, originalBody: f.body, status: f.status, latestStatus: f.status === "PARTIALLY_RESOLVED" ? "PARTIALLY_RESOLVED" : undefined, sourceBatch: batch ? `${batch.fromSha}..${batch.toSha}` : undefined, resolutionTargetSha: f.targetSha, resolutionExplanation: f.explanation, conversation: (r.body ?? "").slice(0, 8000) }; }));
@@ -117,5 +118,5 @@ export function decodeReplyMarker(body: string | null | undefined): { version: 1
   try { const v = JSON.parse(match[1]); return v.version === 1 && Number.isSafeInteger(v.commentId) && Number.isSafeInteger(v.parentId) && typeof v.threadId === "string" ? v : undefined; } catch { return undefined; }
 }
 export function isPiReviewerRootComment(comment: { body?: string | null; in_reply_to_id?: number }): boolean {
-  return comment.in_reply_to_id == null && comment.body?.includes("<!-- pi-reviewer:finding:v1 -->") === true && !comment.body.includes("pi-reviewer:status:v1");
+  return comment.in_reply_to_id == null && comment.body?.startsWith(piReviewerFindingMarker) === true;
 }
