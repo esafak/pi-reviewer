@@ -14,9 +14,13 @@ export interface AiFixFinding {
 
 const AI_FIX_DETAILS = /<details>\s*<summary>Prompt to fix(?: all issues)? with AI<\/summary>[\s\S]*?<\/details>\s*$/;
 const AI_FIX_CONTEXT = /^\*\*Context:\*\*[^\n]*\n\s*\n?/;
-/** JSON-Schema-compatible requirement for prose beyond presentation emoji. */
-export const MEANINGFUL_PROSE_PATTERN = "[\\p{L}\\p{N}]";
-const MEANINGFUL_PROSE = /[\p{L}\p{N}]/u;
+/**
+ * JSON-Schema-compatible requirement for prose beyond whitespace and emoji.
+ * JSON Schema regexes do not enable Unicode property escapes, so this uses
+ * UTF-16 ranges for the emoji blocks and common BMP emoji characters.
+ */
+export const MEANINGFUL_PROSE_PATTERN = "^(?![\\s😀🧪\\u200D\\u20E3\\uFE0F\\uD83C-\\uD83E\\uDC00-\\uDFFF\\u00A9\\u00AE\\u203C\\u2049\\u2122\\u2139\\u2190-\\u21FF\\u2300-\\u23FF\\u25A0-\\u27BF\\u2B00-\\u2BFF\\u3030\\u303D\\u3297\\u3299]+$)[\\s\\S]+$";
+const MEANINGFUL_PROSE = new RegExp(MEANINGFUL_PROSE_PATTERN);
 
 const SEVERITY_EMOJI: Record<string, string> = { CRITICAL: "🔴", WARN: "🟡", INFO: "🔵" };
 
