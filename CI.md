@@ -163,7 +163,7 @@ steps:
     with:
       client-id: ${{ secrets.PI_REVIEWER_CLIENT_ID }}
       private-key: ${{ secrets.PI_REVIEWER_PK }}
-      permission-contents: write
+      permission-contents: read
       permission-pull-requests: write
       permission-issues: write
 
