@@ -147,7 +147,7 @@ At review time, the action extracts keywords from the changed file paths (e.g. `
 
 By default, comments appear under `github-actions[bot]`. To post under a custom bot name, create a GitHub App:
 
-1. Go to `github.com/settings/apps/new`, set **Pull requests** and **Issues** permissions to **Write**, and disable the webhook
+1. Go to `github.com/settings/apps/new`, set **Contents** to **Read and write**, **Pull requests** and **Issues** to **Write**, and disable the webhook
 2. Install the app on your repository
 3. Generate a **private key** and note the **Client ID** (not the numeric App ID)
 4. Add the Client ID as `PI_REVIEWER_CLIENT_ID` and the key as `PI_REVIEWER_PK` to your repo secrets
@@ -161,10 +161,11 @@ steps:
   - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
     id: bot-token
     with:
-      client-id: ${{ secrets.PI_REVIEWER_CLIENT_ID }}
-      private-key: ${{ secrets.PI_REVIEWER_PK }}
-      permission-pull-requests: write
-      permission-issues: write
+       client-id: ${{ secrets.PI_REVIEWER_CLIENT_ID }}
+       private-key: ${{ secrets.PI_REVIEWER_PK }}
+       permission-contents: write
+       permission-pull-requests: write
+       permission-issues: write
 
   - uses: esafak/pi-reviewer@main
     with:
