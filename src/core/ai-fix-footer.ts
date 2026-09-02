@@ -7,8 +7,38 @@ export interface AiFixContext {
   severity?: string;
 }
 
+export interface AiFixFinding {
+  context: AiFixContext;
+  body: string;
+}
+
 const AI_FIX_DETAILS = /<details>\s*<summary>Prompt to fix(?: all issues)? with AI<\/summary>[\s\S]*?<\/details>\s*$/;
 const AI_FIX_CONTEXT = /^\*\*Context:\*\*[^\n]*\n\s*\n?/;
+
+const SEVERITY_EMOJI: Record<string, string> = { CRITICAL: "🔴", WARN: "🟡", INFO: "🔵" };
+
+function withoutSeverityEmoji(body: string): string {
+  return body.trim().replace(/^[🔴🟡🔵]\s*/u, "").trim();
+}
+
+/** Checks the same canonical body rule used by normalizeAiFixBody. */
+export function hasAiFixProse(body: string): boolean {
+  return withoutSeverityEmoji(body).length > 0;
+}
+
+/** Converts model prose into the canonical body used by all renderers. */
+export function normalizeAiFixBody(body: string): string {
+  const normalized = withoutSeverityEmoji(body);
+  if (!normalized) throw new Error("Finding body must contain non-empty prose");
+  return normalized;
+}
+
+/** Returns the human-facing finding summary; it contains no Fixit markup. */
+export function renderFindingSummary(context: AiFixContext, body: string): string {
+  const emoji = SEVERITY_EMOJI[context.severity ?? ""] ?? "";
+  const location = `${context.file}:${context.line}${context.side ? ` · ${context.side}` : ""}`;
+  return `${emoji ? `${emoji} ` : ""}**\`${location}\`**\n\n${normalizeAiFixBody(body)}`;
+}
 
 function stripPromptEnvelope(text: string): string {
   const hasEnvelope = /^<details>\s*<summary>Prompt to fix(?: all issues)? with AI<\/summary>/.test(text);
@@ -53,7 +83,7 @@ export function neutralizeDetailsTags(text: string): string {
 }
 
 function cleanPromptBody(body: string): string {
-  return neutralizeDetailsTags(stripPromptEnvelope(removeAiFixFooter(body)).replace(/^[🔴🟡🔵]\s*/u, "")).trim();
+  return neutralizeDetailsTags(normalizeAiFixBody(body));
 }
 
 function renderPromptDetails(prompt: string, summary = "Prompt to fix with AI"): string {
@@ -76,13 +106,18 @@ function promptEntry(context: AiFixContext, body: string): string {
   return `${level}: ${context.file}:${context.line}\n\n${cleanPromptBody(body)}`;
 }
 
+/** Returns the copyable Fixit payload without its GitHub disclosure wrapper. */
+export function renderAiFixPromptText(context: AiFixContext, body: string): string {
+  return `${promptEntry(context, body)}\n\n${AI_FIX_FOOTER}`;
+}
+
 /** Renders a copyable, self-contained prompt for one actionable finding. */
 export function renderAiFixPrompt(context: AiFixContext, body: string): string {
-  return renderPromptDetails(`${promptEntry(context, body)}\n\n${AI_FIX_FOOTER}`);
+  return renderPromptDetails(renderAiFixPromptText(context, body));
 }
 
 /** Renders one copyable prompt containing all actionable findings. */
-export function renderAiFixPromptList(issues: Array<{ context: AiFixContext; body: string }>): string {
+export function renderAiFixPromptList(issues: AiFixFinding[]): string {
   if (issues.length === 0) return "";
   const entries = issues.map(issue => promptEntry(issue.context, issue.body)).join("\n\n");
   return renderPromptDetails(`${entries}\n\n${AI_FIX_FOOTER}`, "Prompt to fix all issues with AI");
@@ -90,6 +125,6 @@ export function renderAiFixPromptList(issues: Array<{ context: AiFixContext; bod
 
 /** Appends the shared fix instruction without duplicating an existing footer. */
 export function appendAiFixFooter(body: string): string {
-  const withoutExistingFooter = removeAiFixFooter(body);
-  return `${withoutExistingFooter}\n\n${AI_FIX_FOOTER}`;
+  const normalized = body.trimEnd();
+  return normalized.endsWith(AI_FIX_FOOTER) ? normalized : `${normalized}\n\n${AI_FIX_FOOTER}`;
 }

@@ -120,6 +120,12 @@ describe("createReviewTool", () => {
     expect(() => validateToolArguments(tool, toolCall(args))).toThrow(/Validation failed/);
   });
 
+  it.each(["", "   ", "\n\t"]) ("schema rejects an empty finding body (%j)", (body) => {
+    const { tool } = createReviewTool();
+    const args = { ...validArgs(), comments: [{ ...validArgs().comments[0], body }] };
+    expect(() => validateToolArguments(tool, toolCall(args))).toThrow(/Validation failed/);
+  });
+
   it("schema validates finding updates", () => {
     const { tool } = createReviewTool();
     const args = { ...validArgs(), finding_updates: [{ comment_id: 7, status: "PARTIALLY_RESOLVED", explanation: "Changed validation; logging remains." }] };

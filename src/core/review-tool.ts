@@ -34,7 +34,7 @@ const reviewSchema = Type.Object(
             [Type.Literal("CRITICAL"), Type.Literal("WARN"), Type.Literal("INFO")],
             { description: "Issue severity tier." },
           ),
-          body: Type.String({ description: "Inline comment text, may use Markdown." }),
+          body: Type.String({ minLength: 1, pattern: "\\S", description: "Non-empty inline comment text, may use Markdown." }),
           resolved_finding_id: Type.Optional(Type.String({ maxLength: 200 })),
           re_raise_reason: Type.Optional(Type.Union([Type.Literal("REINTRODUCED"), Type.Literal("MATERIALLY_CHANGED"), Type.Literal("CONTRADICTORY_EVIDENCE")])),
           re_raise_evidence: Type.Optional(Type.String({ minLength: 1, maxLength: 2000 })),

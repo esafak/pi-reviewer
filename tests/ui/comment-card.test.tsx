@@ -31,9 +31,7 @@ describe("CommentCard response disclosure", () => {
     await user.click(summary);
     expect((details as HTMLDetailsElement).open).toBe(true);
     expect(screen.getByText("Please handle this error.")).toBeTruthy();
-    const footer = view.container.querySelector(".cc-response-footer");
-    expect(footer).toBeTruthy();
-    expect(footer?.textContent?.trim()).toBeTruthy();
+    expect(view.container.querySelector(".cc-body")?.textContent).toContain(AI_FIX_FOOTER);
     expect(document.activeElement).toBe(summary);
 
     await user.click(screen.getByRole("button", { name: "Accept" }));
@@ -90,12 +88,12 @@ describe("CommentCard response disclosure", () => {
     const view = render(<CommentCard comment={{ ...comment, side: "RIGHT" }} idx={6} onDecide={onDecide} />);
 
     const disclosure = view.container.querySelector(".cc-body");
-    expect(disclosure?.textContent).toContain("Context:");
+    expect(disclosure?.textContent).toContain("WARN: src/example.ts:12");
     expect(disclosure?.textContent).toContain("src/example.ts:12");
 
     await user.click(view.container.querySelector(".cc-copy") as HTMLElement);
     expect(writeText).toHaveBeenCalledWith(
-      `**Context:** \`src/example.ts:12\` · RIGHT · WARN\n\n${comment.body}\n\n${AI_FIX_FOOTER}`,
+      `WARN: src/example.ts:12\n\n${comment.body}\n\n${AI_FIX_FOOTER}`,
     );
   });
 });
