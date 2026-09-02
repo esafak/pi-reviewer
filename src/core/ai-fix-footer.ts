@@ -7,20 +7,38 @@ export interface AiFixContext {
   severity?: string;
 }
 
-const AI_FIX_DETAILS = /<details>\s*<summary>Prompt to fix with AI<\/summary>[\s\S]*?<\/details>\s*$/;
+const AI_FIX_DETAILS = /<details>\s*<summary>Prompt to fix(?: all issues)? with AI<\/summary>[\s\S]*?<\/details>\s*$/;
 const AI_FIX_CONTEXT = /^\*\*Context:\*\*[^\n]*\n\s*\n?/;
+
+function stripPromptEnvelope(text: string): string {
+  const hasEnvelope = /^<details>\s*<summary>Prompt to fix(?: all issues)? with AI<\/summary>/.test(text);
+  let content = hasEnvelope
+    ? text
+      .replace(/^<details>\s*<summary>Prompt to fix(?: all issues)? with AI<\/summary>\s*/, "")
+      .replace(/<\/details>\s*$/, "")
+      .replace(AI_FIX_CONTEXT, "")
+      .trim()
+    : text.trim();
+
+  if (hasEnvelope) {
+    const fence = content.match(/^(`{3,})\n([\s\S]*?)\n\1\s*$/);
+    if (fence) content = fence[2].trim();
+    content = content.replace(/^(?:CRITICAL|WARN|INFO|REPLY):[^\n]*\n\s*/, "");
+  }
+  return content.replace(AI_FIX_FOOTER, "").trim();
+}
 
 /** Removes either the current details prompt or the legacy plain-text footer. */
 export function removeAiFixFooter(body: string): string {
   const details = body.match(AI_FIX_DETAILS);
   if (details) {
-    const content = details[0]
-      .replace(/^<details>\s*<summary>Prompt to fix with AI<\/summary>\s*/, "")
-      .replace(/<\/details>\s*$/, "")
-      .replace(AI_FIX_CONTEXT, "")
-      .replace(AI_FIX_FOOTER, "")
-      .trim();
-    return `${body.slice(0, body.length - details[0].length)}${content}`.trimEnd();
+    const prefix = body.slice(0, body.length - details[0].length);
+    // New finding comments repeat the visible body before the dropdown. Keep
+    // that body and discard the duplicate prompt; legacy comments have only
+    // hidden metadata before the dropdown, so recover their body from it.
+    const visiblePrefix = prefix.replace(/^(?:(?:<!--\s*pi-reviewer\s*:[\s\S]*?-->\n?)*)/, "").trim();
+    if (visiblePrefix) return prefix.trimEnd();
+    return `${prefix}${stripPromptEnvelope(details[0])}`.trimEnd();
   }
   return body.split(AI_FIX_FOOTER).join("").replace(/\n{3,}/g, "\n\n").trimEnd();
 }
@@ -30,26 +48,44 @@ export function removeAiFixFooter(body: string): string {
  * literal text and cannot open or close the wrapper early. The zero-width
  * space keeps the visible text unchanged.
  */
-function neutralizeDetailsTags(text: string): string {
-  return text.replace(/<(\/?)(details|summary)(?:\s[^>]*)?[/]?>/gi, (tag) => tag.replace(/^</, "<\u200b"));
+export function neutralizeDetailsTags(text: string): string {
+  return text.replace(/<(\/?)\s*(details|summary)(?:\s[^>]*)?[/]?>/gi, (tag) => tag.replace(/^</, "<\u200b"));
+}
+
+function cleanPromptBody(body: string): string {
+  return neutralizeDetailsTags(stripPromptEnvelope(removeAiFixFooter(body)).replace(/^[🔴🟡🔵]\s*/u, "")).trim();
+}
+
+function renderPromptDetails(prompt: string, summary = "Prompt to fix with AI"): string {
+  const maxBackticks = Math.max(0, ...(prompt.match(/`+/g) ?? []).map(run => run.length));
+  const fence = "`".repeat(Math.max(3, maxBackticks + 1));
+  return [
+    `<details>`,
+    `<summary>${summary}</summary>`,
+    ``,
+    fence,
+    prompt,
+    fence,
+    ``,
+    `</details>`,
+  ].join("\n");
+}
+
+function promptEntry(context: AiFixContext, body: string): string {
+  const level = context.severity ?? "REPLY";
+  return `${level}: ${context.file}:${context.line}\n\n${cleanPromptBody(body)}`;
 }
 
 /** Renders a copyable, self-contained prompt for one actionable finding. */
 export function renderAiFixPrompt(context: AiFixContext, body: string): string {
-  const cleanBody = neutralizeDetailsTags(removeAiFixFooter(body));
-  const details = [
-    `<details>`,
-    `<summary>Prompt to fix with AI</summary>`,
-    ``,
-    `**Context:** \`${context.file}:${context.line}\`${context.side ? ` · ${context.side}` : ""}${context.severity ? ` · ${context.severity}` : ""}`,
-    ``,
-    cleanBody,
-    ``,
-    AI_FIX_FOOTER,
-    ``,
-    `</details>`,
-  ];
-  return details.join("\n");
+  return renderPromptDetails(`${promptEntry(context, body)}\n\n${AI_FIX_FOOTER}`);
+}
+
+/** Renders one copyable prompt containing all actionable findings. */
+export function renderAiFixPromptList(issues: Array<{ context: AiFixContext; body: string }>): string {
+  if (issues.length === 0) return "";
+  const entries = issues.map(issue => promptEntry(issue.context, issue.body)).join("\n\n");
+  return renderPromptDetails(`${entries}\n\n${AI_FIX_FOOTER}`, "Prompt to fix all issues with AI");
 }
 
 /** Appends the shared fix instruction without duplicating an existing footer. */

@@ -11,7 +11,7 @@ import {
   sendOutput,
 } from "../../src/core/output.js";
 import { bodyFindingId, decodeBodyFindingMarkers, encodeBodyFindingMarker } from "../../src/ci/batch.js";
-import { AI_FIX_FOOTER, appendAiFixFooter } from "../../src/core/ai-fix-footer.js";
+import { AI_FIX_FOOTER, appendAiFixFooter, renderAiFixPrompt } from "../../src/core/ai-fix-footer.js";
 
 const createdDirs: string[] = [];
 
@@ -514,9 +514,27 @@ describe("sendOutput", () => {
 
   it("keeps legacy plain-footer findings dedup-equivalent with wrapped prompts", () => {
     const legacy = `<!-- pi-reviewer:finding:v1 -->\n🟡 valid comment\n\n${AI_FIX_FOOTER}`;
-    const wrapped = `<!-- pi-reviewer:finding:v1 -->\n<details>\n<summary>Prompt to fix with AI</summary>\n\n**Context:** \`src/a.ts:2\` · RIGHT · WARN\n\n🟡 valid comment\n\n${AI_FIX_FOOTER}\n\n</details>`;
+    const legacyWrapped = `<!-- pi-reviewer:finding:v1 -->\n<details>\n<summary>Prompt to fix with AI</summary>\n\n**Context:** \`src/a.ts:2\` · RIGHT · WARN\n\n🟡 valid comment\n\n${AI_FIX_FOOTER}\n\n</details>`;
+    const wrapped = `<!-- pi-reviewer:finding:v1 -->\n🟡 valid comment\n\n<details>\n<summary>Prompt to fix with AI</summary>\n\n\`\`\`\nWARN: src/a.ts:2\n\nvalid comment\n\n${AI_FIX_FOOTER}\n\`\`\`\n\n</details>`;
     const identity = { file: "src/a.ts", line: 2, side: "RIGHT" as const };
     expect(normalizeFinding({ ...identity, body: legacy })).toBe(normalizeFinding({ ...identity, body: wrapped }));
+    expect(normalizeFinding({ ...identity, body: legacyWrapped })).toBe(normalizeFinding({ ...identity, body: wrapped }));
+    expect(normalizeFinding({ ...identity, body: legacyWrapped.replace("<!-- pi-reviewer:finding:v1 -->", "<!-- pi-reviewer:finding:v1 -->\n<!-- pi-reviewer:re-raise:v1 metadata -->") })).toBe(normalizeFinding({ ...identity, body: wrapped.replace("<!-- pi-reviewer:finding:v1 -->", "<!-- pi-reviewer:finding:v1 -->\n<!-- pi-reviewer:re-raise:v1 metadata -->") }));
+  });
+
+  it("renders a copyable prompt without side or Context labels and extends fences around code", () => {
+    const prompt = renderAiFixPrompt({ file: "src/a.ts", line: 2, side: "RIGHT", severity: "WARN" }, "🟡 Check this:\n\n````\ncode\n````");
+    expect(prompt).toContain("<summary>Prompt to fix with AI</summary>");
+    expect(prompt).toContain("`````");
+    expect(prompt).toContain("WARN: src/a.ts:2");
+    expect(prompt).toContain("\n\nCheck this:");
+    expect(prompt).not.toContain("Context");
+    expect(prompt).not.toContain("RIGHT");
+  });
+
+  it("keeps reply text that happens to start with a level-looking line", () => {
+    const prompt = renderAiFixPrompt({ file: "src/a.ts", line: 2 }, "REPLY: noting the fix\nlooks good");
+    expect(prompt).toContain("REPLY: src/a.ts:2\n\nREPLY: noting the fix\nlooks good");
   });
 
   let logSpy: ReturnType<typeof vi.spyOn>;
@@ -569,11 +587,12 @@ describe("sendOutput", () => {
     const body = JSON.parse((fetchMock.mock.calls[0][1] as { body: string }).body).body as string;
     expect(decodeBodyFindingMarkers(body)).toHaveLength(1);
     expect(decodeBodyFindingMarkers(body)[0]).toMatchObject({ file: "src/a.ts", body: expect.stringContaining("🟡 problem") });
-    expect(body).toContain(`🟡 problem\n\n${AI_FIX_FOOTER}`);
+    expect(body).toContain("🟡 problem");
     expect(body.split(AI_FIX_FOOTER)).toHaveLength(2);
-    expect(body).toContain("<summary>Prompt to fix with AI</summary>");
-    expect(body).toContain("**Context:** `src/a.ts:3` · RIGHT · WARN");
-    expect(body.indexOf("<!-- pi-reviewer:body-finding:v1")).toBeLessThan(body.indexOf("<details>"));
+    expect(body).toContain("<summary>Prompt to fix all issues with AI</summary>");
+    expect(body).toContain("WARN: src/a.ts:3");
+    expect(body.match(/<summary>/g)).toHaveLength(1);
+    expect(body.indexOf("<!-- pi-reviewer:body-finding:v1")).toBeLessThan(body.indexOf("🟡 problem"));
   });
 
   it("embeds validated re-raise provenance in posted inline comments", async () => {
@@ -637,19 +656,42 @@ describe("sendOutput", () => {
       commitId: "abc123",
     });
 
-    expect(fetchMock).toHaveBeenCalledWith(
-      "https://api.github.com/repos/owner/repo/pulls/42/reviews",
-      expect.objectContaining({
-        body: JSON.stringify({
-          commit_id: "abc123",
-          body: "Needs fixes",
-          event: "COMMENT",
-          comments: [
-            { path: "src/auth.ts", line: 42, side: "RIGHT", body: `<!-- pi-reviewer:finding:v1 -->\n<details>\n<summary>Prompt to fix with AI</summary>\n\n**Context:** \`src/auth.ts:42\` · RIGHT · CRITICAL\n\n🔴 Missing null check\n\n${AI_FIX_FOOTER}\n\n</details>` },
-          ],
-        }),
+    const payload = JSON.parse((fetchMock.mock.calls[0][1] as { body: string }).body);
+    expect(payload.body).toBe(`Needs fixes\n\n<details>\n<summary>Prompt to fix all issues with AI</summary>\n\n\`\`\`\nCRITICAL: src/auth.ts:42\n\nMissing null check\n\n${AI_FIX_FOOTER}\n\`\`\`\n\n</details>`);
+    expect(payload.comments).toEqual([
+      { path: "src/auth.ts", line: 42, side: "RIGHT", body: `<!-- pi-reviewer:finding:v1 -->\n🔴 Missing null check\n\n<details>\n<summary>Prompt to fix with AI</summary>\n\n\`\`\`\nCRITICAL: src/auth.ts:42\n\nMissing null check\n\n${AI_FIX_FOOTER}\n\`\`\`\n\n</details>` },
+    ]);
+  });
+
+  it("includes every actionable inline finding in one parent Fixit prompt", async () => {
+    const fetchMock = okFetch();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await sendOutput({
+      target: "comment",
+      content: JSON.stringify({
+        summary: "Needs fixes",
+        comments: [
+          { file: "src/a.ts", line: 2, side: "RIGHT", severity: "WARN", body: "Handle the error" },
+          { file: "src/b.ts", line: 4, side: "RIGHT", severity: "CRITICAL", body: "Prevent the crash" },
+          { file: "src/c.ts", line: 6, side: "RIGHT", severity: "INFO", body: "Rename this" },
+        ],
       }),
-    );
+      githubToken: "token123",
+      prNumber: 42,
+      repo: "owner/repo",
+      commitId: "abc123",
+    });
+
+    const payload = JSON.parse((fetchMock.mock.calls[0][1] as { body: string }).body);
+    expect(payload.body.match(/<summary>Prompt to fix all issues with AI<\/summary>/g)).toHaveLength(1);
+    expect(payload.body).toContain("WARN: src/a.ts:2\n\nHandle the error");
+    expect(payload.body).toContain("CRITICAL: src/b.ts:4\n\nPrevent the crash");
+    expect(payload.body).not.toContain("INFO: src/c.ts:6");
+    expect(payload.comments).toHaveLength(3);
+    expect(payload.comments[0].body).toContain("🟡 Handle the error\n\n<details>");
+    expect(payload.comments[1].body).toContain("🔴 Prevent the crash\n\n<details>");
+    expect(payload.comments[2].body).not.toContain("<details>");
   });
 
   it("does not add the AI-fix footer to INFO-only findings", async () => {
@@ -866,6 +908,7 @@ describe("sendOutput", () => {
     expect(retryBody.comments).toEqual([]);
     expect(retryBody.body).toContain("Missing null check");
     expect(retryBody.body).toContain(AI_FIX_FOOTER);
+    expect(retryBody.body).toContain("Prompt to fix all issues with AI");
     expect(retryBody.body).toContain("Comments Not Attached to the Diff");
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("422"));
   });
@@ -950,7 +993,7 @@ describe("sendOutput", () => {
             file: "client/web/src/lib/components/core/tag-input/tag-input.svelte",
             line: 20,
             side: "RIGHT",
-            severity: "INFO",
+            severity: "WARN",
             body: "positionable",
           },
           {
@@ -979,7 +1022,7 @@ describe("sendOutput", () => {
         path: "client/web/src/lib/components/core/tag-input/tag-input.svelte",
         line: 20,
         side: "RIGHT",
-        body: "<!-- pi-reviewer:finding:v1 -->\n🔵 positionable",
+        body: `<!-- pi-reviewer:finding:v1 -->\n🟡 positionable\n\n<details>\n<summary>Prompt to fix with AI</summary>\n\n\`\`\`\nWARN: client/web/src/lib/components/core/tag-input/tag-input.svelte:20\n\npositionable\n\n${AI_FIX_FOOTER}\n\`\`\`\n\n</details>`,
       },
     ]);
     expect(payload.body).toContain("Review");
@@ -987,7 +1030,9 @@ describe("sendOutput", () => {
     expect(payload.body).toContain("unpositionable");
     expect(payload.body).toContain(AI_FIX_FOOTER);
     expect(payload.body).toContain("<summary>Prompt to fix with AI</summary>");
-    expect(payload.body).toContain("**Context:** `client/web/src/lib/components/core/tag-input/tag-input.svelte:36` · RIGHT · WARN");
+    expect(payload.body).toContain("WARN: client/web/src/lib/components/core/tag-input/tag-input.svelte:36");
+    expect(payload.body).toContain("WARN: client/web/src/lib/components/core/tag-input/tag-input.svelte:20");
+    expect(payload.body).not.toContain("**Context:**");
   });
 
   it("posts a body-only review when every comment is unpositionable", async () => {
@@ -1232,7 +1277,7 @@ describe("sendOutput", () => {
         path: "src/a.ts",
         line: 2,
         side: "RIGHT",
-        body: `<!-- pi-reviewer:finding:v1 -->\n<details>\n<summary>Prompt to fix with AI</summary>\n\n**Context:** \`src/a.ts:2\` · RIGHT · WARN\n\n🟡 valid comment\n\n${AI_FIX_FOOTER}\n\n</details>`,
+        body: `<!-- pi-reviewer:finding:v1 -->\n🟡 valid comment\n\n<details>\n<summary>Prompt to fix with AI</summary>\n\n\`\`\`\nWARN: src/a.ts:2\n\nvalid comment\n\n${AI_FIX_FOOTER}\n\`\`\`\n\n</details>`,
       },
     ]);
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("comment_id=999"));
