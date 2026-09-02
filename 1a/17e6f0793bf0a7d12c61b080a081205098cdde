@@ -1,0 +1,19 @@
+dist-ui/index.html
+  s_e6fb1fc81d6ba0::t_bd1a32e03ad3da 14,82,84-85,87,89,99,117
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "1a17e6f0793bf0a7d12c61b080a081205098cdde",
+  "prompts": {},
+  "sessions": {
+    "s_e6fb1fc81d6ba0": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f9c7748a9ffeluy40NrjnJhrtn",
+        "model": "glm-5.3-flash"
+      },
+      "human_author": "Emre Şafak <3928300+esafak@users.noreply.github.com>"
+    }
+  }
+}
