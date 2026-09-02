@@ -6,6 +6,7 @@ import {
   buildSSHUserPrompt,
   buildUserPrompt,
   type ActiveFindingContext,
+  type ResolvedFindingContext,
 } from "../../src/core/prompt-builder.js";
 
 describe("prompt-builder", () => {
@@ -26,6 +27,27 @@ describe("prompt-builder", () => {
     const findingsSection = prompt.slice(prompt.indexOf("<active_findings>"), prompt.indexOf("</active_findings>"));
     expect(findingsSection.match(/"comment_id":/g)?.length).toBe(50);
     expect(prompt).not.toContain("x".repeat(2001));
+  });
+
+  it("injects bounded resolved history with explicit re-raise protocol", () => {
+    const findings: ResolvedFindingContext[] = [{ historicalFindingId: "inline:42", commentId: 42, kind: "inline", file: "src/a.ts", line: 4, side: "RIGHT", body: "old", originalBody: "old", conversation: "reviewer: fixed" }];
+    const prompt = buildJSONSystemPrompt({ conventions: [], reviewRules: [] }, "INFO", undefined, [], undefined, findings);
+    expect(prompt).toContain("<resolved_findings>");
+    expect(prompt).toContain('"historical_finding_id":"inline:42"');
+    expect(prompt).toContain("CONTRADICTORY_EVIDENCE");
+    expect(prompt).toContain("resolved_finding_id (copied from the history)");
+  });
+
+  it("does not document re-raise fields when resolved history is absent", () => {
+    const prompt = buildJSONSystemPrompt({ conventions: [], reviewRules: [] }, "INFO");
+    expect(prompt).toContain("no extra fields");
+    expect(prompt).not.toContain("re_raise_reason");
+  });
+
+  it("applies a total resolved-history budget", () => {
+    const findings: ResolvedFindingContext[] = Array.from({ length: 50 }, (_, i) => ({ historicalFindingId: `inline:${i}`, commentId: i + 1, kind: "inline", originalBody: "x".repeat(2000), conversation: "y".repeat(6000), body: "x" }));
+    const prompt = buildJSONSystemPrompt({ conventions: [], reviewRules: [] }, "INFO", undefined, [], undefined, findings);
+    expect(prompt.slice(prompt.indexOf("<resolved_findings>"), prompt.indexOf("</resolved_findings>")).length).toBeLessThan(120_100);
   });
 
   it("appends conventions section when conventions is provided", () => {

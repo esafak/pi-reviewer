@@ -75,6 +75,7 @@ export class GitHubClient {
   listIssueComments(repo: string, number: number) { return this.list<ReviewComment>(`/repos/${repo}/issues/${number}/comments`); }
   createReview(repo: string, number: number, body: string, commit_id: string, comments: unknown[]) { return this.request<Review>(`/repos/${repo}/pulls/${number}/reviews`, { method: "POST", body: JSON.stringify({ body, commit_id, event: "COMMENT", comments }) }); }
   updateReview(repo: string, number: number, review: number, body: string) { return this.request<Review>(`/repos/${repo}/pulls/${number}/reviews/${review}`, { method: "PUT", body: JSON.stringify({ body }) }); }
+  updateIssueComment(repo: string, number: number, comment: number, body: string) { return this.request<ReviewComment>(`/repos/${repo}/issues/comments/${comment}`, { method: "PATCH", body: JSON.stringify({ body }) }); }
   reply(repo: string, number: number, comment: number, body: string) { return this.request<ReviewComment>(`/repos/${repo}/pulls/${number}/comments`, { method: "POST", body: JSON.stringify({ body, in_reply_to: comment }) }); }
   createReviewCommentReaction(repo: string, number: number, comment: number, content: string) { return this.request<{ id: number; content: string }>(`/repos/${repo}/pulls/${number}/comments/${comment}/reactions`, { method: "POST", body: JSON.stringify({ content }) }); }
   createReaction(repo: string, number: number, content = "+1") { return this.request<{ id: number; content: string }>(`/repos/${repo}/issues/${number}/reactions`, { method: "POST", body: JSON.stringify({ content }) }); }

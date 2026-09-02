@@ -10,7 +10,7 @@ import {
   reconcileFindingUpdates,
   sendOutput,
 } from "../../src/core/output.js";
-import { bodyFindingId, encodeBodyFindingMarker } from "../../src/ci/batch.js";
+import { bodyFindingId, decodeBodyFindingMarkers, encodeBodyFindingMarker } from "../../src/ci/batch.js";
 
 const createdDirs: string[] = [];
 
@@ -28,6 +28,86 @@ function okFetch() {
 }
 
 describe("parseAgentResponse", () => {
+  it("suppresses an unchanged resolved finding and preserves valid re-raise provenance", () => {
+    const history = [{ historicalFindingId: "inline:42", originalBody: "same issue", file: "src/a.ts", line: 10, side: "RIGHT" as const }];
+    const unchanged = parseAgentResponseWithStatus(JSON.stringify({ summary: "review", comments: [{ file: "src/a.ts", line: 10, side: "RIGHT", severity: "WARN", body: "same issue" }] }), "INFO", undefined, undefined, history);
+    expect(unchanged.result.comments).toEqual([]);
+    const reraised = parseAgentResponseWithStatus(JSON.stringify({ summary: "review", comments: [{ file: "src/a.ts", line: 10, side: "RIGHT", severity: "WARN", body: "same issue", resolved_finding_id: "inline:42", re_raise_reason: "REINTRODUCED", re_raise_evidence: "The new diff restores the unsafe branch." }] }), "INFO", undefined, undefined, history);
+    expect(reraised.result.comments[0].reRaiseProvenance).toEqual({ historicalFindingId: "inline:42", reason: "REINTRODUCED", evidence: "The new diff restores the unsafe branch." });
+    // Hidden provenance metadata is generated at posting time, not baked into the comment body.
+    expect(reraised.result.comments[0].body).not.toContain("pi-reviewer:re-raise:v1");
+  });
+
+  it("drops unknown and malformed resolved-finding provenance", () => {
+    const history = [{ historicalFindingId: "inline:42", originalBody: "same issue", file: "src/a.ts", line: 10, side: "RIGHT" as const }];
+    const result = parseAgentResponseWithStatus(JSON.stringify({ summary: "review", comments: [{ file: "src/a.ts", line: 10, side: "RIGHT", severity: "WARN", body: "same issue", resolved_finding_id: "inline:99", re_raise_reason: "REINTRODUCED", re_raise_evidence: "x" }] }), "INFO", undefined, undefined, history);
+    expect(result.result.comments).toEqual([]);
+  });
+
+  it("suppresses an unchanged finding when its location is unchanged and wording is lightly revised", () => {
+    const history = [{ historicalFindingId: "inline:42", originalBody: "unsafe Loki configuration", file: "src/a.ts", line: 10, side: "RIGHT" as const }];
+    const result = parseAgentResponseWithStatus(JSON.stringify({ summary: "review", comments: [{ file: "src/a.ts", line: 10, side: "RIGHT", severity: "WARN", body: "unsafe Loki configuration setting" }] }), "INFO", undefined, undefined, history);
+    expect(result.result.comments).toEqual([]);
+  });
+
+  it("does not suppress a distinct new finding at the same location", () => {
+    const history = [{ historicalFindingId: "inline:42", originalBody: "unsafe Loki configuration", file: "src/a.ts", line: 10, side: "RIGHT" as const }];
+    const result = parseAgentResponseWithStatus(JSON.stringify({ summary: "review", comments: [{ file: "src/a.ts", line: 10, side: "RIGHT", severity: "WARN", body: "error handling drops the upstream response" }] }), "INFO", undefined, undefined, history);
+    expect(result.result.comments).toHaveLength(1);
+  });
+
+  it("suppresses a duplicate whose line moved when its normalized identity is unchanged", () => {
+    const history = [{ historicalFindingId: "inline:42", originalBody: "same issue", file: "src/a.ts", line: 10, side: "RIGHT" as const }];
+    const result = parseAgentResponseWithStatus(JSON.stringify({ summary: "review", comments: [{ file: "src/a.ts", line: 11, side: "RIGHT", severity: "WARN", body: "same issue" }] }), "INFO", undefined, undefined, history);
+    expect(result.result.comments).toEqual([]);
+  });
+
+  it.each(["REINTRODUCED", "MATERIALLY_CHANGED", "CONTRADICTORY_EVIDENCE"] as const)("accepts %s with bounded evidence", (reason) => {
+    const history = [{ historicalFindingId: "inline:42", originalBody: "old", file: "src/a.ts", line: 10, side: "RIGHT" as const }];
+    const result = parseAgentResponseWithStatus(JSON.stringify({ summary: "review", comments: [{ file: "src/a.ts", line: 10, side: "RIGHT", severity: "WARN", body: "old", resolved_finding_id: "inline:42", re_raise_reason: reason, re_raise_evidence: "current diff evidence" }] }), "INFO", undefined, undefined, history);
+    expect(result.result.comments).toHaveLength(1);
+  });
+
+  it("rejects missing, whitespace-only, and oversized re-raise evidence", () => {
+    const history = [{ historicalFindingId: "inline:42", originalBody: "old", file: "src/a.ts", line: 10, side: "RIGHT" as const }];
+    for (const evidence of [undefined, " ", "x".repeat(2001)]) {
+      const result = parseAgentResponseWithStatus(JSON.stringify({ summary: "review", comments: [{ file: "src/a.ts", line: 10, side: "RIGHT", severity: "WARN", body: "old", resolved_finding_id: "inline:42", re_raise_reason: "REINTRODUCED", ...(evidence === undefined ? {} : { re_raise_evidence: evidence }) }] }), "INFO", undefined, undefined, history);
+      expect(result.result.comments).toEqual([]);
+    }
+  });
+
+  it("does not put model-controlled re-raise text in diagnostics", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const secret = "model secret evidence";
+    await sendOutput({ target: "terminal", structuredResult: { summary: "review", comments: [{ file: "src/a.ts", line: 10, side: "RIGHT", severity: "WARN", body: "old", resolved_finding_id: "inline:42", re_raise_reason: "BAD" as never, re_raise_evidence: secret }] }, resolvedFindings: [{ historicalFindingId: "inline:42", originalBody: "old", file: "src/a.ts", line: 10, side: "RIGHT" }] });
+    expect(warn.mock.calls.flat().join(" ")).not.toContain(secret);
+  });
+
+  it("keeps a valid re-raise citing its historical ID even when an earlier history entry matches its identity", () => {
+    const history = [
+      { historicalFindingId: "inline:1", originalBody: "unsafe default timeout config", file: "src/a.ts", line: 10, side: "RIGHT" as const },
+      { historicalFindingId: "inline:2", originalBody: "unrelated memory leak in worker cleanup", file: "src/a.ts", line: 99, side: "RIGHT" as const },
+    ];
+    const result = parseAgentResponseWithStatus(JSON.stringify({ summary: "review", comments: [{ file: "src/a.ts", line: 12, side: "RIGHT", severity: "WARN", body: "unsafe default timeout config restored", resolved_finding_id: "inline:2", re_raise_reason: "REINTRODUCED", re_raise_evidence: "The new diff restores the timeout default." }] }), "INFO", undefined, undefined, history);
+    expect(result.result.comments).toHaveLength(1);
+    expect(result.result.comments[0].resolved_finding_id).toBe("inline:2");
+  });
+
+  it("suppresses an identity-matched comment that carries reason and evidence but no historical ID", () => {
+    const history = [{ historicalFindingId: "inline:1", originalBody: "unsafe default timeout config", file: "src/a.ts", line: 10, side: "RIGHT" as const }];
+    const result = parseAgentResponseWithStatus(JSON.stringify({ summary: "review", comments: [{ file: "src/a.ts", line: 12, side: "RIGHT", severity: "WARN", body: "unsafe default timeout config restored", re_raise_reason: "REINTRODUCED", re_raise_evidence: "The new diff restores the timeout default." }] }), "INFO", undefined, undefined, history);
+    expect(result.result.comments).toEqual([]);
+  });
+
+  it("omits hidden re-raise metadata from terminal output", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    await sendOutput({ target: "terminal", structuredResult: { summary: "review", comments: [{ file: "src/a.ts", line: 10, side: "RIGHT", severity: "WARN", body: "old", resolved_finding_id: "inline:42", re_raise_reason: "REINTRODUCED", re_raise_evidence: "diff evidence" }] }, resolvedFindings: [{ historicalFindingId: "inline:42", originalBody: "old", file: "src/a.ts", line: 10, side: "RIGHT" }] });
+    const printed = log.mock.calls.flat().join("\n");
+    expect(printed).toContain("old");
+    expect(printed).not.toContain("re-raise:v1");
+    expect(printed).not.toContain("diff evidence");
+    log.mockRestore();
+  });
   it("returns parsed ReviewResult for valid JSON", () => {
     const result = parseAgentResponse(
       JSON.stringify({
@@ -459,6 +539,52 @@ describe("sendOutput", () => {
     const body = (fetchMock.mock.calls[0][1] as { body: string }).body;
     expect(body).not.toContain("---");
     expect(body).not.toContain("Review by pi-reviewer");
+  });
+
+  it("makes issue-comment fallback findings reconstructable", async () => {
+    const fetchMock = okFetch();
+    vi.stubGlobal("fetch", fetchMock);
+    await sendOutput({ target: "comment", content: JSON.stringify({ summary: "review", comments: [{ file: "src/a.ts", line: 3, side: "RIGHT", severity: "WARN", body: "problem" }] }), githubToken: "token123", prNumber: 42, repo: "owner/repo" });
+    const body = JSON.parse((fetchMock.mock.calls[0][1] as { body: string }).body).body as string;
+    expect(decodeBodyFindingMarkers(body)).toHaveLength(1);
+    expect(decodeBodyFindingMarkers(body)[0]).toMatchObject({ file: "src/a.ts", body: "🟡 problem" });
+  });
+
+  it("embeds validated re-raise provenance in posted inline comments", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue(JSON.stringify({ head: { sha: "head" } })) })
+      .mockResolvedValue({ ok: true, text: vi.fn().mockResolvedValue(""), clone: () => ({ json: async () => undefined }) });
+    vi.stubGlobal("fetch", fetchMock);
+    await sendOutput({ target: "comment", content: "", structuredResult: { summary: "review", comments: [{ file: "src/a.ts", line: 1, side: "RIGHT", severity: "WARN", body: "old issue", resolved_finding_id: "inline:42", re_raise_reason: "REINTRODUCED", re_raise_evidence: "The new diff restores it." }] }, githubToken: "t", prNumber: 1, repo: "o/r", commitId: "head", batchMarker: "<!-- pi-reviewer:batch:v1 {\"fromSha\":\"a\",\"toSha\":\"head\"} -->", resolvedFindings: [{ historicalFindingId: "inline:42", originalBody: "old issue", file: "src/a.ts", line: 1, side: "RIGHT" }] });
+    const payload = JSON.parse((fetchMock.mock.calls[1][1] as { body: string }).body);
+    expect(payload.comments[0].body).toMatch(/^<!-- pi-reviewer:finding:v1 -->\n<!-- pi-reviewer:re-raise:v1 \{/);
+    const metadata = JSON.parse(payload.comments[0].body.match(/<!-- pi-reviewer:re-raise:v1 (\{[\s\S]*?\}) -->/)?.[1] ?? "{}");
+    expect(metadata).toMatchObject({ historicalFindingId: "inline:42", reason: "REINTRODUCED", evidence: "The new diff restores it.", targetSha: "head" });
+    expect(payload.comments[0].body).toContain("🟡 old issue");
+  });
+
+  it("keeps re-raise provenance intact when a comment moves to the review body", async () => {
+    const fetchMock = okFetch();
+    vi.stubGlobal("fetch", fetchMock);
+    await sendOutput({ target: "comment", content: "", structuredResult: { summary: "review", comments: [{ file: "src/a.ts", line: 99, side: "RIGHT", severity: "WARN", body: "old issue", resolved_finding_id: "inline:42", re_raise_reason: "MATERIALLY_CHANGED", re_raise_evidence: "behavior changed --> in diff" }] }, githubToken: "t", prNumber: 1, repo: "o/r", commitId: "head", diff: "diff --git a/src/a.ts b/src/a.ts\n--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1,1 +1,1 @@\n-old\n+new\n", resolvedFindings: [{ historicalFindingId: "inline:42", originalBody: "old issue", file: "src/a.ts", line: 99, side: "RIGHT" }] });
+    const payload = JSON.parse((fetchMock.mock.calls[0][1] as { body: string }).body);
+    const [marker] = decodeBodyFindingMarkers(payload.body);
+    expect(marker?.body.startsWith("<!-- pi-reviewer:re-raise:v1 ")).toBe(true);
+    expect(marker?.body).toContain('"reason":"MATERIALLY_CHANGED"');
+    expect(marker?.body).toContain("behavior changed --\\u003e in diff");
+    expect(payload.body).not.toContain("pi-reviewer :re-raise");
+    expect(payload.body).toContain("🟡 old issue");
+  });
+
+  it("keeps re-raise provenance intact in issue-comment fallback findings", async () => {
+    const fetchMock = okFetch();
+    vi.stubGlobal("fetch", fetchMock);
+    await sendOutput({ target: "comment", content: "", structuredResult: { summary: "review", comments: [{ file: "src/a.ts", line: 3, side: "RIGHT", severity: "WARN", body: "old issue", resolved_finding_id: "inline:42", re_raise_reason: "CONTRADICTORY_EVIDENCE", re_raise_evidence: "New test proves it." }] }, githubToken: "t", prNumber: 1, repo: "o/r", resolvedFindings: [{ historicalFindingId: "inline:42", originalBody: "old issue", file: "src/a.ts", line: 3, side: "RIGHT" }] });
+    const body = JSON.parse((fetchMock.mock.calls[0][1] as { body: string }).body).body as string;
+    const [marker] = decodeBodyFindingMarkers(body);
+    expect(marker?.body.startsWith("<!-- pi-reviewer:re-raise:v1 ")).toBe(true);
+    expect(marker?.body).toContain('"reason":"CONTRADICTORY_EVIDENCE"');
+    expect(body).not.toContain("pi-reviewer :re-raise");
   });
 
   it("posts to Reviews API with inline comments when commitId is provided", async () => {
@@ -1279,7 +1405,7 @@ describe("reconcileFindingUpdates", () => {
       .mockResolvedValueOnce({ ok: true, status: 200, text: vi.fn().mockResolvedValue(JSON.stringify({ head: { sha: "345879342abcdef" } })) })
       .mockResolvedValueOnce({ ok: true, status: 200, text: vi.fn().mockResolvedValue(JSON.stringify({ data: { resolveReviewThread: { thread: { id: "thread", isResolved: true } } } })) });
     vi.stubGlobal("fetch", fetchMock);
-    await expect(reconcileFindingUpdates({ token: "t", repo: "o/r", prNumber: 1, targetSha: "345879342abcdef", updates: [{ comment_id: 3, status: "RESOLVED", explanation: "Resolved: fixed" }], findings: [{ commentId: 3, threadId: "thread" }] })).resolves.toEqual(new Set());
+    await expect(reconcileFindingUpdates({ token: "t", repo: "o/r", prNumber: 1, targetSha: "345879342abcdef", updates: [{ comment_id: 3, status: "RESOLVED", explanation: "fixed" }], findings: [{ commentId: 3, threadId: "thread" }] })).resolves.toEqual(new Set());
     expect(JSON.parse((fetchMock.mock.calls[4][1] as { body: string }).body).body).toContain("Resolved by 3458793: fixed");
   });
   it("leaves partial findings open and skips an already-posted reply", async () => {
@@ -1315,6 +1441,24 @@ describe("reconcileFindingUpdates", () => {
     await reconcileFindingUpdates({ token: "t", repo: "o/r", prNumber: 1, targetSha: "head", updates: [{ comment_id: 3, status: "PARTIALLY_RESOLVED", explanation: "changed" }], findings: [{ commentId: 3 }] });
     expect(fetchMock).toHaveBeenCalledTimes(5);
     expect(fetchMock.mock.calls[4][0]).toContain("/comments");
+  });
+  it("updates issue-comment fallback findings through the Issues API without touching reviews", async () => {
+    const marker = encodeBodyFindingMarker({ findingId: 555, file: "src/a.ts", line: 3, side: "RIGHT", severity: "WARN", body: "problem" });
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue(JSON.stringify({ login: "bot" })) })
+      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue(JSON.stringify({ head: { sha: "head" } })) })
+      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue(JSON.stringify([])) })
+      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue(JSON.stringify({ body: `fallback comment\n${marker}` })) })
+      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue(JSON.stringify({ head: { sha: "head" } })) })
+      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue(JSON.stringify({ id: 555 })) });
+    vi.stubGlobal("fetch", fetchMock);
+    const outstanding = await reconcileFindingUpdates({ token: "t", repo: "o/r", prNumber: 1, targetSha: "head", updates: [{ comment_id: 555, status: "PARTIALLY_RESOLVED", explanation: "half fixed" }], findings: [{ commentId: 555, issueCommentId: 555, bodyFinding: true, reviewBody: `fallback comment\n${marker}` }] });
+    expect(outstanding).toEqual(new Set([555]));
+    const patchCall = fetchMock.mock.calls.find(([, init]) => (init as RequestInit).method === "PATCH");
+    expect(patchCall).toBeDefined();
+    expect(patchCall![0]).toBe("https://api.github.com/repos/o/r/issues/comments/555");
+    expect(JSON.parse((patchCall![1] as RequestInit).body as string).body).toContain('"status":"PARTIALLY_RESOLVED"');
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/reviews/"))).toBe(false);
   });
   it("suppresses an existing finding across batches", async () => {
     const fetchMock = okFetch(); vi.stubGlobal("fetch", fetchMock);

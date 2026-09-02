@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { parseThinkingLevel, review } from "./review.js";
 import { GitHubClient } from "./github.js";
-import { decodeBatchMarker, encodeBatchMarker, isAuthorizedReviewCommand, isEventRangeConsistent, isSafePullRequestNumber, normalizeEvent, reconstructBodyFindings, selectAuthenticatedBatchMarkers, selectBatchRange } from "./batch.js";
+import { collectFindingHistory, decodeBatchMarker, encodeBatchMarker, isAuthorizedReviewCommand, isEventRangeConsistent, isSafePullRequestNumber, normalizeEvent, selectAuthenticatedBatchMarkers, selectBatchRange } from "./batch.js";
 import { handleReply } from "./reply.js";
 
 async function readEvent(): Promise<unknown> {
@@ -73,12 +73,7 @@ const latestMarkerSource = latest ? [...markerSources].reverse().find(source => 
   return source.user?.login === identity.login && marker?.actor === identity.login && marker.version === latest.version && marker.fromSha === latest.fromSha && marker.toSha === latest.toSha && marker.kind === latest.kind && marker.actor === latest.actor && marker.reviewId === latest.reviewId;
 }) : undefined;
 const priorSummary = latestMarkerSource?.body?.replace(/<!-- pi-reviewer:batch:v1 [^>]+ -->/, "").trim() || undefined;
-const batchByReview = new Map(reviews.map(r => [r.id, decodeBatchMarker(r.body)]));
-const threadByComment = new Map(threads.flatMap(t => t.comments.nodes.map(c => [c.id, { id: t.id, resolved: t.isResolved }] as const)));
-const inlineFindings = comments.filter(c => c.user?.login === identity.login && c.id > 0 && c.body.includes("<!-- pi-reviewer:finding:v1 -->") && !c.body.includes("pi-reviewer:status:v1") && !threadByComment.get(c.id)?.resolved).map(c => { const batch = c.pull_request_review_id ? batchByReview.get(c.pull_request_review_id) : undefined; const replies = comments.filter(reply => reply.in_reply_to_id === c.id && reply.user?.login === identity.login).sort((a, b) => a.id - b.id); return { commentId: c.id, threadId: threadByComment.get(c.id)?.id, file: c.path, line: c.line, side: c.side, body: c.body, sourceBatch: batch ? `${batch.fromSha}..${batch.toSha}` : undefined, latestStatus: replies.at(-1)?.body.match(/status:v1 \{[^}]*"status":"([^"]+)/)?.[1] }; });
-// Body findings have no inline comment target. Their authenticated, hidden
-// markers carry the stable ID and originating review needed for later runs.
-const activeFindings = [...inlineFindings, ...reconstructBodyFindings(reviews, identity.login)];
+const { activeFindings, resolvedFindings } = collectFindingHistory({ reviews, issueComments, comments, threads, login: identity.login });
 const head = event.targetHead ?? pr.head.sha;
 if (pr.head.repo?.full_name !== repo) { console.log("[pi-reviewer] fork or deleted-head PRs are not reviewed"); process.exit(0); }
 // The default-branch checkout used by issue-comment and dispatch events may
@@ -99,7 +94,7 @@ console.log(`[pi-reviewer] reviewing PR #${event.pr}: ${range.fromSha}..${range.
 const worktree = await mkdtemp(path.join(tmpdir(), "pi-reviewer-") );
 try {
   execFileSync("git", ["worktree", "add", "--detach", worktree, head], { cwd: process.cwd() });
-  await review({ cwd: worktree, pr: event.pr, commitId: head, fromSha: range.fresh ? range.fromSha : head, allowEmptyDiff: !range.fresh, batchMarker: range.fresh ? marker : undefined, activeFindings, priorSummary, output: "comment", minSeverity, thinking: parseThinkingLevel(process.env.PI_REVIEWER_THINKING), githubToken: token, repo, reactOnNoFindings: process.env.REACT_ON_NO_FINDINGS === "true" });
+  await review({ cwd: worktree, pr: event.pr, commitId: head, fromSha: range.fresh ? range.fromSha : head, allowEmptyDiff: !range.fresh, batchMarker: range.fresh ? marker : undefined, activeFindings, resolvedFindings, priorSummary, output: "comment", minSeverity, thinking: parseThinkingLevel(process.env.PI_REVIEWER_THINKING), githubToken: token, repo, reactOnNoFindings: process.env.REACT_ON_NO_FINDINGS === "true" });
 } finally {
   try { execFileSync("git", ["worktree", "remove", "--force", worktree], { cwd: process.cwd(), stdio: "ignore" }); } catch { await rm(worktree, { recursive: true, force: true }); }
 }

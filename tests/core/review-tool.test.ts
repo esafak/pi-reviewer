@@ -129,4 +129,12 @@ describe("createReviewTool", () => {
     const tooLong = { ...validArgs(), finding_updates: [{ comment_id: 7, status: "RESOLVED", explanation: "x".repeat(2001) }] };
     expect(() => validateToolArguments(tool, toolCall(tooLong))).toThrow(/Validation failed/);
   });
+
+  it("schema validates re-raise fields and bounds", () => {
+    const { tool } = createReviewTool();
+    const args = { ...validArgs(), comments: [{ ...validArgs().comments[0], resolved_finding_id: "inline:42", re_raise_reason: "MATERIALLY_CHANGED", re_raise_evidence: "behavior changed" }] };
+    expect(() => validateToolArguments(tool, toolCall(args))).not.toThrow();
+    args.comments[0].re_raise_reason = "INVALID";
+    expect(() => validateToolArguments(tool, toolCall(args))).toThrow(/Validation failed/);
+  });
 });

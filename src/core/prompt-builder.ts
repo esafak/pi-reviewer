@@ -1,13 +1,22 @@
 import type { ContextFile, ContextResult } from "./context.js";
 
 export type MinSeverity = "CRITICAL" | "WARN" | "INFO";
-export interface ActiveFindingContext { commentId: number; threadId?: string; reviewId?: number; bodyFinding?: boolean; reviewBody?: string; file?: string; line?: number; side?: string; body: string; sourceBatch?: string; latestStatus?: string }
+export interface ActiveFindingContext { commentId: number; threadId?: string; reviewId?: number; issueCommentId?: number; bodyFinding?: boolean; reviewBody?: string; file?: string; line?: number; side?: string; body: string; sourceBatch?: string; latestStatus?: string }
+export interface ResolvedFindingContext extends ActiveFindingContext {
+  historicalFindingId: string;
+  kind: "inline" | "body";
+  originalBody: string;
+  resolutionTargetSha?: string;
+  resolutionExplanation?: string;
+  conversation?: string;
+}
 
 const SEVERITY_RULE: Record<MinSeverity, string | null> = {
   INFO: null,
   WARN: "- Only report CRITICAL and WARN issues — skip INFO",
   CRITICAL: "- Only report CRITICAL issues — skip WARN and INFO",
 };
+export const RESOLVED_HISTORY_LIMIT = 120_000;
 
 function mergeContent(files: ContextFile[]): string {
   return files.map(f => f.content).join("\n\n");
@@ -47,8 +56,9 @@ export function buildJSONSystemPrompt(
   contextFiles?: ContextFile[],
   activeFindings: ActiveFindingContext[] = [],
   priorSummary?: string,
+  resolvedFindings: ResolvedFindingContext[] = [],
 ): string {
-  const base = [
+  const baseLines = [
     ...buildSharedBase(minSeverity),
     "- Do not repeat what the project conventions already enforce",
     "",
@@ -75,7 +85,11 @@ export function buildJSONSystemPrompt(
     '- severity: "CRITICAL" | "WARN" | "INFO"',
     "- body: inline comment text, may use Markdown",
     "- finding_updates: optional updates to existing findings supplied below. Use RESOLVED only when fully addressed, PARTIALLY_RESOLVED when some concern remains, and STILL_OPEN when unchanged.",
-  ].join("\n");
+  ];
+  if (resolvedFindings.length > 0) {
+    baseLines.push("- Re-raising a finding from <resolved_findings> below is the only case with extra comment fields: add resolved_finding_id (copied from the history), re_raise_reason (REINTRODUCED, MATERIALLY_CHANGED, or CONTRADICTORY_EVIDENCE), and re_raise_evidence (non-empty, at most 2000 characters, grounded in the current diff). A comment matching resolved history without all three fields is dropped.");
+  }
+  const base = baseLines.join("\n");
 
   const conventionsStr = typeof context === "string" ? context : mergeContent(context.conventions);
   const reviewRulesStr = typeof context === "string" ? "" : mergeContent(context.reviewRules);
@@ -87,6 +101,18 @@ export function buildJSONSystemPrompt(
   if (activeFindings.length > 0) {
     const findings = activeFindings.slice(0, 50).sort((a, b) => a.commentId - b.commentId).map(f => JSON.stringify({ comment_id: f.commentId, thread_id: f.threadId, file: f.file, line: f.line, side: f.side, body: f.body.slice(0, 2000), source_batch: f.sourceBatch, latest_status: f.latestStatus })).join("\n");
     sections.push(`<active_findings>\n${findings}\n</active_findings>\nDo not repost these findings in comments; report their changes in finding_updates using the supplied comment_id.`);
+  }
+  if (resolvedFindings.length > 0) {
+    const records: string[] = [];
+    let used = 0;
+    for (const f of resolvedFindings.slice(0, 50).sort((a, b) => a.historicalFindingId.localeCompare(b.historicalFindingId))) {
+      const record = JSON.stringify({ historical_finding_id: f.historicalFindingId, kind: f.kind, file: f.file, line: f.line, side: f.side, original_body: f.originalBody.slice(0, 2000), source_batch: f.sourceBatch, resolution_target_sha: f.resolutionTargetSha, resolution_explanation: f.resolutionExplanation?.slice(0, 2000), conversation: f.conversation?.slice(0, 6000) });
+      if (used + record.length + (records.length ? 1 : 0) > RESOLVED_HISTORY_LIMIT) break;
+      records.push(record);
+      used += record.length + (records.length > 1 ? 1 : 0);
+    }
+    const findings = records.join("\n");
+    sections.push(`<resolved_findings>\n${findings}\n</resolved_findings>\nResolved findings are review history, not active targets. Do not repost a matching finding unless the current diff reintroduces it, materially changes the relevant behavior, or provides contradictory evidence. A re-raised comment must include resolved_finding_id, re_raise_reason (REINTRODUCED, MATERIALLY_CHANGED, or CONTRADICTORY_EVIDENCE), and non-empty re_raise_evidence grounded in the current diff.`);
   }
   if (priorSummary?.trim()) sections.push(`<previous_review_summary>\n${priorSummary.slice(0, 8000)}\n</previous_review_summary>`);
 

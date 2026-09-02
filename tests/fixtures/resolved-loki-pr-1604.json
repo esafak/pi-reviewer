@@ -1,0 +1,9 @@
+{
+  "provenance": "Synthetic reproduction of archipelagoAI/configs#1604. The real PR/review payload was unavailable (repository/API returned 404); IDs and Loki text are retained only as regression-shaped identifiers.",
+  "pullRequest": 1604,
+  "resolvedReview": 5078197836,
+  "laterReview": 5083938684,
+  "finding": { "file": "charts/loki/values.yaml", "line": 42, "side": "RIGHT", "body": "Loki values allow an unsafe configuration." },
+  "resolution": "Human resolution: intended configuration is safe for this deployment.",
+  "laterDiff": "Unchanged Loki values/configuration diff; no contradictory evidence."
+}
