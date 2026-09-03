@@ -76,6 +76,12 @@ jobs:
           # doc-dirs: '.pi/notes,docs/review'
 ```
 
+The `init` command is the generic, non-App setup. It runs only when invoked
+explicitly, creates the workflow only when `.github/workflows/pi-review.yml`
+does not already exist, and does not configure GitHub App credentials,
+environments, or repository variables. If the file already exists—for example,
+because a repository has a custom workflow—`init` leaves it unchanged.
+
 Commit it to your default branch, then provide the API key for your selected provider in the action environment. For `openai/...`, `anthropic/...`, and `zai/...` models, use `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or `ZAI_API_KEY`, respectively. Other providers can use `PI_API_KEY` (or the explicit `pi-api-key` input). The precedence order is explicit `pi-api-key` input, then the selected provider's variable, then `PI_API_KEY`; provider-specific variables therefore override the `PI_API_KEY` fallback, but not an explicit input.
 
 In the workflow above, `PI_API_KEY` is supplied through the `pi-api-key`
@@ -222,6 +228,12 @@ At review time, the action extracts keywords from the changed file paths (e.g. `
 ## Bot identity
 
 By default, comments appear under `github-actions[bot]`. To post under a custom bot name, create a GitHub App:
+
+Fresnel and configs use this custom App-based approach rather than the
+`init`-generated workflow. Their workflows select a model with the
+`MODEL_NAME` environment/repository variable and use the corresponding
+provider secret in the `reviews` environment. The environment name is not
+special; choose any environment name and use it consistently in the workflow.
 
 1. Go to `github.com/settings/apps/new`, set **Contents** to **Read and write**, **Pull requests** and **Issues** to **Write**, and disable the webhook
 2. Install the app on your repository
