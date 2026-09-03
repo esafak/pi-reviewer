@@ -1,5 +1,5 @@
-import { marked } from "marked";
 import { SidePanel } from "../sidebar/SidePanel";
+import { renderMarkdown } from "../../utils/renderMarkdown";
 
 interface Props {
   summary: string;
@@ -9,7 +9,7 @@ interface Props {
 export function SummaryPanel({ summary, onClose }: Props) {
   return (
     <SidePanel title="Overview" onClose={onClose}>
-      <div className="summary-body md" dangerouslySetInnerHTML={{ __html: marked(summary) as string }} />
+      <div className="summary-body md" dangerouslySetInnerHTML={{ __html: renderMarkdown(summary) }} />
     </SidePanel>
   );
 }

@@ -222,6 +222,7 @@ describe("review", () => {
     sendOutputMock.mockClear();
     await review({ cwd: "/repo", fromSha: "base-sha", commitId: "head-sha", output: "comment", pr: 42, githubToken: "token", repo: "owner/repo" });
     expect(resolveDiffMock).toHaveBeenCalledWith(expect.objectContaining({ fromSha: "base-sha", toSha: "head-sha" }));
+    expect(sendOutputMock).toHaveBeenCalledWith(expect.objectContaining({ baseCommitId: "base-sha" }));
     expect(sendOutputMock).toHaveBeenCalledTimes(1);
   });
 

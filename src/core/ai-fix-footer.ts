@@ -5,6 +5,9 @@ export interface AiFixContext {
   line: number;
   side?: string;
   severity?: string;
+  repository?: string;
+  commitId?: string;
+  baseCommitId?: string;
 }
 
 export interface AiFixFinding {
@@ -24,27 +27,44 @@ const MEANINGFUL_PROSE = new RegExp(MEANINGFUL_PROSE_PATTERN);
 
 const SEVERITY_EMOJI: Record<string, string> = { CRITICAL: "🔴", WARN: "🟡", INFO: "🔵" };
 
+/** Repairs line-break escapes emitted by models that double-encode JSON text. */
+export function normalizeMarkdownText(text: string): string {
+  if (/[\r\n]/.test(text)) return text;
+  return text.replace(/\\r\\n/g, "\n").replace(/\\n/g, "\n").replace(/\\r/g, "\n");
+}
+
 function withoutSeverityEmoji(body: string): string {
   return body.trim().replace(/^[🔴🟡🔵]\s*/u, "").trim();
 }
 
 /** Checks the same canonical body rule used by normalizeAiFixBody. */
 export function hasAiFixProse(body: string): boolean {
-  return MEANINGFUL_PROSE.test(withoutSeverityEmoji(body));
+  return MEANINGFUL_PROSE.test(withoutSeverityEmoji(normalizeMarkdownText(body)));
 }
 
 /** Converts model prose into the canonical body used by all renderers. */
 export function normalizeAiFixBody(body: string): string {
-  const normalized = withoutSeverityEmoji(body);
+  const normalized = withoutSeverityEmoji(normalizeMarkdownText(body));
   if (!normalized) throw new Error("Finding body must contain non-empty prose");
   return normalized;
 }
 
 /** Returns the human-facing finding summary; it contains no Fixit markup. */
-export function renderFindingSummary(context: AiFixContext, body: string): string {
+export function renderFindingSummary(context: AiFixContext, body: string, options: { includeLocation?: boolean } = {}): string {
   const emoji = SEVERITY_EMOJI[context.severity ?? ""] ?? "";
   const location = `${context.file}:${context.line}${context.side ? ` · ${context.side}` : ""}`;
-  return `${emoji ? `${emoji} ` : ""}**\`${location}\`**\n\n${normalizeAiFixBody(body)}`;
+  const revision = context.repository && context.commitId
+    ? context.side === "LEFT"
+      ? context.baseCommitId !== context.commitId ? context.baseCommitId : undefined
+      : context.commitId
+    : undefined;
+  const href = context.repository && revision && context.line > 0
+    ? `https://github.com/${context.repository}/blob/${revision}/${context.file.split("/").map(encodeURIComponent).join("/")}#L${context.line}`
+    : undefined;
+  const linkedLocation = href ? `[\`${location}\`](${href})` : `\`${location}\``;
+  const normalizedBody = normalizeAiFixBody(body);
+  if (options.includeLocation === false) return `${emoji ? `${emoji} ` : ""}${normalizedBody}`;
+  return `${emoji ? `${emoji} ` : ""}**${linkedLocation}**\n\n${normalizedBody}`;
 }
 
 function stripPromptEnvelope(text: string): string {

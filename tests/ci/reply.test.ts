@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vite-plus/test";
 import { handleReply } from "../../src/ci/reply.js";
+import { parseReplyAction } from "../../src/ci/review.js";
 import { replyMarker, type Event } from "../../src/ci/batch.js";
 import type { PullRequest, ReviewComment, ReviewThread } from "../../src/ci/github.js";
 
@@ -26,6 +27,13 @@ function client(comments: ReviewComment[] = [root, triggering], current = pr) {
 }
 
 describe("review-comment reply action path", () => {
+  it("decodes JSON-escaped Markdown line breaks in assistant replies", () => {
+    expect(parseReplyAction({ action: "reply", body: "First paragraph\\n\\n- **second**" })).toEqual({
+      action: "reply",
+      body: "First paragraph\n\n- **second**",
+    });
+  });
+
   it("posts one response rooted at the finding and remains idempotent", async () => {
     const github = client();
     const generate = vi.fn(async () => ({ action: "reply", body: "That is explained by the validation step." }));
