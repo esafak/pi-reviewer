@@ -40,12 +40,12 @@ on:
 
 jobs:
   review:
-    if: \${{ github.event_name != 'pull_request_review_comment' || github.event.comment.user.type != 'Bot' }}
     runs-on: ubuntu-latest
+    if: \${{ (github.event_name != 'pull_request_review_comment' || github.event.comment.user.type != 'Bot') && (github.event_name != 'issue_comment' || github.event.comment.user.type != 'Bot') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
     permissions:
       contents: read
       pull-requests: write
-      issues: write
+      issues: write # Required when react-on-no-findings is enabled.
 
     concurrency:
       group: pi-reviewer-\${{ github.repository }}-\${{ github.event.pull_request.number || github.event.issue.number || inputs.pr-number || github.run_id }}
@@ -55,24 +55,25 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          persist-credentials: false
           ref: \${{ github.event.pull_request.head.sha || github.sha }}
-
-      - name: Fetch PR refs for comment and manual events
-        shell: bash
-        run: git fetch origin '+refs/pull/*/head:refs/remotes/origin/pr/*' --no-tags
 
       - uses: esafak/pi-reviewer@main
         with:
           github-token: \${{ secrets.GITHUB_TOKEN }}
           pi-api-key: \${{ secrets.PI_API_KEY }}
           model: openrouter/openai/gpt-5.4-mini
+          thinking: off
           min-severity: \${{ inputs.min-severity || 'info' }}
           review-drafts: '${reviewDrafts ? "true" : "false"}'
           react-on-no-findings: 'true'
+          # Optional workflow_dispatch inputs:
+          # pr-number: 123
+          # target-head: <ancestor SHA>
           # Opt in to injecting matching project docs into the review.
           # Comma-separated dirs scanned for .md files with a 'description' frontmatter.
           # doc-dirs: '.pi/notes,docs/review'
- `; }
+`; }
 
 export async function init(options: InitOptions = {}): Promise<void> {
   const cwd = options.cwd ?? process.cwd();

@@ -33,11 +33,19 @@ on:
           - info
           - warn
           - critical
+      pr-number:
+        description: 'Pull request number to review'
+        required: false
+        type: number
+      target-head:
+        description: 'Optional ancestor commit to review'
+        required: false
+        type: string
 
 jobs:
   review:
     runs-on: ubuntu-latest
-    if: github.event_name != 'pull_request_review_comment' || github.event.comment.user.type != 'Bot'
+    if: ${{ (github.event_name != 'pull_request_review_comment' || github.event.comment.user.type != 'Bot') && (github.event_name != 'issue_comment' || github.event.comment.user.type != 'Bot') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
     permissions:
       contents: read
       pull-requests: write
@@ -49,19 +57,17 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          persist-credentials: false
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
-      - name: Fetch PR refs for comment and manual events
-        shell: bash
-        run: git fetch origin '+refs/pull/*/head:refs/remotes/origin/pr/*' --no-tags
       - uses: esafak/pi-reviewer@main
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           pi-api-key: ${{ secrets.PI_API_KEY }}
           model: openrouter/openai/gpt-5.4-mini
           thinking: off
-          review-drafts: false
-          react-on-no-findings: true
           min-severity: ${{ inputs.min-severity || 'info' }}
+          review-drafts: 'false'
+          react-on-no-findings: 'true'
           # Optional workflow_dispatch inputs:
           # pr-number: 123
           # target-head: <ancestor SHA>
@@ -70,13 +76,83 @@ jobs:
           # doc-dirs: '.pi/notes,docs/review'
 ```
 
-Commit it to your default branch, then provide the API key for your selected provider in the action environment. For `openai/...`, `anthropic/...`, and `zai/...` models, use `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or `ZAI_API_KEY`, respectively. Other providers can use `PI_API_KEY` (or the explicit `pi-api-key` input). When more than one is available, the explicit `pi-api-key` input takes precedence, followed by the selected provider's variable, then `PI_API_KEY`.
+Commit it to your default branch, then provide the API key for your selected provider in the action environment. For `openai/...`, `anthropic/...`, and `zai/...` models, use `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or `ZAI_API_KEY`, respectively. Other providers can use `PI_API_KEY` (or the explicit `pi-api-key` input). The precedence order is explicit `pi-api-key` input, then the selected provider's variable, then `PI_API_KEY`; provider-specific variables therefore override the `PI_API_KEY` fallback, but not an explicit input.
+
+In the workflow above, `PI_API_KEY` is supplied through the `pi-api-key`
+input, making it the explicit highest-priority key. If you want
+`MODEL_NAME` to select the provider-specific key, omit `pi-api-key` and pass
+the provider keys through `env:` instead.
+
+### Selecting a model from multiple provider secrets
+
+For workflows that need to select between several providers without changing
+the workflow, set the repository variable `MODEL_NAME` to the complete model
+name (for example, `openai/gpt-5.6-luna`) and add the corresponding secrets to
+the repository or environment. Add this step immediately before the Pi
+Reviewer action. Values used by shell commands are passed through `env:` rather
+than expanded directly into the script. This keeps GitHub context values and
+secrets out of the command text and follows the workflow's injection-safety
+convention.
+
+```yaml
+      - name: Select provider API key
+        shell: bash
+        env:
+          MODEL_NAME: ${{ vars.MODEL_NAME }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ZAI_API_KEY: ${{ secrets.ZAI_API_KEY }}
+        run: |
+          if [ -z "$MODEL_NAME" ]; then
+            echo "::error::Repository variable MODEL_NAME is required"
+            exit 1
+          fi
+          provider="${MODEL_NAME%%/*}"
+          case "$provider" in
+            openai) key="$OPENAI_API_KEY" ;;
+            anthropic) key="$ANTHROPIC_API_KEY" ;;
+            zai) key="$ZAI_API_KEY" ;;
+            *) echo "::error::Unsupported provider in MODEL_NAME: $provider"; exit 1 ;;
+          esac
+          if [ -z "$key" ]; then
+            echo "::error::No API key configured for provider: $provider"
+            exit 1
+          fi
+          echo "::add-mask::$key"
+          printf 'PI_API_KEY=%s\n' "$key" >> "$GITHUB_ENV"
+```
+
+Then configure the action to use the selected key and model:
+
+```yaml
+      - uses: esafak/pi-reviewer@main
+        # Alternative: pass all provider keys directly. Empty/unset secrets are
+        # ignored, but every configured key is exposed to the action process.
+        # When using this alternative, omit the selection step above and omit
+        # the pi-api-key input below.
+        # env:
+        #   OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        #   ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        #   ZAI_API_KEY: ${{ secrets.ZAI_API_KEY }}
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          pi-api-key: ${{ env.PI_API_KEY }}
+          model: ${{ vars.MODEL_NAME }}
+```
+
+This pattern supports one configured provider at a time while keeping all
+provider secrets available to the workflow. The selection step supports the
+`openai/`, `anthropic/`, and `zai/` prefixes documented above; use `PI_API_KEY`
+directly for other providers or extend the `case` statement for that provider.
 
 ## Repository self-review
 
 This repository's workflow uses the `review` environment and the required
 repository variable `MODEL_NAME` to select the provider. Add the matching
 provider secret to the `review` environment:
+
+`review` is only this repository's environment name; environment names are arbitrary.
+Put `MODEL_NAME` and the matching provider secret in whichever environment the workflow selects.
 
 | `MODEL_NAME` prefix | Secret |
 |---|---|
@@ -157,6 +233,8 @@ Then update your workflow:
 ```yaml
 steps:
   - uses: actions/checkout@v4
+    with:
+      persist-credentials: false
 
   - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
     id: bot-token
