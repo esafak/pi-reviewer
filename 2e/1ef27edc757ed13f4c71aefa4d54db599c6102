@@ -1,0 +1,22 @@
+src/ci/review.ts
+  h_ea91e2db23540f 279
+src/core/ai-fix-footer.ts
+  h_ea91e2db23540f 10,32,53,57-59,65-67
+src/core/output.ts
+  h_ea91e2db23540f 71-72,530,561,572,590,600
+tests/ci/review.test.ts
+  h_ea91e2db23540f 225
+tests/core/output.test.ts
+  h_ea91e2db23540f 562-563,565,574-583,657,713,743-744,1076,1331
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "2e1ef27edc757ed13f4c71aefa4d54db599c6102",
+  "prompts": {},
+  "humans": {
+    "h_ea91e2db23540f": {
+      "author": "Emre Şafak <3928300+esafak@users.noreply.github.com>"
+    }
+  }
+}
