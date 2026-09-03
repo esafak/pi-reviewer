@@ -1,0 +1,20 @@
+CI.md
+  h_ea91e2db23540f 36-43,48,60,69-70,79-146,154-156,236-237
+src/ci/action-entry.ts
+  h_ea91e2db23540f 97
+src/ci/init.ts
+  h_ea91e2db23540f 44,48,58,66,70-72,76
+tests/ci/init.test.ts
+  h_ea91e2db23540f 40,44-45
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "2ea8287a3a644ef90d88a3465c08d682e2aa1ead",
+  "prompts": {},
+  "humans": {
+    "h_ea91e2db23540f": {
+      "author": "Emre Şafak <3928300+esafak@users.noreply.github.com>"
+    }
+  }
+}
