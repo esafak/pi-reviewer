@@ -558,7 +558,15 @@ describe("sendOutput", () => {
     const context = { file: "src/a.ts", line: 2, side: "RIGHT", severity: "WARN" };
     const body = "Check this:\n\n```ts\nreturn value;\n```";
     expect(renderFindingSummary(context, body)).toBe("🟡 **`src/a.ts:2 · RIGHT`**\n\nCheck this:\n\n```ts\nreturn value;\n```");
+    expect(renderFindingSummary({ ...context, repository: "owner/repo", commitId: "abc123" }, body)).toContain("[`src/a.ts:2 · RIGHT`](https://github.com/owner/repo/blob/abc123/src/a.ts#L2)");
+    expect(renderFindingSummary({ ...context, side: "LEFT", repository: "owner/repo", commitId: "abc123" }, body)).toContain("[`src/a.ts:2 · LEFT`](https://github.com/owner/repo/blob/abc123~1/src/a.ts#L2)");
+    expect(renderFindingSummary({ ...context, side: "LEFT", repository: "owner/repo" }, body)).not.toContain("https://github.com");
     expect(renderAiFixPromptText(context, body)).toBe(`WARN: src/a.ts:2\n\n${body}\n\n${AI_FIX_FOOTER}`);
+  });
+
+  it("normalizes escaped Markdown line breaks in review JSON", () => {
+    const parsed = parseAgentResponse(JSON.stringify({ summary: "First\\n\\n- **second**", comments: [] }));
+    expect(parsed.summary).toBe("First\n\n- **second**");
   });
 
   it("keeps reply text that happens to start with a level-looking line", () => {
@@ -648,7 +656,7 @@ describe("sendOutput", () => {
     expect(marker?.body).toContain('"reason":"MATERIALLY_CHANGED"');
     expect(marker?.body).toContain("behavior changed --\\u003e in diff");
     expect(payload.body).not.toContain("pi-reviewer :re-raise");
-    expect(payload.body).toContain("🟡 **`src/a.ts:99 · RIGHT`**");
+    expect(payload.body).toContain("[`src/a.ts:99 · RIGHT`](https://github.com/o/r/blob/head/src/a.ts#L99)");
     expect(payload.body).toContain("old issue");
   });
 

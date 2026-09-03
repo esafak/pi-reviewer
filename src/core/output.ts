@@ -4,7 +4,7 @@ import path from "node:path";
 import { parseDiffPositions, partitionComments } from "./diff-positions.js";
 import { GitHubClient } from "../ci/github.js";
 import { bodyFindingId, decodeBodyFindingMarkers, encodeBodyFindingMarker, updateBodyFindingMarker } from "../ci/batch.js";
-import { AI_FIX_FOOTER, appendAiFixFooter, hasAiFixProse, neutralizeDetailsTags, normalizeAiFixBody, renderAiFixPrompt, renderAiFixPromptList, renderFindingSummary, removeAiFixFooter } from "./ai-fix-footer.js";
+import { AI_FIX_FOOTER, appendAiFixFooter, hasAiFixProse, neutralizeDetailsTags, normalizeAiFixBody, normalizeMarkdownText, renderAiFixPrompt, renderAiFixPromptList, renderFindingSummary, removeAiFixFooter } from "./ai-fix-footer.js";
 
 export type OutputTarget = "terminal" | "comment" | "file";
 export type Severity = "CRITICAL" | "WARN" | "INFO";
@@ -161,7 +161,7 @@ function normalizeReviewResult(result: ReviewResult, options: Pick<OutputOptions
       console.warn(`[pi-reviewer] dropped finding update comment_id=${formatDiagnosticValue(checked.commentId, "comment_id")}${checked.status === undefined ? "" : ` status=${formatDiagnosticValue(checked.status, "status")}`} reason=${checked.reason}`);
     }
   }
-  return { summary: result.summary, comments, ...(updates.length ? { finding_updates: updates } : {}), ...(result.diff !== undefined ? { diff: result.diff } : {}) };
+  return { summary: normalizeMarkdownText(result.summary), comments, ...(updates.length ? { finding_updates: updates } : {}), ...(result.diff !== undefined ? { diff: result.diff } : {}) };
 }
 
 /** Applies model-approved transitions independently so a failed mutation can be retried safely. */
@@ -556,7 +556,7 @@ export function parseAgentResponse(text: string, minSeverity: Severity = "INFO")
   return parseAgentResponseWithStatus(text, minSeverity).result;
 }
 
-function formatForGitHub(result: ReviewResult, provenance: ReRaiseProvenanceOptions): string {
+function formatForGitHub(result: ReviewResult, provenance: ReRaiseProvenanceOptions & Pick<OutputOptions, "repo">): string {
   const lines = ["## Pi Reviewer", "", sanitizeVisibleReviewText(result.summary)];
 
   const actionable = result.comments.filter(comment => comment.severity === "WARN" || comment.severity === "CRITICAL");
@@ -567,7 +567,7 @@ function formatForGitHub(result: ReviewResult, provenance: ReRaiseProvenanceOpti
     lines.push("", "### Inline Comments");
     for (const comment of result.comments) {
       const findingBody = normalizeAiFixBody(comment.body);
-      const visibleBody = `${reRaiseMetadata(comment, provenance)}${renderFindingSummary(comment, findingBody)}`;
+      const visibleBody = `${reRaiseMetadata(comment, provenance)}${renderFindingSummary({ ...comment, repository: provenance.repo, commitId: provenance.commitId }, findingBody)}`;
       lines.push(
         "",
         encodeBodyFindingMarker({ findingId: bodyFindingId(normalizeFinding(comment)), file: comment.file, line: comment.line, side: comment.side, severity: comment.severity, body: `${reRaiseMetadata(comment, provenance)}${findingBody}` }),
@@ -585,7 +585,7 @@ function formatForGitHub(result: ReviewResult, provenance: ReRaiseProvenanceOpti
  * comments that could not be attached to a diff line. GitHub shows the body as
  * the review's main text, so moved comments stay visible to the author.
  */
-function buildReviewBody(summary: string, moved: ReviewComment[], allComments: ReviewComment[], provenance: ReRaiseProvenanceOptions): string {
+function buildReviewBody(summary: string, moved: ReviewComment[], allComments: ReviewComment[], provenance: ReRaiseProvenanceOptions & Pick<OutputOptions, "repo">): string {
   const lines = [sanitizeVisibleReviewText(summary)];
   const actionable = allComments.filter(comment => comment.severity === "WARN" || comment.severity === "CRITICAL");
   const prompt = renderAiFixPromptList(actionable.map(comment => ({ context: comment, body: sanitizeVisibleReviewText(comment.body) })));
@@ -595,12 +595,12 @@ function buildReviewBody(summary: string, moved: ReviewComment[], allComments: R
   lines.push("These comments could not be attached to a specific diff line, so the reported location is approximate — the line is not part of the diff:");
   for (const comment of moved) {
     const findingBody = sanitizeVisibleReviewText(normalizeAiFixBody(comment.body));
-    const visibleBody = `${reRaiseMetadata(comment, provenance)}${renderFindingSummary(comment, findingBody)}${comment.severity === "WARN" || comment.severity === "CRITICAL" ? `\n\n${renderAiFixPrompt(comment, findingBody)}` : ""}`;
+    const visibleBody = `${reRaiseMetadata(comment, provenance)}${renderFindingSummary({ ...comment, repository: provenance.repo, commitId: provenance.commitId }, findingBody)}${comment.severity === "WARN" || comment.severity === "CRITICAL" ? `\n\n${renderAiFixPrompt(comment, findingBody)}` : ""}`;
     const findingId = bodyFindingId(normalizeFinding(comment));
     lines.push(
       "",
       encodeBodyFindingMarker({ findingId, file: comment.file, line: comment.line, side: comment.side, severity: comment.severity, body: `${reRaiseMetadata(comment, provenance)}${findingBody}` }),
-      `> ${SEVERITY_EMOJI[comment.severity]} **\`${comment.file}:${comment.line}\`** · ${comment.side} — location could not be verified`,
+      `> ${SEVERITY_EMOJI[comment.severity]} Location could not be verified in this diff`,
       visibleBody
     );
   }

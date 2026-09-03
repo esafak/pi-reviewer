@@ -8,6 +8,7 @@ import { FileDiff } from "../../ui/src/components/diff/FileDiff.js";
 import { OrphanComments } from "../../ui/src/components/diff/OrphanComments.js";
 import { SettingsProvider } from "../../ui/src/context/SettingsContext.js";
 import { parseDiff } from "../../ui/src/utils/diff-parser.js";
+import { renderMarkdown } from "../../ui/src/utils/renderMarkdown.js";
 
 const comment = {
   file: "src/example.ts",
@@ -17,6 +18,13 @@ const comment = {
 };
 
 describe("CommentCard response disclosure", () => {
+  it("renders escaped line breaks as GFM", () => {
+    const html = renderMarkdown("First\\n\\n- **second**");
+    expect(html).toContain("<p>First</p>");
+    expect(html).toContain("<li><strong>second</strong></li>");
+    expect(html).not.toContain("\\n");
+  });
+
   it("starts closed and toggles while keeping decision controls available", async () => {
     const user = userEvent.setup();
     const onDecide = vi.fn();

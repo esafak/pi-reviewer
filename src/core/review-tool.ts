@@ -16,7 +16,7 @@ import { hasAiFixProse, MEANINGFUL_PROSE_PATTERN } from "./ai-fix-footer.js";
 const reviewSchema = Type.Object(
   {
     summary: Type.String({
-      description: "Overall review written in Markdown. Use bullet points and bold for clarity.",
+      description: "Overall review written in Markdown. Use bullet points and bold for clarity. In JSON, encode each Markdown newline once as \\n; never double-escape formatting newlines as \\\\n.",
     }),
     comments: Type.Array(
       Type.Object(
