@@ -229,11 +229,11 @@ At review time, the action extracts keywords from the changed file paths (e.g. `
 
 By default, comments appear under `github-actions[bot]`. To post under a custom bot name, create a GitHub App:
 
-Fresnel and configs use this custom App-based approach rather than the
+Some repositories use this custom App-based approach rather than the
 `init`-generated workflow. Their workflows select a model with the
 `MODEL_NAME` environment/repository variable and use the corresponding
-provider secret in the `reviews` environment. The environment name is not
-special; choose any environment name and use it consistently in the workflow.
+provider secret in a dedicated GitHub environment. The environment name is
+not special.
 
 1. Go to `github.com/settings/apps/new`, set **Contents** to **Read and write**, **Pull requests** and **Issues** to **Write**, and disable the webhook
 2. Install the app on your repository
@@ -253,7 +253,7 @@ steps:
     with:
       client-id: ${{ secrets.PI_REVIEWER_CLIENT_ID }}
       private-key: ${{ secrets.PI_REVIEWER_PK }}
-      permission-contents: read
+      permission-contents: write # for resolveReviewThread
       permission-pull-requests: write
       permission-issues: write
 
