@@ -68,6 +68,8 @@ export interface OutputOptions {
   prNumber?: number;
   repo?: string;
   commitId?: string;
+  /** Commit containing the left side of the reviewed diff. */
+  baseCommitId?: string;
   minSeverity?: Severity;
   /** Raw diff the model was shown. When present, inline comments are validated
    * against it and unpositionable ones are moved to the review body instead of
@@ -525,7 +527,7 @@ function hasActionableFindings(comments: ReviewComment[]): boolean {
 function appendFindingFooter(comment: ReviewComment, body: string): string {
   const metadata = body.match(/^(?:(?:<!--\s*pi-reviewer\s*:[\s\S]*?-->\n?)*)/)?.[0] ?? "";
   const findingBody = normalizeAiFixBody(body.slice(metadata.length));
-  const visibleBody = renderFindingSummary(comment, findingBody);
+  const visibleBody = renderFindingSummary(comment, findingBody, { includeLocation: false });
   const fixit = comment.severity === "WARN" || comment.severity === "CRITICAL"
     ? `\n\n${renderAiFixPrompt(comment, findingBody)}`
     : "";
@@ -556,7 +558,7 @@ export function parseAgentResponse(text: string, minSeverity: Severity = "INFO")
   return parseAgentResponseWithStatus(text, minSeverity).result;
 }
 
-function formatForGitHub(result: ReviewResult, provenance: ReRaiseProvenanceOptions & Pick<OutputOptions, "repo">): string {
+function formatForGitHub(result: ReviewResult, provenance: ReRaiseProvenanceOptions & Pick<OutputOptions, "repo" | "baseCommitId">): string {
   const lines = ["## Pi Reviewer", "", sanitizeVisibleReviewText(result.summary)];
 
   const actionable = result.comments.filter(comment => comment.severity === "WARN" || comment.severity === "CRITICAL");
@@ -567,7 +569,7 @@ function formatForGitHub(result: ReviewResult, provenance: ReRaiseProvenanceOpti
     lines.push("", "### Inline Comments");
     for (const comment of result.comments) {
       const findingBody = normalizeAiFixBody(comment.body);
-      const visibleBody = `${reRaiseMetadata(comment, provenance)}${renderFindingSummary({ ...comment, repository: provenance.repo, commitId: provenance.commitId }, findingBody)}`;
+      const visibleBody = `${reRaiseMetadata(comment, provenance)}${renderFindingSummary({ ...comment, repository: provenance.repo, commitId: provenance.commitId, baseCommitId: provenance.baseCommitId }, findingBody)}`;
       lines.push(
         "",
         encodeBodyFindingMarker({ findingId: bodyFindingId(normalizeFinding(comment)), file: comment.file, line: comment.line, side: comment.side, severity: comment.severity, body: `${reRaiseMetadata(comment, provenance)}${findingBody}` }),
@@ -585,7 +587,7 @@ function formatForGitHub(result: ReviewResult, provenance: ReRaiseProvenanceOpti
  * comments that could not be attached to a diff line. GitHub shows the body as
  * the review's main text, so moved comments stay visible to the author.
  */
-function buildReviewBody(summary: string, moved: ReviewComment[], allComments: ReviewComment[], provenance: ReRaiseProvenanceOptions & Pick<OutputOptions, "repo">): string {
+function buildReviewBody(summary: string, moved: ReviewComment[], allComments: ReviewComment[], provenance: ReRaiseProvenanceOptions & Pick<OutputOptions, "repo" | "baseCommitId">): string {
   const lines = [sanitizeVisibleReviewText(summary)];
   const actionable = allComments.filter(comment => comment.severity === "WARN" || comment.severity === "CRITICAL");
   const prompt = renderAiFixPromptList(actionable.map(comment => ({ context: comment, body: sanitizeVisibleReviewText(comment.body) })));
@@ -595,7 +597,7 @@ function buildReviewBody(summary: string, moved: ReviewComment[], allComments: R
   lines.push("These comments could not be attached to a specific diff line, so the reported location is approximate — the line is not part of the diff:");
   for (const comment of moved) {
     const findingBody = sanitizeVisibleReviewText(normalizeAiFixBody(comment.body));
-    const visibleBody = `${reRaiseMetadata(comment, provenance)}${renderFindingSummary({ ...comment, repository: provenance.repo, commitId: provenance.commitId }, findingBody)}${comment.severity === "WARN" || comment.severity === "CRITICAL" ? `\n\n${renderAiFixPrompt(comment, findingBody)}` : ""}`;
+    const visibleBody = `${reRaiseMetadata(comment, provenance)}${renderFindingSummary({ ...comment, repository: provenance.repo, commitId: provenance.commitId, baseCommitId: provenance.baseCommitId }, findingBody)}${comment.severity === "WARN" || comment.severity === "CRITICAL" ? `\n\n${renderAiFixPrompt(comment, findingBody)}` : ""}`;
     const findingId = bodyFindingId(normalizeFinding(comment));
     lines.push(
       "",

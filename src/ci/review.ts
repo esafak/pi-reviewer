@@ -276,6 +276,7 @@ export async function review(options: ReviewOptions): Promise<void> {
       prNumber: options.pr,
       repo,
       commitId: options.commitId,
+      baseCommitId: options.fromSha,
       minSeverity: options.minSeverity as Severity | undefined,
       diff,
       batchMarker: options.batchMarker,
