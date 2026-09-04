@@ -26,6 +26,11 @@
       "groupName": "pnpm"
     },
     {
+      "matchManagers": ["npm"],
+      "matchPackageNames": ["/^@earendil-works\\/pi-/"],
+      "groupName": "earendil-works pi packages"
+    },
+    {
       "matchManagers": ["github-actions"],
       "description": "Keep GitHub Actions pinned to commit SHAs.",
       "pinDigests": true
