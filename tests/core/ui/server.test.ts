@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import type { ReviewResult } from "../../../src/core/output.js";
 import { buildHTML } from "../../../src/core/ui/template.js";
 import { startUIServer, type UIAction } from "../../../src/core/ui/server/index.js";
+import { compileRoute, matchPath } from "../../../src/core/ui/server/routes.js";
 import { applyConfigPatch } from "../../../src/core/config.js";
 
 vi.mock("node:child_process", () => ({ exec: vi.fn() }));
@@ -83,6 +84,27 @@ describe("buildHTML", () => {
   });
 });
 
+describe("route matching", () => {
+  it("matches nested named segments without decoding structure", () => {
+    const route = compileRoute({
+      id: "action",
+      methods: ["GET"],
+      path: "/reviews/:reviewId/comments/:commentId",
+    });
+    expect(matchPath(route, "/reviews/abc/comments/42")).toEqual({
+      params: { reviewId: "abc", commentId: "42" },
+    });
+    expect(matchPath(route, "/reviews/a%2Fb/comments/42")).toEqual({
+      params: { reviewId: "a/b", commentId: "42" },
+    });
+    expect(matchPath(route, "/reviews/%zz/comments/42")).toEqual({ decodeError: true });
+  });
+
+  it("rejects duplicate route parameters", () => {
+    expect(() => compileRoute({ id: "action", methods: ["GET"], path: "/:id/:id" })).toThrow();
+  });
+});
+
 // ── startUIServer ────────────────────────────────────────────────────────────
 
 function get(url: string): Promise<{ status: number; body: string }> {
@@ -93,6 +115,19 @@ function get(url: string): Promise<{ status: number; body: string }> {
         res.on("data", (chunk) => {
           body += chunk;
         });
+        res.on("end", () => resolve({ status: res.statusCode ?? 0, body }));
+      })
+      .on("error", reject);
+  });
+}
+
+function getPath(baseUrl: string, path: string): Promise<{ status: number; body: string }> {
+  const base = new URL(baseUrl);
+  return new Promise((resolve, reject) => {
+    http
+      .get({ hostname: base.hostname, port: base.port, path }, (res) => {
+        let body = "";
+        res.on("data", (chunk) => { body += chunk; });
         res.on("end", () => resolve({ status: res.statusCode ?? 0, body }));
       })
       .on("error", reject);
@@ -161,10 +196,39 @@ describe("startUIServer", () => {
     await handle.close();
   });
 
+  it("ignores query strings when matching routes", async () => {
+    const handle = await startUIServer(RESULT, DIFF);
+    const { status } = await get(handle.url + "/ping?source=test");
+    expect(status).toBe(204);
+    await handle.close();
+  });
+
+  it("returns 405 and Allow for an unsupported method on a known route", async () => {
+    const handle = await startUIServer(RESULT, DIFF);
+    const { status, allow } = await new Promise<{ status: number; allow: string | undefined }>((resolve, reject) => {
+      const req = http.request(handle.url + "/ping", { method: "POST" }, (res) => {
+        res.resume();
+        res.on("end", () => resolve({ status: res.statusCode ?? 0, allow: res.headers.allow }));
+      });
+      req.on("error", reject);
+      req.end();
+    });
+    expect(status).toBe(405);
+    expect(allow).toBe("GET");
+    await handle.close();
+  });
+
   it("returns 404 for unknown routes", async () => {
     const handle = await startUIServer(RESULT, DIFF);
     const { status } = await get(handle.url + "/toString");
     expect(status).toBe(404);
+    await handle.close();
+  });
+
+  it("does not normalize trailing or empty path segments", async () => {
+    const handle = await startUIServer(RESULT, DIFF);
+    expect((await get(handle.url + "/ping/")).status).toBe(404);
+    expect((await getPath(handle.url, "/ping//")).status).toBe(404);
     await handle.close();
   });
 
@@ -198,6 +262,13 @@ describe("startUIServer", () => {
     await handle.close();
   });
 
+  it("POST /action with an invalid action shape returns 400", async () => {
+    const handle = await startUIServer(RESULT, DIFF);
+    const { status } = await post(handle.url + "/action", { type: "send", decisions: [{ index: "0" }] });
+    expect(status).toBe(400);
+    await handle.close();
+  });
+
   it("POST /config calls applyConfigPatch with the patch and returns 204", async () => {
     const handle = await startUIServer(RESULT, DIFF);
     const { status } = await post(handle.url + "/config", {
@@ -209,7 +280,7 @@ describe("startUIServer", () => {
     await handle.close();
   });
 
-  it("POST /config with invalid JSON body returns 204 (ignored gracefully)", async () => {
+  it("POST /config with invalid JSON body returns 400", async () => {
     const handle = await startUIServer(RESULT, DIFF);
     const { status } = await new Promise<{ status: number }>((resolve, reject) => {
       const req = http.request(handle.url + "/config", { method: "POST" }, (res) => {
@@ -219,12 +290,12 @@ describe("startUIServer", () => {
       req.on("error", reject);
       req.end("not-json");
     });
-    expect(status).toBe(204);
+    expect(status).toBe(400);
     expect(applyConfigPatchMock).not.toHaveBeenCalled();
     await handle.close();
   });
 
-  it("POST /config with empty body returns 204 (ignored gracefully)", async () => {
+  it("POST /config with empty body returns 400", async () => {
     const handle = await startUIServer(RESULT, DIFF);
     const { status } = await new Promise<{ status: number }>((resolve, reject) => {
       const req = http.request(handle.url + "/config", { method: "POST" }, (res) => {
@@ -234,8 +305,15 @@ describe("startUIServer", () => {
       req.on("error", reject);
       req.end("");
     });
-    expect(status).toBe(204);
+    expect(status).toBe(400);
     expect(applyConfigPatchMock).not.toHaveBeenCalled();
+    await handle.close();
+  });
+
+  it("rejects request bodies larger than 1 MiB", async () => {
+    const handle = await startUIServer(RESULT, DIFF);
+    const { status } = await post(handle.url + "/config", "x".repeat(1024 * 1024));
+    expect(status).toBe(413);
     await handle.close();
   });
 });
