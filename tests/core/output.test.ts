@@ -583,7 +583,8 @@ printf("first\\nsecond")
 
   it("keeps reply text that happens to start with a level-looking line", () => {
     const prompt = renderAiFixPrompt({ file: "src/a.ts", line: 2 }, "REPLY: noting the fix\nlooks good");
-    expect(prompt).toContain("REPLY: src/a.ts:2\n\nREPLY: noting the fix\nlooks good");
+    expect(prompt).toContain("src/a.ts:2\n\nREPLY: noting the fix\nlooks good");
+    expect(prompt).not.toContain("REPLY: src/a.ts:2");
   });
 
   let logSpy: ReturnType<typeof vi.spyOn>;

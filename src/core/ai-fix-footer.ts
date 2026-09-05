@@ -129,8 +129,8 @@ function renderPromptDetails(prompt: string, summary = "Prompt to fix with AI"):
 }
 
 function promptEntry(context: AiFixContext, body: string): string {
-  const level = context.severity ?? "REPLY";
-  return `${level}: ${context.file}:${context.line}\n\n${cleanPromptBody(body)}`;
+  const level = context.severity ? `${context.severity}: ` : "";
+  return `${level}${context.file}:${context.line}\n\n${cleanPromptBody(body)}`;
 }
 
 /** Returns the copyable Fixit payload without its GitHub disclosure wrapper. */

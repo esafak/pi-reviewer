@@ -66,6 +66,10 @@ describe("reply prompt limits", () => {
   it.each(["", "not json", "{}", '{"action":"react","content":"thumbs-up"}', '{"action":"reply","body":""}', '{"action":"reply","body":"ok"}\nextra'])("rejects malformed or unsupported actions: %s", (raw) => {
     expect(parseReplyAction(raw)).toBeUndefined();
   });
+  it("accepts an explicit resolve action with a non-empty body", () => {
+    expect(parseReplyAction('{"action":"resolve","body":"Withdrawing this concern"}')).toEqual({ action: "resolve", body: "Withdrawing this concern" });
+    expect(parseReplyAction('{"action":"resolve","body":""}')).toBeUndefined();
+  });
   it("defuses reserved metadata while preserving normal markdown and code", () => {
     const action = parseReplyAction(JSON.stringify({ action: "reply", body: "Use **this** and `<!-- pi-reviewer:finding:v1 -->`" }));
     expect(action).toEqual({ action: "reply", body: "Use **this** and `<!-- pi-reviewer : reserved metadata -->`" });
