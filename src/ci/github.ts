@@ -1,4 +1,4 @@
-export interface PullRequest { number: number; head: { sha: string; repo?: { full_name?: string } }; base: { sha: string; repo?: { full_name?: string } }; draft?: boolean }
+export interface PullRequest { number: number; head: { sha: string; repo?: { full_name?: string } }; base: { sha: string; repo?: { full_name?: string } }; draft?: boolean; user?: { login?: string; type?: string } }
 export interface Review { id: number; body?: string | null; user?: { login?: string; type?: string }; commit_id?: string; created_at?: string }
 export interface ReviewComment { id: number; body: string; user?: { login?: string; type?: string }; path?: string; line?: number; side?: string; pull_request_review_id?: number; in_reply_to_id?: number; created_at?: string }
 export interface PageInfo { hasNextPage: boolean; endCursor?: string }
