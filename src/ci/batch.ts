@@ -1,3 +1,5 @@
+import { escapeHtmlCommentText } from "../core/html-comment.js";
+
 export type BatchKind = "opened" | "synchronize" | "manual";
 export type EventKind = BatchKind | "reply";
 export interface BatchMarker { version: 1; fromSha: string; toSha: string; kind: BatchKind; actor: string; reviewId: number }
@@ -31,7 +33,7 @@ export function bodyFindingId(identity: string): number {
   return Number(hash & 0x0000ffffffffffffn) || 1;
 }
 export function encodeBodyFindingMarker(value: Omit<BodyFinding, "status"> & { status?: BodyFindingStatus }): string {
-  const json = JSON.stringify({ version: 1, status: "ACTIVE", ...value }).replace(/-->/g, "--\\u003e");
+  const json = escapeHtmlCommentText(JSON.stringify({ version: 1, status: "ACTIVE", ...value }));
   return `<!-- pi-reviewer:body-finding:v1 ${json} -->`;
 }
 function isBodyFinding(value: unknown): value is BodyFinding {

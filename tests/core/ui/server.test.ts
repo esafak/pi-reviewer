@@ -161,6 +161,13 @@ describe("startUIServer", () => {
     await handle.close();
   });
 
+  it("returns 404 for unknown routes", async () => {
+    const handle = await startUIServer(RESULT, DIFF);
+    const { status } = await get(handle.url + "/toString");
+    expect(status).toBe(404);
+    await handle.close();
+  });
+
   it("POST /action resolves waitForAction with the payload", async () => {
     const handle = await startUIServer(RESULT, DIFF);
     const payload: UIAction = {

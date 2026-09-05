@@ -2,6 +2,7 @@ import { writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { parseDiffPositions, partitionComments } from "./diff-positions.js";
+import { escapeHtmlCommentText } from "./html-comment.js";
 import { GitHubClient } from "../ci/github.js";
 import { bodyFindingId, decodeBodyFindingMarkers, encodeBodyFindingMarker, updateBodyFindingMarker } from "../ci/batch.js";
 import { AI_FIX_FOOTER, appendAiFixFooter, hasAiFixProse, neutralizeDetailsTags, normalizeAiFixBody, normalizeMarkdownText, renderAiFixPrompt, renderAiFixPromptList, renderFindingSummary, removeAiFixFooter } from "./ai-fix-footer.js";
@@ -550,7 +551,7 @@ type ReRaiseProvenanceOptions = Pick<OutputOptions, "commitId" | "batchMarker">;
 function reRaiseMetadata(comment: ReviewComment, options: ReRaiseProvenanceOptions): string {
   const provenance = comment.reRaiseProvenance;
   if (!provenance) return "";
-  const json = JSON.stringify({ historicalFindingId: provenance.historicalFindingId, reason: provenance.reason, evidence: provenance.evidence, newFindingId: normalizeFinding(comment), targetSha: options.commitId, batch: options.batchMarker }).replace(/-->/g, "--\\u003e");
+  const json = escapeHtmlCommentText(JSON.stringify({ historicalFindingId: provenance.historicalFindingId, reason: provenance.reason, evidence: provenance.evidence, newFindingId: normalizeFinding(comment), targetSha: options.commitId, batch: options.batchMarker }));
   return `<!-- pi-reviewer:re-raise:v1 ${json} -->\n`;
 }
 

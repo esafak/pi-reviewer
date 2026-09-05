@@ -18,23 +18,23 @@ export function createRequestHandler(
   resolveOnce: (action: UIAction) => void,
   resetHeartbeat: () => void,
 ): (req: IncomingMessage, res: ServerResponse) => Promise<void> {
-  const routes: Record<string, RouteHandler> = {
-    "GET /": (_req, res) => {
+  const routes = new Map<string, RouteHandler>([
+    ["GET /", (_req, res) => {
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
       res.end(html);
-    },
-    "GET /ping": (_req, res) => {
+    }],
+    ["GET /ping", (_req, res) => {
       resetHeartbeat();
       res.writeHead(204);
       res.end();
-    },
-    "POST /config": async (req, res) => {
+    }],
+    ["POST /config", async (req, res) => {
       const raw = await readBody(req);
       try { applyConfigPatch(JSON.parse(raw) as Partial<PiReviewerConfig>); } catch { /* ignore */ }
       res.writeHead(204);
       res.end();
-    },
-    "POST /action": async (req, res) => {
+    }],
+    ["POST /action", async (req, res) => {
       const raw = await readBody(req);
       try {
         const action = JSON.parse(raw) as UIAction;
@@ -45,12 +45,12 @@ export function createRequestHandler(
         res.writeHead(400);
         res.end();
       }
-    },
-  };
+    }],
+  ]);
 
   return async (req, res) => {
     const key = `${req.method} ${req.url}`;
-    const handler = routes[key];
+    const handler = routes.get(key);
     if (handler) await handler(req, res);
     else { res.writeHead(404); res.end(); }
   };
