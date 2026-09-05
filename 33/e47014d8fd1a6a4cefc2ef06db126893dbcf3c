@@ -1,0 +1,20 @@
+src/ci/github.ts
+  h_ea91e2db23540f 79
+src/ci/reply.ts
+  h_ea91e2db23540f 11,45-46,49-54,67-68,71-76,80,82,87
+tests/ci/github.test.ts
+  h_ea91e2db23540f 65-70
+tests/ci/reply.test.ts
+  h_ea91e2db23540f 21,27,56-57,59-68,72,77,82,89-108
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "33e47014d8fd1a6a4cefc2ef06db126893dbcf3c",
+  "prompts": {},
+  "humans": {
+    "h_ea91e2db23540f": {
+      "author": "Emre Şafak <3928300+esafak@users.noreply.github.com>"
+    }
+  }
+}
