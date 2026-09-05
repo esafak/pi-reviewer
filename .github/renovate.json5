@@ -21,7 +21,7 @@
   "enabledManagers": ["npm", "mise", "github-actions"],
   "packageRules": [
     {
-      "matchManagers": ["npm", "mise"],
+      "matchManagers": ["npm", "mise", "github-actions"],
       "matchPackageNames": ["pnpm"],
       "groupName": "pnpm"
     },

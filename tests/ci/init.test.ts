@@ -37,7 +37,7 @@ describe("init", () => {
 
     expect(content).toContain("types: [opened, synchronize, reopened, ready_for_review]");
     expect(content).toContain("pull_request_review_comment:\n    types: [created]");
-    expect(content).toContain("if: ${{ (github.event_name != 'pull_request_review_comment' || github.event.comment.user.type != 'Bot') && (github.event_name != 'issue_comment' || github.event.comment.user.type != 'Bot') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}");
+    expect(content).toContain("if: ${{ (github.event_name != 'pull_request_review_comment' || github.event.comment.user.type != 'Bot') && (github.event_name != 'issue_comment' || github.event.comment.user.type != 'Bot') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && (github.event_name != 'pull_request' || github.event.pull_request.user.login != 'renovate[bot]') && (github.event_name != 'pull_request_review_comment' || github.event.pull_request.user.login != 'renovate[bot]') && (github.event_name != 'issue_comment' || github.event.issue.user.login != 'renovate[bot]') }}");
     expect(content.match(/^\s*if:/gm)).toHaveLength(1);
     expect(content).toContain("issue_comment:");
     expect(content).toContain("fetch-depth: 0");

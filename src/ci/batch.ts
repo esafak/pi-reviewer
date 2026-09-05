@@ -99,6 +99,7 @@ export function collectFindingHistory(input: { reviews: FindingHistorySource[]; 
 export function selectAuthenticatedBatchMarkers(reviews: Array<{ id: number; body?: string | null; user?: { login?: string } }>, login: string) { return reviews.filter(r => r.user?.login === login).map(r => decodeBatchMarker(r.body)).filter((m): m is BatchMarker => m !== undefined && m.actor === login); }
 export function selectBatchRange(mergeBase: string, head: string, latest?: BatchMarker, isAncestor?: (from: string, to: string) => boolean) { if (!latest || (isAncestor && !isAncestor(latest.toSha, head))) return { fromSha: mergeBase, toSha: head, fresh: true }; return { fromSha: latest.toSha, toSha: head, fresh: latest.toSha !== head }; }
 export function isSafePullRequestNumber(value: unknown): value is number { return typeof value === "number" && Number.isSafeInteger(value) && value > 0; }
+export function isRenovatePullRequest(pullRequest: { user?: { login?: string } }) { return pullRequest.user?.login === "renovate[bot]"; }
 function safeNumber(value: unknown): number | undefined {
   try {
     const number = typeof value === "number" ? value : Number(value);

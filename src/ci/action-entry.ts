@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { parseThinkingLevel, review } from "./review.js";
 import { GitHubClient } from "./github.js";
-import { collectFindingHistory, decodeBatchMarker, encodeBatchMarker, isAuthorizedReviewCommand, isEventRangeConsistent, isSafePullRequestNumber, normalizeEvent, selectAuthenticatedBatchMarkers, selectBatchRange } from "./batch.js";
+import { collectFindingHistory, decodeBatchMarker, encodeBatchMarker, isAuthorizedReviewCommand, isEventRangeConsistent, isRenovatePullRequest, isSafePullRequestNumber, normalizeEvent, selectAuthenticatedBatchMarkers, selectBatchRange } from "./batch.js";
 import { handleReply } from "./reply.js";
 
 async function readEvent(): Promise<unknown> {
@@ -42,6 +42,7 @@ if (event.command && !isAuthorizedReviewCommand(event)) { console.log("[pi-revie
 
 const github = new GitHubClient(token);
 const pr = await github.getPullRequest(repo, event.pr);
+if (isRenovatePullRequest(pr)) { console.log("[pi-reviewer] Renovate PRs are not reviewed"); process.exit(0); }
 if (event.kind === "manual" && event.command !== "/pi-review" && process.env.GITHUB_EVENT_NAME === "issue_comment") { process.exit(0); }
 if (pr.draft && process.env.REVIEW_DRAFTS !== "true") { console.log("[pi-reviewer] draft PR reviews are disabled"); process.exit(0); }
 const identity = await github.getUser();

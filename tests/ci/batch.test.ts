@@ -2,7 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { parseAgentResponseWithStatus } from "../../src/core/output.js";
-import { collectFindingHistory, decodeBatchMarker, encodeBatchMarker, encodeBodyFindingMarker, isAuthorizedReply, isAuthorizedReviewCommand, isEventRangeConsistent, isPiReviewerRootComment, isSafePullRequestNumber, normalizeEvent, replyMarker, decodeReplyMarker, selectAuthenticatedBatchMarkers, selectBatchRange } from "../../src/ci/batch.js";
+import { collectFindingHistory, decodeBatchMarker, encodeBatchMarker, encodeBodyFindingMarker, isAuthorizedReply, isAuthorizedReviewCommand, isEventRangeConsistent, isPiReviewerRootComment, isRenovatePullRequest, isSafePullRequestNumber, normalizeEvent, replyMarker, decodeReplyMarker, selectAuthenticatedBatchMarkers, selectBatchRange } from "../../src/ci/batch.js";
 
 describe("batch markers", () => {
   it("round trips a versioned authenticated marker", () => {
@@ -202,5 +202,10 @@ describe("event normalization", () => {
     expect(isSafePullRequestNumber(0)).toBe(false);
     expect(isSafePullRequestNumber(Number.MAX_SAFE_INTEGER + 1)).toBe(false);
     expect(normalizeEvent({ inputs: { "pr-number": "not-a-number" } }).pr).toBeUndefined();
+  });
+  it("identifies Renovate pull requests", () => {
+    expect(isRenovatePullRequest({ user: { login: "renovate[bot]" } })).toBe(true);
+    expect(isRenovatePullRequest({ user: { login: "dependabot[bot]" } })).toBe(false);
+    expect(isRenovatePullRequest({})).toBe(false);
   });
 });
