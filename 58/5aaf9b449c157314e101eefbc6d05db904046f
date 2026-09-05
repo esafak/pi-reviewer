@@ -1,0 +1,28 @@
+.github/renovate.json5
+  h_ea91e2db23540f 24
+.github/workflows/pi-review.yml
+  h_ea91e2db23540f 30
+src/ci/action-entry.ts
+  h_ea91e2db23540f 7,45
+src/ci/batch.ts
+  h_ea91e2db23540f 102
+src/ci/github.ts
+  h_ea91e2db23540f 1
+src/ci/init.ts
+  h_ea91e2db23540f 44
+tests/ci/batch.test.ts
+  h_ea91e2db23540f 5,206-210
+tests/ci/init.test.ts
+  h_ea91e2db23540f 40
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "585aaf9b449c157314e101eefbc6d05db904046f",
+  "prompts": {},
+  "humans": {
+    "h_ea91e2db23540f": {
+      "author": "Emre Şafak <3928300+esafak@users.noreply.github.com>"
+    }
+  }
+}
