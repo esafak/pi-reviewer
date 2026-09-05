@@ -1,0 +1,24 @@
+CI.md
+  h_ea91e2db23540f 175
+src/ci/review.ts
+  h_ea91e2db23540f 12,62,307-308,310-348
+src/core/prompts.ts
+  h_ea91e2db23540f 53
+src/core/reply-tool.ts
+  h_ea91e2db23540f 1-78
+tests/ci/review.test.ts
+  h_ea91e2db23540f 43-56,64,96-97,110,149-158,415-470
+tests/core/reply-tool.test.ts
+  h_ea91e2db23540f 1-60
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "79ca96d8122440c0f1dbe36db695136674852bc6",
+  "prompts": {},
+  "humans": {
+    "h_ea91e2db23540f": {
+      "author": "Emre Şafak <3928300+esafak@users.noreply.github.com>"
+    }
+  }
+}
