@@ -62,6 +62,12 @@ describe("GitHubClient", () => {
       body: JSON.stringify({ query: githubGraphqlDocuments.resolveThread, variables: { id: "thread-1" } }),
     }));
   });
+  it("updates a review comment", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(response({ id: 9, body: "updated" }));
+    vi.stubGlobal("fetch", fetchMock);
+    await new GitHubClient("token").updateReviewComment("owner/repo", 42, 9, "updated");
+    expect(fetchMock).toHaveBeenCalledWith("https://api.github.com/repos/owner/repo/pulls/comments/9", expect.objectContaining({ method: "PATCH", body: JSON.stringify({ body: "updated" }) }));
+  });
   it("lists pull request issue comments separately from review comments", async () => {
     const fetchMock = vi.fn().mockResolvedValue(response([{ id: 1, body: "marker" }]));
     vi.stubGlobal("fetch", fetchMock);

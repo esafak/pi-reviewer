@@ -8,6 +8,7 @@ export interface ReplyClient {
   listThreads(repo: string, number: number): Promise<ReviewThread[]>;
   getPullRequest(repo: string, number: number): Promise<PullRequest>;
   reply(repo: string, number: number, comment: number, body: string): Promise<ReviewComment>;
+  updateReviewComment(repo: string, number: number, comment: number, body: string): Promise<ReviewComment>;
   resolveThread(threadId: string): Promise<unknown>;
   createReviewCommentReaction(repo: string, number: number, comment: number, content: string): Promise<{ id: number; content: string }>;
 }
@@ -41,10 +42,16 @@ export async function handleReply(options: ReplyHandlerOptions): Promise<boolean
     if (pullRequest.head.sha !== event.headSha) return false;
     const existingReply = replyComments.find(c => c.user?.login === identity.login && decodeReplyMarker(c.body)?.commentId === commentId && decodeReplyMarker(c.body)?.parentId === parentCommentId && decodeReplyMarker(c.body)?.threadId === thread.id);
     if (existingReply) {
-      if (decodeStatusMarker(existingReply.body)?.status !== "RESOLVED") return false;
+      const existingStatus = decodeStatusMarker(existingReply.body);
+      if (!existingStatus || existingStatus.targetSha !== pullRequest.head.sha || !["STILL_OPEN", "RESOLVED"].includes(existingStatus.status)) return false;
       const latest = await github.getPullRequest(repo, event.pr!);
       if (latest.head.sha !== pullRequest.head.sha) return false;
-      await github.resolveThread(thread.id);
+      if (existingStatus.status === "STILL_OPEN") {
+        await github.resolveThread(thread.id);
+        await github.updateReviewComment(repo, event.pr!, existingReply.id, existingReply.body.replace(/"status":"STILL_OPEN"/, '"status":"RESOLVED"'));
+      } else {
+        await github.resolveThread(thread.id);
+      }
       return true;
     }
     const nearby = replyComments.filter(c => thread.comments.nodes.some(n => n.id === c.id)).sort((a, b) => a.id - b.id).slice(-12).map(c => `${c.user?.login ?? "unknown"}: ${c.body}`).join("\n");
@@ -57,20 +64,27 @@ export async function handleReply(options: ReplyHandlerOptions): Promise<boolean
     } else {
       const freshReply = freshComments.find(c => c.user?.login === identity.login && decodeReplyMarker(c.body)?.commentId === commentId && decodeReplyMarker(c.body)?.parentId === parentCommentId && decodeReplyMarker(c.body)?.threadId === thread.id);
       if (freshReply) {
-        if (action.action !== "resolve" || decodeStatusMarker(freshReply.body)?.status !== "RESOLVED") return false;
+        const freshStatus = decodeStatusMarker(freshReply.body);
+        if (action.action !== "resolve" || !freshStatus || freshStatus.targetSha !== pullRequest.head.sha || !["STILL_OPEN", "RESOLVED"].includes(freshStatus.status)) return false;
         const latest = await github.getPullRequest(repo, event.pr!);
         if (latest.head.sha !== pullRequest.head.sha) return false;
-        await github.resolveThread(thread.id);
+        if (freshStatus.status === "STILL_OPEN") {
+          await github.resolveThread(thread.id);
+          await github.updateReviewComment(repo, event.pr!, freshReply.id, freshReply.body.replace(/"status":"STILL_OPEN"/, '"status":"RESOLVED"'));
+        } else {
+          await github.resolveThread(thread.id);
+        }
         return true;
       }
       const lifecycle = action.action === "resolve"
-        ? `\n<!-- pi-reviewer:status:v1 ${JSON.stringify({ findingId: parentCommentId, targetSha: pullRequest.head.sha, status: "RESOLVED" })} -->`
+        ? `\n<!-- pi-reviewer:status:v1 ${JSON.stringify({ findingId: parentCommentId, targetSha: pullRequest.head.sha, status: "STILL_OPEN" })} -->`
         : "";
-      await github.reply(repo, event.pr!, parentCommentId, `${replyMarker(commentId, parentCommentId, thread.id)}${lifecycle}\n${action.body}`);
+      const posted = await github.reply(repo, event.pr!, parentCommentId, `${replyMarker(commentId, parentCommentId, thread.id)}${lifecycle}\n${action.body}`);
       if (action.action === "resolve") {
         const latest = await github.getPullRequest(repo, event.pr!);
         if (latest.head.sha !== pullRequest.head.sha) return false;
         await github.resolveThread(thread.id);
+        await github.updateReviewComment(repo, event.pr!, posted.id, posted.body.replace(/"status":"STILL_OPEN"/, '"status":"RESOLVED"'));
       }
     }
     return true;

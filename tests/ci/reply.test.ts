@@ -18,11 +18,13 @@ function client(comments: ReviewComment[] = [root, triggering], current = pr) {
   });
   const createReviewCommentReaction = vi.fn(async () => ({ id: 11, content: "+1" }));
   const resolveThread = vi.fn(async () => undefined);
+  const updateReviewComment = vi.fn(async (_repo: string, _number: number, id: number, body: string) => ({ id, body } as ReviewComment));
   return {
     listComments: vi.fn(async () => [...all]),
     listThreads: vi.fn(async () => [thread]),
     getPullRequest: vi.fn(async () => current),
     reply,
+    updateReviewComment,
     resolveThread,
     createReviewCommentReaction,
   };
@@ -51,25 +53,57 @@ describe("review-comment reply action path", () => {
     const generate = vi.fn(async () => ({ action: "resolve", body: "I am withdrawing this concern." }));
 
     expect(await handleReply({ event, repo: "owner/repo", pullRequest: pr, identity: { login: "reviewer[bot]" }, github, generate })).toBe(true);
-    expect(github.reply).toHaveBeenCalledWith("owner/repo", 42, 8, `${replyMarker(9, 8, "thread-1")}\n<!-- pi-reviewer:status:v1 {"findingId":8,"targetSha":"head","status":"RESOLVED"} -->\nI am withdrawing this concern.`);
+    expect(github.reply).toHaveBeenCalledWith("owner/repo", 42, 8, `${replyMarker(9, 8, "thread-1")}\n<!-- pi-reviewer:status:v1 {"findingId":8,"targetSha":"head","status":"STILL_OPEN"} -->\nI am withdrawing this concern.`);
+    expect(github.updateReviewComment).toHaveBeenCalledWith("owner/repo", 42, 10_002, `${replyMarker(9, 8, "thread-1")}\n<!-- pi-reviewer:status:v1 {"findingId":8,"targetSha":"head","status":"RESOLVED"} -->\nI am withdrawing this concern.`);
     expect(github.resolveThread).toHaveBeenCalledWith("thread-1");
+    expect(github.resolveThread.mock.invocationCallOrder[0]).toBeLessThan(github.updateReviewComment.mock.invocationCallOrder[0]);
+  });
+  it("does not mark a reply resolved when thread resolution fails", async () => {
+    const github = client();
+    github.resolveThread.mockRejectedValueOnce(new Error("resolve failed"));
+    const generate = vi.fn(async () => ({ action: "resolve", body: "I am withdrawing this concern." }));
+
+    expect(await handleReply({ event, repo: "owner/repo", pullRequest: pr, identity: { login: "reviewer[bot]" }, github, generate })).toBe(false);
+    expect(github.reply).toHaveBeenCalledWith("owner/repo", 42, 8, expect.stringContaining('"status":"STILL_OPEN"'));
+    expect(github.updateReviewComment).not.toHaveBeenCalled();
   });
   it("retries resolution without duplicating an already-posted resolve reply", async () => {
     const github = client();
-    const body = `${replyMarker(9, 8, "thread-1")}\n<!-- pi-reviewer:status:v1 {"findingId":8,"targetSha":"head","status":"RESOLVED"} -->\nI am withdrawing this concern.`;
+    const body = `${replyMarker(9, 8, "thread-1")}\n<!-- pi-reviewer:status:v1 {"findingId":8,"targetSha":"head","status":"STILL_OPEN"} -->\nI am withdrawing this concern.`;
     github.listComments.mockResolvedValue([root, triggering, { id: 10, body, in_reply_to_id: 8, user: { login: "reviewer[bot]" } }]);
 
     expect(await handleReply({ event, repo: "owner/repo", pullRequest: pr, identity: { login: "reviewer[bot]" }, github, generate: vi.fn() })).toBe(true);
     expect(github.reply).not.toHaveBeenCalled();
+    expect(github.updateReviewComment).toHaveBeenCalled();
     expect(github.resolveThread).toHaveBeenCalledWith("thread-1");
   });
   it("does not retry resolution for a stale event", async () => {
     const github = client();
-    const body = `${replyMarker(9, 8, "thread-1")}\n<!-- pi-reviewer:status:v1 {"findingId":8,"targetSha":"head","status":"RESOLVED"} -->\nI am withdrawing this concern.`;
+    const body = `${replyMarker(9, 8, "thread-1")}\n<!-- pi-reviewer:status:v1 {"findingId":8,"targetSha":"head","status":"STILL_OPEN"} -->\nI am withdrawing this concern.`;
     github.listComments.mockResolvedValue([root, triggering, { id: 10, body, in_reply_to_id: 8, user: { login: "reviewer[bot]" } }]);
 
     expect(await handleReply({ event: { ...event, headSha: "old-head" }, repo: "owner/repo", pullRequest: pr, identity: { login: "reviewer[bot]" }, github, generate: vi.fn() })).toBe(false);
     expect(github.reply).not.toHaveBeenCalled();
+    expect(github.resolveThread).not.toHaveBeenCalled();
+  });
+  it("does not retry when the existing resolve marker targets another head", async () => {
+    const github = client();
+    const body = `${replyMarker(9, 8, "thread-1")}\n<!-- pi-reviewer:status:v1 {"findingId":8,"targetSha":"old-head","status":"STILL_OPEN"} -->\nI am withdrawing this concern.`;
+    github.listComments.mockResolvedValue([root, triggering, { id: 10, body, in_reply_to_id: 8, user: { login: "reviewer[bot]" } }]);
+
+    expect(await handleReply({ event, repo: "owner/repo", pullRequest: pr, identity: { login: "reviewer[bot]" }, github, generate: vi.fn() })).toBe(false);
+    expect(github.updateReviewComment).not.toHaveBeenCalled();
+    expect(github.resolveThread).not.toHaveBeenCalled();
+  });
+  it("does not leave a resolved marker when the head moves after posting", async () => {
+    const github = client();
+    github.getPullRequest.mockResolvedValueOnce(pr).mockResolvedValueOnce({ ...pr, head: { ...pr.head, sha: "new-head" } });
+    const generate = vi.fn(async () => ({ action: "resolve", body: "I am withdrawing this concern." }));
+
+    expect(await handleReply({ event, repo: "owner/repo", pullRequest: pr, identity: { login: "reviewer[bot]" }, github, generate })).toBe(false);
+    expect(github.reply).toHaveBeenCalledWith("owner/repo", 42, 8, expect.stringContaining('"status":"STILL_OPEN"'));
+    expect(github.reply).not.toHaveBeenCalledWith("owner/repo", 42, 8, expect.stringContaining('"status":"RESOLVED"'));
+    expect(github.updateReviewComment).not.toHaveBeenCalled();
     expect(github.resolveThread).not.toHaveBeenCalled();
   });
   it("reacts to the triggering user comment, not the root finding", async () => {
