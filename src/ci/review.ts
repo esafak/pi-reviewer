@@ -9,6 +9,7 @@ import { loadDocContext } from "../core/doc-context.js";
 import { sendOutput, extractLastAssistantText, normalizeFinding, type OutputTarget, type Severity } from "../core/output.js";
 import { buildJSONSystemPrompt, buildUserPrompt, selectResolvedFindings, type MinSeverity, type ActiveFindingContext, type ResolvedFindingContext } from "../core/prompt-builder.js";
 import { createReviewTool } from "../core/review-tool.js";
+import { ALLOWED_REACTIONS, createReplyTool, type ReplyAction } from "../core/reply-tool.js";
 import { normalizeMarkdownText } from "../core/ai-fix-footer.js";
 import { PROMPTS } from "../core/prompts.js";
 import type { ThinkingLevel } from "../core/config.js";
@@ -58,11 +59,7 @@ export function truncateReplyInput(value: string, limit: number): string {
   return value.length <= limit ? value : `${value.slice(0, limit)}\n[truncated]`;
 }
 
-export const ALLOWED_REACTIONS = ["+1", "-1", "laugh", "confused", "heart", "hooray", "rocket", "eyes"] as const;
-export type ReplyAction =
-  | { action: "react"; content: typeof ALLOWED_REACTIONS[number] }
-  | { action: "reply"; body: string }
-  | { action: "resolve"; body: string };
+export { ALLOWED_REACTIONS, type ReplyAction } from "../core/reply-tool.js";
 
 const PROVIDER_API_KEY_ENV: Record<string, string> = {
   anthropic: "ANTHROPIC_API_KEY",
@@ -307,9 +304,48 @@ export async function generateReplyResponse(options: ReplyOptions & { model?: st
   const prompt = buildReplyPrompt(options);
   const models = builtinModels();
   const provider = modelStr.slice(0, slash);
-  const agent = new Agent({ initialState: { systemPrompt: "You are Pi Reviewer’s concise thread assistant.", model: resolvedModel, tools: [], thinkingLevel: options.thinking ?? "off" }, streamFn: models.streamSimple.bind(models), getApiKey: async () => { const key = resolveProviderApiKey(provider, options.piApiKey); if (!key) throw new Error(`No API key is set for provider "${provider}".`); return key; } });
+  const { tool: replyTool, getResult } = createReplyTool();
+  const agent = new Agent({ initialState: { systemPrompt: "You are Pi Reviewer’s concise thread assistant.", model: resolvedModel, tools: [replyTool], thinkingLevel: options.thinking ?? "off" }, streamFn: models.streamSimple.bind(models), getApiKey: async () => { const key = resolveProviderApiKey(provider, options.piApiKey); if (!key) throw new Error(`No API key is set for provider "${provider}".`); return key; } });
   let answer = "";
-  await new Promise<void>((resolve, reject) => { let unsubscribe: (() => void) | undefined; unsubscribe = agent.subscribe((event: unknown) => { if ((event as { type?: string })?.type !== "agent_end") return; const e = event as { messages?: unknown[]; stopReason?: string; errorMessage?: string }; const lastAssistant = Array.isArray(e.messages) ? [...e.messages].reverse().find((message) => (message as { role?: string })?.role === "assistant") as { stopReason?: string; errorMessage?: string } | undefined : undefined; const errorMessage = (e.stopReason === "error" ? e.errorMessage : undefined) ?? (lastAssistant?.stopReason === "error" ? lastAssistant.errorMessage : undefined); if (errorMessage) { reject(new Error(`Agent failed: ${errorMessage}`)); return; } answer = extractLastAssistantText(e.messages); unsubscribe?.(); if (answer) resolve(); else reject(new Error("Agent returned an empty response")); }); agent.prompt(prompt).catch(reject); });
+  let structuredAction: ReplyAction | undefined;
+  await new Promise<void>((resolve, reject) => {
+    let unsubscribe: (() => void) | undefined;
+    unsubscribe = agent.subscribe((event: unknown) => {
+      if ((event as { type?: string })?.type !== "agent_end") return;
+      const e = event as { messages?: unknown[]; stopReason?: string; errorMessage?: string };
+      const lastAssistant = Array.isArray(e.messages)
+        ? [...e.messages].reverse().find((message) => (message as { role?: string })?.role === "assistant") as { stopReason?: string; errorMessage?: string } | undefined
+        : undefined;
+      const errorMessage = (e.stopReason === "error" ? e.errorMessage : undefined) ?? (lastAssistant?.stopReason === "error" ? lastAssistant.errorMessage : undefined);
+      if (errorMessage) {
+        reject(new Error(`Agent failed: ${errorMessage}`));
+        return;
+      }
+
+      const toolResult = getResult();
+      if (toolResult) {
+        structuredAction = parseReplyAction(toolResult);
+        unsubscribe?.();
+        if (!structuredAction) {
+          reject(new Error("Agent returned a malformed reply action"));
+        } else {
+          console.log("[pi-reviewer] conversation agent completed via submit_reply tool");
+          resolve();
+        }
+        return;
+      }
+
+      answer = extractLastAssistantText(e.messages);
+      unsubscribe?.();
+      if (answer) {
+        console.warn("[pi-reviewer] submit_reply was not called; using legacy JSON text fallback");
+        resolve();
+      }
+      else reject(new Error("Agent returned an empty response"));
+    });
+    agent.prompt(prompt).catch(reject);
+  });
+  if (structuredAction) return structuredAction;
   const action = parseReplyAction(answer);
   if (!action) throw new Error("Agent returned a malformed reply action");
   return action;
