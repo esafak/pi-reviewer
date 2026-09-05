@@ -96,7 +96,7 @@ jobs:
           printf 'PI_API_KEY=%s\n' "$key" >> "$GITHUB_ENV"
 
       - name: Review
-        uses: esafak/pi-reviewer@f1c00074ad5af273b8799eca5f60ae2c93b45a07
+        uses: esafak/pi-reviewer@c4d3ab4b64c2e0b4e8f8e1e9cea1f2a0a995dc30
         with:
           github-token: ${{ steps.bot-token.outputs.token }}
           pi-api-key: ${{ env.PI_API_KEY }}
