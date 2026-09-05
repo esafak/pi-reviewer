@@ -661,12 +661,12 @@ printf("first\\nsecond")
   it("keeps re-raise provenance intact when a comment moves to the review body", async () => {
     const fetchMock = okFetch();
     vi.stubGlobal("fetch", fetchMock);
-    await sendOutput({ target: "comment", content: "", structuredResult: { summary: "review", comments: [{ file: "src/a.ts", line: 99, side: "RIGHT", severity: "WARN", body: "old issue", resolved_finding_id: "inline:42", re_raise_reason: "MATERIALLY_CHANGED", re_raise_evidence: "behavior changed --> in diff" }] }, githubToken: "t", prNumber: 1, repo: "o/r", commitId: "head", diff: "diff --git a/src/a.ts b/src/a.ts\n--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1,1 +1,1 @@\n-old\n+new\n", resolvedFindings: [{ historicalFindingId: "inline:42", originalBody: "old issue", file: "src/a.ts", line: 99, side: "RIGHT" }] });
+    await sendOutput({ target: "comment", content: "", structuredResult: { summary: "review", comments: [{ file: "src/a.ts", line: 99, side: "RIGHT", severity: "WARN", body: "old issue", resolved_finding_id: "inline:42", re_raise_reason: "MATERIALLY_CHANGED", re_raise_evidence: "behavior changed --> and --!> in diff" }] }, githubToken: "t", prNumber: 1, repo: "o/r", commitId: "head", diff: "diff --git a/src/a.ts b/src/a.ts\n--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1,1 +1,1 @@\n-old\n+new\n", resolvedFindings: [{ historicalFindingId: "inline:42", originalBody: "old issue", file: "src/a.ts", line: 99, side: "RIGHT" }] });
     const payload = JSON.parse((fetchMock.mock.calls[0][1] as { body: string }).body);
     const [marker] = decodeBodyFindingMarkers(payload.body);
     expect(marker?.body.startsWith("<!-- pi-reviewer:re-raise:v1 ")).toBe(true);
     expect(marker?.body).toContain('"reason":"MATERIALLY_CHANGED"');
-    expect(marker?.body).toContain("behavior changed --\\u003e in diff");
+    expect(marker?.body).toContain("behavior changed -\\u002d> and -\\u002d!> in diff");
     expect(payload.body).not.toContain("pi-reviewer :re-raise");
     expect(payload.body).toContain("[`src/a.ts:99 · RIGHT`](https://github.com/o/r/blob/head/src/a.ts#L99)");
     expect(payload.body).toContain("old issue");

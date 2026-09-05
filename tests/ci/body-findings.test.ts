@@ -29,11 +29,13 @@ describe("body finding markers", () => {
   });
 
   it("escapes comment terminators in metadata while preserving the finding text", () => {
-    const value = { ...finding, body: "keep --> visible" };
+    const value = { ...finding, body: "keep --> and --!> visible" };
     const encoded = encodeBodyFindingMarker(value);
-    expect(encoded).not.toContain('"body":"keep --> visible"');
+    const encodedMetadata = encoded.slice(0, encoded.lastIndexOf(" -->"));
+    expect(encodedMetadata).not.toContain("-->");
+    expect(encodedMetadata).not.toContain("--!>");
     expect(decodeBodyFindingMarkers(encoded)[0]).toMatchObject(value);
-    expect(updateBodyFindingMarker(encoded, finding.findingId, "RESOLVED", "head", "fixed")).toContain('"body":"keep --\\u003e visible"');
+    expect(updateBodyFindingMarker(encoded, finding.findingId, "RESOLVED", "head", "fixed")).toContain('"body":"keep -\\u002d> and -\\u002d!> visible"');
     expect(decodeBodyFindingMarkers(updateBodyFindingMarker(encoded, finding.findingId, "RESOLVED", "head", "fixed"))[0]).toMatchObject({ ...value, status: "RESOLVED", targetSha: "head", explanation: "fixed" });
   });
 });
