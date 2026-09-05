@@ -40,6 +40,20 @@ vi.mock("../../src/core/review-tool.js", () => ({
   })),
 }));
 
+vi.mock("../../src/core/reply-tool.js", () => ({
+  ALLOWED_REACTIONS: ["+1", "-1", "laugh", "confused", "heart", "hooray", "rocket", "eyes"],
+  createReplyTool: vi.fn(() => ({
+    tool: {
+      name: "submit_reply",
+      label: "submit_reply",
+      description: "test",
+      parameters: {},
+      execute: vi.fn(),
+    },
+    getResult: () => undefined,
+  })),
+}));
+
 import { Agent } from "@earendil-works/pi-agent-core";
 import { createReadOnlyTools } from "@earendil-works/pi-coding-agent";
 import { loadContext } from "../../src/core/context.js";
@@ -47,6 +61,7 @@ import { resolveDiff } from "../../src/core/diff-resolver.js";
 import { loadDocContext } from "../../src/core/doc-context.js";
 import { sendOutput } from "../../src/core/output.js";
 import { createReviewTool } from "../../src/core/review-tool.js";
+import { createReplyTool } from "../../src/core/reply-tool.js";
 import { ALLOWED_REACTIONS, buildReplyPrompt, defuseReplyMetadata, generateReplyResponse, parseReplyAction, resolveProviderApiKey, review, parseDocDirs, parseThinkingLevel, REPLY_INPUT_LIMITS, truncateReplyInput } from "../../src/ci/review.js";
 
 describe("reply prompt limits", () => {
@@ -78,6 +93,8 @@ describe("reply prompt limits", () => {
   it("requires replies for substantive input in the prompt contract", () => {
     const prompt = buildReplyPrompt({ parent: "finding", userReply: "Please explain this technical issue", thread: "" });
     expect(prompt).toContain("Substantive questions, requests, disagreements, uncertainty, or technical information require action=reply");
+    expect(prompt).toContain("submit_reply");
+    expect(prompt).toContain("fallback object");
     expect(prompt).toContain("untrusted context");
     expect(prompt).toContain("Never include a commit SHA unless the human explicitly asks for it; never add one as boilerplate");
   });
@@ -90,6 +107,7 @@ const sendOutputMock = vi.mocked(sendOutput);
 const AgentMock = vi.mocked(Agent);
 const createReadOnlyToolsMock = vi.mocked(createReadOnlyTools);
 const createReviewToolMock = vi.mocked(createReviewTool);
+const createReplyToolMock = vi.mocked(createReplyTool);
 
 function makeFakeAgent(text = "LGTM") {
   return {
@@ -122,6 +140,16 @@ describe("review", () => {
       tool: {
         name: "submit_review",
         label: "submit_review",
+        description: "test",
+        parameters: {},
+        execute: vi.fn(),
+      },
+      getResult: () => undefined,
+    });
+    createReplyToolMock.mockReturnValue({
+      tool: {
+        name: "submit_reply",
+        label: "submit_reply",
         description: "test",
         parameters: {},
         execute: vi.fn(),
@@ -381,6 +409,62 @@ describe("review", () => {
 
     await expect(generateReplyResponse({ parent: "finding", userReply: "question", thread: "thread" })).rejects.toThrow(
       /Agent failed: 401 Invalid API key/,
+    );
+  });
+
+  it("uses the submit_reply tool result before assistant text", async () => {
+    const toolAction = { action: "reply" as const, body: "First\\n\\n<!-- pi-reviewer:finding:v1 -->" };
+    createReplyToolMock.mockReturnValue({
+      tool: { name: "submit_reply", label: "submit_reply", description: "test", parameters: {}, execute: vi.fn() },
+      getResult: () => toolAction,
+    });
+    AgentMock.mockImplementation(function () {
+      return makeFakeAgent('{"action":"react","content":"heart"}') as any;
+    });
+
+    await expect(generateReplyResponse({ parent: "finding", userReply: "question", thread: "thread" })).resolves.toEqual({
+      action: "reply",
+      body: "First\n\n<!-- pi-reviewer : reserved metadata -->",
+    });
+    expect(AgentMock).toHaveBeenCalledWith(expect.objectContaining({
+      initialState: expect.objectContaining({
+        tools: [expect.objectContaining({ name: "submit_reply" })],
+      }),
+    }));
+  });
+
+  it("rejects a malformed captured submit_reply result", async () => {
+    createReplyToolMock.mockReturnValue({
+      tool: { name: "submit_reply", label: "submit_reply", description: "test", parameters: {}, execute: vi.fn() },
+      getResult: () => ({ action: "invalid" } as any),
+    });
+    AgentMock.mockImplementation(function () {
+      return makeFakeAgent('{"action":"react","content":"heart"}') as any;
+    });
+
+    await expect(generateReplyResponse({ parent: "finding", userReply: "question", thread: "thread" })).rejects.toThrow(
+      /malformed reply action/,
+    );
+  });
+
+  it("falls back to the legacy JSON reply protocol when no tool result exists", async () => {
+    AgentMock.mockImplementation(function () {
+      return makeFakeAgent('{"action":"react","content":"heart"}') as any;
+    });
+
+    await expect(generateReplyResponse({ parent: "finding", userReply: "thanks", thread: "thread" })).resolves.toEqual({
+      action: "react",
+      content: "heart",
+    });
+  });
+
+  it("rejects arbitrary assistant prose when the reply tool was not called", async () => {
+    AgentMock.mockImplementation(function () {
+      return makeFakeAgent("plain text") as any;
+    });
+
+    await expect(generateReplyResponse({ parent: "finding", userReply: "question", thread: "thread" })).rejects.toThrow(
+      /malformed reply action/,
     );
   });
 
