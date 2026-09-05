@@ -58,7 +58,7 @@ describe("resolved finding history", () => {
       comments: [
         { id: 42, body: "<!-- pi-reviewer:finding:v1 -->\nLoki values allow an unsafe configuration.", user: { login: "review-bot" }, path: "charts/loki/values.yaml", line: 42, side: "RIGHT", pull_request_review_id: 5078197836, created_at: "2026-01-01T00:00:00Z" },
         { id: 43, body: "I checked the deployment; this is safe.", user: { login: "maintainer" }, in_reply_to_id: 42, created_at: "2026-01-01T00:01:00Z" },
-        { id: 44, body: "<!-- pi-reviewer:status:v1 {\"findingId\":42,\"targetSha\":\"resolved-sha\",\"status\":\"RESOLVED\"} --> Resolved", user: { login: "review-bot" }, in_reply_to_id: 42, created_at: "2026-01-01T00:02:00Z" },
+        { id: 44, body: `${replyMarker(9, 8, "thread-42")}\n<!-- pi-reviewer:status:v1 {"findingId":42,"targetSha":"resolved-sha","status":"RESOLVED"} --> Resolved`, user: { login: "review-bot" }, in_reply_to_id: 42, created_at: "2026-01-01T00:02:00Z" },
         { id: 45, body: "<!-- pi-reviewer:finding:v1 -->\nactive", user: { login: "review-bot" }, path: "src/a.ts", line: 1, side: "RIGHT", created_at: "2026-01-01T00:03:00Z" }
       ],
       threads: [{ id: "thread-42", isResolved: true, comments: { nodes: [{ id: 42 }, { id: 43 }, { id: 44 }] } }]
@@ -67,6 +67,7 @@ describe("resolved finding history", () => {
     expect(result.resolvedFindings.map(f => f.historicalFindingId)).toEqual(["inline:42", "body:9001"]);
     expect(result.resolvedFindings[0].conversation).toContain("maintainer: I checked");
     expect(result.resolvedFindings[0].resolutionTargetSha).toBe("resolved-sha");
+    expect(result.resolvedFindings[0].resolutionExplanation).toBe("Resolved");
   });
 
   it("uses thread structure instead of quoted marker text to identify roots", () => {

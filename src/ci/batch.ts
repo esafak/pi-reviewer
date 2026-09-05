@@ -61,7 +61,7 @@ export function updateBodyFindingMarker(body: string, findingId: number, status:
   });
 }
 /** Decodes bot lifecycle metadata without relying on JSON property ordering. */
-function decodeStatusMarker(body: string): { targetSha: string; status: FindingUpdate["status"] } | undefined {
+export function decodeStatusMarker(body: string): { targetSha: string; status: FindingUpdate["status"] } | undefined {
   const match = body.match(statusMarker);
   if (!match) return undefined;
   try {
@@ -90,7 +90,7 @@ export function collectFindingHistory(input: { reviews: FindingHistorySource[]; 
     const resolutionReply = input.comments.filter(reply => reply.in_reply_to_id === c.id && reply.user?.login === input.login && decodeStatusMarker(reply.body)).sort((a, b) => a.id - b.id).at(-1);
     const resolution = resolutionReply ? decodeStatusMarker(resolutionReply.body) : undefined;
     const batch = c.pull_request_review_id ? batchByReview.get(c.pull_request_review_id) : undefined;
-    return { historicalFindingId: `inline:${c.id}`, commentId: c.id, threadId, kind: "inline" as const, file: c.path, line: c.line, side: c.side, body: c.body, originalBody: c.body.replace(piReviewerFindingMarker, "").trim(), sourceBatch: batch ? `${batch.fromSha}..${batch.toSha}` : undefined, resolutionTargetSha: resolution?.targetSha, resolutionExplanation: resolutionReply?.body.replace(statusMarker, "").trim(), conversation };
+    return { historicalFindingId: `inline:${c.id}`, commentId: c.id, threadId, kind: "inline" as const, file: c.path, line: c.line, side: c.side, body: c.body, originalBody: c.body.replace(piReviewerFindingMarker, "").trim(), sourceBatch: batch ? `${batch.fromSha}..${batch.toSha}` : undefined, resolutionTargetSha: resolution?.targetSha, resolutionExplanation: resolutionReply?.body.replace(statusMarker, "").replace(/<!--\s*pi-reviewer:reply:v1\s+\{[^\n]*\}\s*-->/, "").trim(), conversation };
   });
   const bodySources = [...input.reviews.filter(r => r.user?.login === input.login).map(r => ({ ...r, reviewId: r.id, issueCommentId: undefined })), ...input.issueComments.filter(r => r.user?.login === input.login).map(r => ({ ...r, reviewId: undefined, issueCommentId: r.id }))];
   const body = bodySources.flatMap(r => decodeBodyFindingMarkers(r.body).map(f => { const batch = decodeBatchMarker(r.body); return { historicalFindingId: `body:${f.findingId}`, commentId: f.findingId, threadId: undefined, reviewId: r.reviewId, issueCommentId: r.issueCommentId, bodyFinding: true, kind: "body" as const, reviewBody: r.body ?? "", file: f.file, line: f.line, side: f.side, body: f.body, originalBody: f.body, status: f.status, latestStatus: f.status === "PARTIALLY_RESOLVED" ? "PARTIALLY_RESOLVED" : undefined, sourceBatch: batch ? `${batch.fromSha}..${batch.toSha}` : undefined, resolutionTargetSha: f.targetSha, resolutionExplanation: f.explanation, conversation: (r.body ?? "").slice(0, 8000) }; }));

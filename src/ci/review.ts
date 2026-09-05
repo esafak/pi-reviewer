@@ -59,7 +59,10 @@ export function truncateReplyInput(value: string, limit: number): string {
 }
 
 export const ALLOWED_REACTIONS = ["+1", "-1", "laugh", "confused", "heart", "hooray", "rocket", "eyes"] as const;
-export type ReplyAction = { action: "react"; content: typeof ALLOWED_REACTIONS[number] } | { action: "reply"; body: string };
+export type ReplyAction =
+  | { action: "react"; content: typeof ALLOWED_REACTIONS[number] }
+  | { action: "reply"; body: string }
+  | { action: "resolve"; body: string };
 
 const PROVIDER_API_KEY_ENV: Record<string, string> = {
   anthropic: "ANTHROPIC_API_KEY",
@@ -90,7 +93,9 @@ export function parseReplyAction(raw: unknown): ReplyAction | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
   const v = value as Record<string, unknown>;
   if (v.action === "react" && typeof v.content === "string" && ALLOWED_REACTIONS.includes(v.content as typeof ALLOWED_REACTIONS[number]) && Object.keys(v).every(k => k === "action" || k === "content")) return { action: "react", content: v.content as typeof ALLOWED_REACTIONS[number] };
-  if (v.action === "reply" && typeof v.body === "string" && v.body.trim() && Object.keys(v).every(k => k === "action" || k === "body")) return { action: "reply", body: defuseReplyMetadata(normalizeMarkdownText(v.body)).slice(0, 4000) };
+  if ((v.action === "reply" || v.action === "resolve") && typeof v.body === "string" && v.body.trim() && Object.keys(v).every(k => k === "action" || k === "body")) {
+    return { action: v.action, body: defuseReplyMetadata(normalizeMarkdownText(v.body)).slice(0, 4000) } as ReplyAction;
+  }
   return undefined;
 }
 

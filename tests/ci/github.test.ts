@@ -51,6 +51,23 @@ describe("GitHubClient", () => {
     await new GitHubClient("token").createReviewCommentReaction("owner/repo", 42, 99, "eyes");
     expect(fetchMock).toHaveBeenCalledWith("https://api.github.com/repos/owner/repo/pulls/42/comments/99/reactions", expect.objectContaining({ method: "POST", body: JSON.stringify({ content: "eyes" }) }));
   });
+  it("resolves a review thread through GraphQL", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(response({ data: { resolveReviewThread: { thread: { id: "thread-1", isResolved: true } } } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await new GitHubClient("token").resolveThread("thread-1");
+
+    expect(fetchMock).toHaveBeenCalledWith("https://api.github.com/graphql", expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({ query: githubGraphqlDocuments.resolveThread, variables: { id: "thread-1" } }),
+    }));
+  });
+  it("updates a review comment", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(response({ id: 9, body: "updated" }));
+    vi.stubGlobal("fetch", fetchMock);
+    await new GitHubClient("token").updateReviewComment("owner/repo", 42, 9, "updated");
+    expect(fetchMock).toHaveBeenCalledWith("https://api.github.com/repos/owner/repo/pulls/comments/9", expect.objectContaining({ method: "PATCH", body: JSON.stringify({ body: "updated" }) }));
+  });
   it("lists pull request issue comments separately from review comments", async () => {
     const fetchMock = vi.fn().mockResolvedValue(response([{ id: 1, body: "marker" }]));
     vi.stubGlobal("fetch", fetchMock);
