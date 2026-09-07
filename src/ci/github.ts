@@ -81,6 +81,7 @@ export class GitHubClient {
   createReviewCommentReaction(repo: string, number: number, comment: number, content: string) { return this.request<{ id: number; content: string }>(`/repos/${repo}/pulls/${number}/comments/${comment}/reactions`, { method: "POST", body: JSON.stringify({ content }) }); }
   createReaction(repo: string, number: number, content = "+1") { return this.request<{ id: number; content: string }>(`/repos/${repo}/issues/${number}/reactions`, { method: "POST", body: JSON.stringify({ content }) }); }
   listReactions(repo: string, number: number) { return this.list<Reaction>(`/repos/${repo}/issues/${number}/reactions`); }
+  deleteReaction(repo: string, reaction: number) { return this.request<void>(`/repos/${repo}/issues/reactions/${reaction}`, { method: "DELETE" }); }
   async graphql<T>(query: string, variables: Record<string, unknown>) { const result = await this.request<{ data?: T; errors?: { message: string }[] }>("https://api.github.com/graphql", { method: "POST", body: JSON.stringify({ query, variables }) }); if (result.errors?.length) throw new Error(result.errors.map(e => e.message).join("; ")); return result.data as T; }
   resolveThread(threadId: string) { return this.graphql(githubGraphqlDocuments.resolveThread, { id: threadId }); }
   async listThreads(repo: string, number: number) {

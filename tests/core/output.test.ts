@@ -715,6 +715,35 @@ printf("first\\nsecond")
     ]);
   });
 
+  it("removes the reviewer's stale thumbs-up after posting a finding", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue("") })
+      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue(JSON.stringify({ login: "review-bot" })) })
+      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue(JSON.stringify([
+        { id: 7, content: "+1", user: { login: "review-bot" } },
+        { id: 8, content: "+1", user: { login: "human" } },
+      ])) })
+      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue("") });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await sendOutput({ target: "comment", structuredResult: { summary: "Needs fixes", comments: [{ file: "src/a.ts", line: 1, side: "RIGHT", severity: "WARN", body: "problem" }] }, githubToken: "token", prNumber: 42, repo: "owner/repo", reactOnNoFindings: true });
+
+    expect(fetchMock).toHaveBeenCalledWith("https://api.github.com/repos/owner/repo/issues/reactions/7", expect.objectContaining({ method: "DELETE" }));
+    expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("/issues/reactions/8"))).toBe(false);
+    expect(fetchMock.mock.calls.findIndex(([url]) => String(url).includes("/issues/42/comments"))).toBeLessThan(fetchMock.mock.calls.findIndex(([url]) => String(url).endsWith("/issues/reactions/7")));
+  });
+
+  it("does not fail the posted review when stale reaction cleanup fails", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue("") })
+      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue(JSON.stringify({ login: "review-bot" })) })
+      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue(JSON.stringify([{ id: 7, content: "+1", user: { login: "review-bot" } }])) })
+      .mockResolvedValueOnce({ ok: false, status: 403, statusText: "Forbidden", text: vi.fn().mockResolvedValue("") });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(sendOutput({ target: "comment", structuredResult: { summary: "Needs fixes", comments: [{ file: "src/a.ts", line: 1, side: "RIGHT", severity: "WARN", body: "problem" }] }, githubToken: "token", prNumber: 42, repo: "owner/repo", reactOnNoFindings: true })).resolves.toMatchObject({ fallback: true });
+  });
+
   it("includes every actionable inline finding in one parent Fixit prompt", async () => {
     const fetchMock = okFetch();
     vi.stubGlobal("fetch", fetchMock);
