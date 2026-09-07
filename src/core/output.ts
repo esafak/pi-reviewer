@@ -95,6 +95,23 @@ export interface ExistingFinding { commentId: number; threadId?: string; body?: 
 
 const FINDING_STATUSES = ["RESOLVED", "PARTIALLY_RESOLVED", "STILL_OPEN"] as const;
 
+/** Best-effort cleanup of the reviewer's stale PR-level approval reaction. */
+async function clearStaleThumbsUp(token: string, repo: string, prNumber: number): Promise<void> {
+  const client = new GitHubClient(token);
+  try {
+    const identity = await client.getUser();
+    const reactions = await client.listReactions(repo, prNumber);
+    const ownThumbsUps = reactions.filter(reaction => reaction.content === "+1" && reaction.user?.login === identity.login);
+    const deletions = await Promise.allSettled(ownThumbsUps.map(reaction => client.deleteReaction(repo, reaction.id)));
+    const failed = deletions.filter(result => result.status === "rejected");
+    if (failed.length > 0) console.warn(`[pi-reviewer] could not remove ${failed.length} stale thumbs-up reaction(s)`);
+    const removed = ownThumbsUps.length - failed.length;
+    if (removed > 0) console.log(`[pi-reviewer] findings detected — removed ${removed} stale thumbs-up reaction(s) from the PR`);
+  } catch (error) {
+    console.warn(`[pi-reviewer] could not remove stale thumbs-up reaction: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
 function findingUpdateRejection(update: unknown, allowedFindingIds?: ReadonlySet<number>): { update?: FindingUpdate; reason: string; commentId: unknown; status: unknown } {
   const value = update && typeof update === "object" ? update as Record<string, unknown> : {};
   const commentId = value.comment_id;
@@ -788,6 +805,7 @@ export async function sendOutput(options: OutputOptions): Promise<OutputMetadata
         if (!findingUpdatesReconciled && result.finding_updates?.length && options.existingFindings && options.githubToken && options.repo && options.prNumber && options.commitId) {
           await reconcileFindingUpdates({ token: options.githubToken, repo: options.repo, prNumber: options.prNumber, targetSha: options.commitId, updates: result.finding_updates, findings: options.existingFindings });
         }
+        if (options.reactOnNoFindings && comments.length > 0) await clearStaleThumbsUp(options.githubToken, options.repo, options.prNumber);
         const posted = await responseJson(reviewResponse);
         return { reviewId: posted?.id, commentIds: posted?.comments?.flatMap(c => c.id ? [c.id] : []) ?? [], fallback: false };
       }
@@ -824,6 +842,7 @@ export async function sendOutput(options: OutputOptions): Promise<OutputMetadata
             }
           }
           if (!findingUpdatesReconciled && result.finding_updates?.length && options.existingFindings && options.githubToken && options.repo && options.prNumber && options.commitId) await reconcileFindingUpdates({ token: options.githubToken, repo: options.repo, prNumber: options.prNumber, targetSha: options.commitId, updates: result.finding_updates, findings: options.existingFindings });
+          if (options.reactOnNoFindings && comments.length > 0) await clearStaleThumbsUp(options.githubToken, options.repo, options.prNumber);
           const posted = await responseJson(reviewResponse);
           return { reviewId: posted?.id, commentIds: posted?.comments?.flatMap(c => c.id ? [c.id] : []) ?? [], fallback: true };
         }
@@ -851,6 +870,7 @@ export async function sendOutput(options: OutputOptions): Promise<OutputMetadata
     }
 
     console.log("[pi-reviewer] review comment posted");
+    if (options.reactOnNoFindings && comments.length > 0) await clearStaleThumbsUp(options.githubToken, options.repo, options.prNumber);
     const posted = await responseJson(issueResponse);
     return { commentIds: posted?.id ? [posted.id] : [], fallback: true };
   }

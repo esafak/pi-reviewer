@@ -45,6 +45,12 @@ describe("GitHubClient", () => {
       expect.objectContaining({ method: "POST", body: JSON.stringify({ content: "+1" }) }),
     );
   });
+  it("deletes a pull request reaction", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(response(undefined));
+    vi.stubGlobal("fetch", fetchMock);
+    await new GitHubClient("token").deleteReaction("owner/repo", 7);
+    expect(fetchMock).toHaveBeenCalledWith("https://api.github.com/repos/owner/repo/issues/reactions/7", expect.objectContaining({ method: "DELETE" }));
+  });
   it("creates a reaction on a specific review comment", async () => {
     const fetchMock = vi.fn().mockResolvedValue(response({ id: 8, content: "eyes" }));
     vi.stubGlobal("fetch", fetchMock);
