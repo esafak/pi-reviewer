@@ -74,6 +74,12 @@ describe("GitHubClient", () => {
     await new GitHubClient("token").updateReviewComment("owner/repo", 42, 9, "updated");
     expect(fetchMock).toHaveBeenCalledWith("https://api.github.com/repos/owner/repo/pulls/comments/9", expect.objectContaining({ method: "PATCH", body: JSON.stringify({ body: "updated" }) }));
   });
+  it("updates an issue comment", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(response({ id: 10, body: "updated" }));
+    vi.stubGlobal("fetch", fetchMock);
+    await new GitHubClient("token").updateIssueComment("owner/repo", 42, 10, "updated");
+    expect(fetchMock).toHaveBeenCalledWith("https://api.github.com/repos/owner/repo/issues/comments/10", expect.objectContaining({ method: "PATCH", body: JSON.stringify({ body: "updated" }) }));
+  });
   it("lists pull request issue comments separately from review comments", async () => {
     const fetchMock = vi.fn().mockResolvedValue(response([{ id: 1, body: "marker" }]));
     vi.stubGlobal("fetch", fetchMock);
