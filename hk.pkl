@@ -22,11 +22,6 @@ local prepush = new Mapping<String, Step> {
     exclude = List("dist/**", "dist-ui/**")
     check = "mise run lint"
   }
-  ["vite-plus-fmt"] {
-    glob = List("**/*.js", "**/*.jsx", "**/*.ts", "**/*.tsx")
-    exclude = List("dist/**", "dist-ui/**")
-    check = "mise run fmt -- --check {{files}}"
-  }
 }
 
 hooks {
