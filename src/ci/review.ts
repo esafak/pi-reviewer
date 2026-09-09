@@ -55,6 +55,7 @@ export function parseDocDirs(raw: string | undefined): string[] {
 }
 
 export const REPLY_INPUT_LIMITS = { parent: 4_000, userReply: 4_000, thread: 8_000 } as const;
+export const REPLY_GENERATION_TIMEOUT_MS = 3 * 60 * 1_000;
 export function truncateReplyInput(value: string, limit: number): string {
   return value.length <= limit ? value : `${value.slice(0, limit)}\n[truncated]`;
 }
@@ -294,7 +295,7 @@ export async function review(options: ReviewOptions): Promise<void> {
 }
 
 /** Generate only a short conversational answer; deliberately has no review tools or diff. */
-export async function generateReplyResponse(options: ReplyOptions & { model?: string; thinking?: ThinkingLevel; piApiKey?: string }): Promise<ReplyAction> {
+export async function generateReplyResponse(options: ReplyOptions & { model?: string; thinking?: ThinkingLevel; piApiKey?: string; replyTimeoutMs?: number }): Promise<ReplyAction> {
   const modelStr = options.model ?? process.env.PI_REVIEWER_MODEL;
   if (!modelStr) throw new Error("No model configured.");
   const slash = modelStr.indexOf("/");
@@ -310,7 +311,18 @@ export async function generateReplyResponse(options: ReplyOptions & { model?: st
   let structuredAction: ReplyAction | undefined;
   await new Promise<void>((resolve, reject) => {
     let unsubscribe: (() => void) | undefined;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let settled = false;
+    const settle = (error?: Error) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      unsubscribe?.();
+      unsubscribe = undefined;
+      if (error) reject(error); else resolve();
+    };
     unsubscribe = agent.subscribe((event: unknown) => {
+      if (settled) return;
       if ((event as { type?: string })?.type !== "agent_end") return;
       const e = event as { messages?: unknown[]; stopReason?: string; errorMessage?: string };
       const lastAssistant = Array.isArray(e.messages)
@@ -318,32 +330,45 @@ export async function generateReplyResponse(options: ReplyOptions & { model?: st
         : undefined;
       const errorMessage = (e.stopReason === "error" ? e.errorMessage : undefined) ?? (lastAssistant?.stopReason === "error" ? lastAssistant.errorMessage : undefined);
       if (errorMessage) {
-        reject(new Error(`Agent failed: ${errorMessage}`));
+        settle(new Error(`Agent failed: ${errorMessage}`));
         return;
       }
 
       const toolResult = getResult();
       if (toolResult) {
         structuredAction = parseReplyAction(toolResult);
-        unsubscribe?.();
         if (!structuredAction) {
-          reject(new Error("Agent returned a malformed reply action"));
+          settle(new Error("Agent returned a malformed reply action"));
         } else {
           console.log("[pi-reviewer] conversation agent completed via submit_reply tool");
-          resolve();
+          settle();
         }
         return;
       }
 
       answer = extractLastAssistantText(e.messages);
-      unsubscribe?.();
       if (answer) {
         console.warn("[pi-reviewer] submit_reply was not called; using legacy JSON text fallback");
-        resolve();
-      }
-      else reject(new Error("Agent returned an empty response"));
+        settle();
+      } else settle(new Error("Agent returned an empty response"));
     });
-    agent.prompt(prompt).catch(reject);
+    if (settled) {
+      unsubscribe?.();
+      unsubscribe = undefined;
+    }
+    const timeoutMs = options.replyTimeoutMs ?? REPLY_GENERATION_TIMEOUT_MS;
+    if (!settled) {
+      timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        if (timer) clearTimeout(timer);
+        unsubscribe?.();
+        unsubscribe = undefined;
+        agent.abort();
+        reject(new Error(`Reply agent timed out after ${timeoutMs}ms`));
+      }, timeoutMs);
+    }
+    agent.prompt(prompt).catch((error: unknown) => settle(error instanceof Error ? error : new Error(String(error))));
   });
   if (structuredAction) return structuredAction;
   const action = parseReplyAction(answer);

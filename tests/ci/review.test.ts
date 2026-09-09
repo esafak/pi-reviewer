@@ -412,6 +412,22 @@ describe("review", () => {
     );
   });
 
+  it("aborts and cleans up a reply agent that exceeds its timeout", async () => {
+    const unsubscribe = vi.fn();
+    const abort = vi.fn();
+    AgentMock.mockImplementation(function () {
+      return {
+        subscribe: vi.fn(() => unsubscribe),
+        prompt: vi.fn(() => new Promise<void>(() => {})),
+        abort,
+      } as any;
+    });
+
+    await expect(generateReplyResponse({ parent: "finding", userReply: "question", thread: "thread", replyTimeoutMs: 1 })).rejects.toThrow(/Reply agent timed out after 1ms/);
+    expect(abort).toHaveBeenCalledTimes(1);
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
+  });
+
   it("uses the submit_reply tool result before assistant text", async () => {
     const toolAction = { action: "reply" as const, body: "First\\n\\n<!-- pi-reviewer:finding:v1 -->" };
     createReplyToolMock.mockReturnValue({
