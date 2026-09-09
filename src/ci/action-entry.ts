@@ -5,7 +5,8 @@ import path from "node:path";
 import { parseThinkingLevel, review } from "./review.js";
 import { GitHubClient } from "./github.js";
 import { collectFindingHistory, decodeBatchMarker, encodeBatchMarker, isAuthorizedReviewCommand, isEventRangeConsistent, isRenovatePullRequest, isSafePullRequestNumber, normalizeEvent, selectAuthenticatedBatchMarkers, selectBatchRange } from "./batch.js";
-import { handleReply } from "./reply.js";
+import { fetchReplySnapshot, handleReply } from "./reply.js";
+import { recoverSynchronizeReplies } from "./recovery.js";
 
 async function readEvent(): Promise<unknown> {
   const file = process.env.GITHUB_EVENT_PATH;
@@ -41,11 +42,12 @@ if (event.fork) { console.log("[pi-reviewer] fork PRs are not reviewed because s
 if (event.command && !isAuthorizedReviewCommand(event)) { console.log("[pi-reviewer] ignoring unauthorized comment"); process.exit(0); }
 
 const github = new GitHubClient(token);
-const pr = await github.getPullRequest(repo, event.pr);
+let pr = await github.getPullRequest(repo, event.pr);
 if (isRenovatePullRequest(pr)) { console.log("[pi-reviewer] Renovate PRs are not reviewed"); process.exit(0); }
 if (event.kind === "manual" && event.command !== "/pi-review" && process.env.GITHUB_EVENT_NAME === "issue_comment") { process.exit(0); }
 if (pr.draft && process.env.REVIEW_DRAFTS !== "true") { console.log("[pi-reviewer] draft PR reviews are disabled"); process.exit(0); }
 const identity = await github.getUser();
+if (pr.head.repo?.full_name !== repo) { console.log("[pi-reviewer] fork or deleted-head PRs are not reviewed"); process.exit(0); }
 if (event.kind === "reply") {
   // This branch intentionally precedes all batch-marker, diff, and review work.
   // The payload's repository relationship was checked above, before comment API access.
@@ -56,8 +58,29 @@ if (event.kind === "reply") {
   }
   process.exit(0);
 }
+let replySnapshot = await fetchReplySnapshot(github, repo, event.pr, pr);
+if (event.kind === "synchronize") {
+  const expectedHead = event.targetHead ?? pr.head.sha;
+  await recoverSynchronizeReplies({
+    repo,
+    pullRequest: pr,
+    expectedHeadSha: expectedHead,
+    identity,
+    github,
+    snapshot: replySnapshot,
+    thinking: parseThinkingLevel(process.env.PI_REVIEWER_THINKING),
+    piApiKey: process.env.PI_API_KEY,
+  });
+  replySnapshot = await fetchReplySnapshot(github, repo, event.pr!);
+  pr = replySnapshot.pullRequest;
+  if (pr.head.repo?.full_name !== repo || pr.head.sha !== expectedHead) {
+    console.log("[pi-reviewer] PR state changed during reply recovery; skipping normal review");
+    process.exit(0);
+  }
+}
 const reviews = await github.listReviews(repo, event.pr);
-const [comments, issueComments, threads] = await Promise.all([github.listComments(repo, event.pr), github.listIssueComments(repo, event.pr), github.listThreads(repo, event.pr)]);
+const [comments, issueComments] = await Promise.all([github.listComments(repo, event.pr), github.listIssueComments(repo, event.pr)]);
+const threads = replySnapshot.threads;
 // Issue-comment fallback markers are durable batch state too. Reviews and issue
 // comments have separate chronological collections, so merge them by creation
 // time. Issue comments are the later source on an equal timestamp because the
@@ -76,7 +99,6 @@ const latestMarkerSource = latest ? [...markerSources].reverse().find(source => 
 const priorSummary = latestMarkerSource?.body?.replace(/<!-- pi-reviewer:batch:v1 [^>]+ -->/, "").trim() || undefined;
 const { activeFindings, resolvedFindings } = collectFindingHistory({ reviews, issueComments, comments, threads, login: identity.login });
 const head = event.targetHead ?? pr.head.sha;
-if (pr.head.repo?.full_name !== repo) { console.log("[pi-reviewer] fork or deleted-head PRs are not reviewed"); process.exit(0); }
 // The default-branch checkout used by issue-comment and dispatch events may
 // not have the PR ref in its fetch refspec. Fetch the authenticated head
 // explicitly before any merge-base, ancestry, or worktree operation.
@@ -96,6 +118,24 @@ const worktree = await mkdtemp(path.join(tmpdir(), "pi-reviewer-") );
 try {
   execFileSync("git", ["worktree", "add", "--detach", worktree, head], { cwd: process.cwd() });
   await review({ cwd: worktree, pr: event.pr, commitId: head, fromSha: range.fresh ? range.fromSha : head, allowEmptyDiff: !range.fresh, batchMarker: range.fresh ? marker : undefined, activeFindings, resolvedFindings, priorSummary, output: "comment", minSeverity, thinking: parseThinkingLevel(process.env.PI_REVIEWER_THINKING), piApiKey: process.env.PI_API_KEY, githubToken: token, repo, reactOnNoFindings: process.env.REACT_ON_NO_FINDINGS === "true" });
+  if (event.kind === "synchronize") {
+    const latest = await github.getPullRequest(repo, event.pr!);
+    if (latest.head.sha === head) {
+      const latestSnapshot = await fetchReplySnapshot(github, repo, event.pr!, latest);
+      await recoverSynchronizeReplies({
+        repo,
+        pullRequest: latest,
+        expectedHeadSha: head,
+        identity,
+        github,
+        snapshot: latestSnapshot,
+        thinking: parseThinkingLevel(process.env.PI_REVIEWER_THINKING),
+        piApiKey: process.env.PI_API_KEY,
+      });
+    } else {
+      console.log("[pi-reviewer] skipping final reply recovery because the PR head changed");
+    }
+  }
 } finally {
   try { execFileSync("git", ["worktree", "remove", "--force", worktree], { cwd: process.cwd(), stdio: "ignore" }); } catch { await rm(worktree, { recursive: true, force: true }); }
 }

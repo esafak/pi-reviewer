@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vite-plus/test";
-import { handleReply } from "../../src/ci/reply.js";
+import { discoverPendingReplies, handleReply, recoverPendingReplies } from "../../src/ci/reply.js";
+import { recoverSynchronizeReplies } from "../../src/ci/recovery.js";
 import { parseReplyAction } from "../../src/ci/review.js";
 import { replyMarker, type Event } from "../../src/ci/batch.js";
 import type { PullRequest, ReviewComment, ReviewThread } from "../../src/ci/github.js";
@@ -31,6 +32,72 @@ function client(comments: ReviewComment[] = [root, triggering], current = pr) {
 }
 
 describe("review-comment reply action path", () => {
+  it("discovers the oldest unprocessed direct reply per unresolved finding", () => {
+    const first: ReviewComment = { id: 9, body: "first", in_reply_to_id: 8, created_at: "2026-01-01T00:00:00Z", author_association: "MEMBER", user: { login: "human", type: "User" } };
+    const second: ReviewComment = { id: 10, body: "second", in_reply_to_id: 8, created_at: "2026-01-01T00:01:00Z", author_association: "MEMBER", user: { login: "human", type: "User" } };
+    const handled: ReviewComment = { id: 11, body: replyMarker(9, 8, "thread-1"), in_reply_to_id: 8, user: { login: "reviewer[bot]", type: "Bot" } };
+    const snapshot = { pullRequest: pr, comments: [root, first, second, handled], threads: [thread] };
+    expect(discoverPendingReplies(snapshot, { login: "reviewer[bot]" })).toEqual([expect.objectContaining({ commentId: 10, parentCommentId: 8, threadId: "thread-1", headSha: "head" })]);
+  });
+
+  it("does not let nested, unauthorized, resolved, or spoofed replies suppress recovery", () => {
+    const secondRoot: ReviewComment = { id: 18, body: "<!-- pi-reviewer:finding:v1 --> second", user: { login: "reviewer[bot]", type: "Bot" } };
+    const nested: ReviewComment = { id: 19, body: "nested", in_reply_to_id: 9, author_association: "MEMBER", user: { login: "human", type: "User" } };
+    const unauthorized: ReviewComment = { id: 20, body: "outsider", in_reply_to_id: 8, author_association: "NONE", user: { login: "outsider", type: "User" } };
+    const resolvedThread: ReviewThread = { id: "thread-2", isResolved: true, comments: { nodes: [{ id: 18 }], pageInfo: { hasNextPage: false } } };
+    const spoofed: ReviewComment = { id: 21, body: replyMarker(9, 8, "thread-1"), in_reply_to_id: 8, author_association: "MEMBER", user: { login: "human", type: "User" } };
+    const snapshot = { pullRequest: pr, comments: [root, triggering, nested, unauthorized, secondRoot, spoofed], threads: [thread, resolvedThread] };
+    expect(discoverPendingReplies(snapshot, { login: "reviewer[bot]" })).toEqual([expect.objectContaining({ commentId: 21, parentCommentId: 8 })]);
+  });
+
+  it("recovers a canceled reply event through the push path", async () => {
+    const replyComment = { ...triggering, author_association: "MEMBER", created_at: "2026-01-01T00:00:00Z" };
+    const snapshot = { pullRequest: pr, comments: [root, replyComment], threads: [thread] };
+    const github = client([root, replyComment]);
+    const generate = vi.fn(async () => ({ action: "resolve", body: "The exception is intentional for this adoption PR." }));
+
+    expect(await recoverSynchronizeReplies({ repo: "owner/repo", pullRequest: pr, expectedHeadSha: "head", identity: { login: "reviewer[bot]" }, github, snapshot, generate })).toBe(1);
+    expect(generate).toHaveBeenCalledTimes(1);
+    expect(github.reply).toHaveBeenCalledTimes(1);
+    expect(github.resolveThread).toHaveBeenCalledWith("thread-1");
+  });
+
+  it("refuses stale, fork, and snapshot-mismatched synchronize recovery", async () => {
+    const github = client();
+    const generate = vi.fn();
+    expect(await recoverSynchronizeReplies({ repo: "owner/repo", pullRequest: pr, expectedHeadSha: "other", identity: { login: "reviewer[bot]" }, github, snapshot: { pullRequest: pr, comments: [], threads: [] }, generate })).toBe(0);
+    expect(await recoverSynchronizeReplies({ repo: "owner/repo", pullRequest: { ...pr, head: { ...pr.head, repo: { full_name: "fork/repo" } } }, expectedHeadSha: "head", identity: { login: "reviewer[bot]" }, github, snapshot: { pullRequest: pr, comments: [], threads: [] }, generate })).toBe(0);
+    expect(await recoverSynchronizeReplies({ repo: "owner/repo", pullRequest: pr, expectedHeadSha: "head", identity: { login: "reviewer[bot]" }, github, snapshot: { pullRequest: { ...pr, head: { ...pr.head, sha: "other" } }, comments: [root, triggering], threads: [thread] }, generate })).toBe(0);
+    expect(github.reply).not.toHaveBeenCalled();
+    expect(generate).not.toHaveBeenCalled();
+  });
+
+  it("continues recovery after one reply fails and does not invoke the model twice", async () => {
+    const firstReply: ReviewComment = { ...triggering, author_association: "MEMBER" };
+    const secondRoot: ReviewComment = { id: 18, body: "<!-- pi-reviewer:finding:v1 --> second", path: "src/other.ts", line: 4, side: "RIGHT", user: { login: "reviewer[bot]", type: "Bot" } };
+    const secondReply: ReviewComment = { id: 19, body: "Please explain", in_reply_to_id: 18, author_association: "MEMBER", user: { login: "human", type: "User" } };
+    const secondThread: ReviewThread = { id: "thread-2", isResolved: false, comments: { nodes: [{ id: 18 }, { id: 19 }], pageInfo: { hasNextPage: false } } };
+    const github = client([root, firstReply, secondRoot, secondReply]);
+    github.listThreads = vi.fn(async () => [thread, secondThread]);
+    const generate = vi.fn()
+      .mockRejectedValueOnce(new Error("temporary model failure"))
+      .mockResolvedValue({ action: "resolve", body: "acknowledged" });
+    const snapshot = { pullRequest: pr, comments: [root, firstReply, secondRoot, secondReply], threads: [thread, secondThread] };
+    expect(await recoverPendingReplies({ repo: "owner/repo", pullRequest: pr, identity: { login: "reviewer[bot]" }, github, snapshot, refreshSnapshot: async () => ({ pullRequest: pr, comments: [root, firstReply, secondRoot, secondReply], threads: [thread, secondThread] }), generate })).toBe(1);
+    expect(generate).toHaveBeenCalledTimes(2);
+    expect(github.reply).toHaveBeenCalledTimes(1);
+    github.listThreads = vi.fn(async () => [{ ...thread, isResolved: true }, secondThread]);
+    expect(await recoverSynchronizeReplies({ repo: "owner/repo", pullRequest: pr, expectedHeadSha: "head", identity: { login: "reviewer[bot]" }, github, generate })).toBe(1);
+    expect(generate).toHaveBeenCalledTimes(2);
+    expect(github.reply).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not discover bot-authored replies", () => {
+    const botReply: ReviewComment = { id: 22, body: "bot reply", in_reply_to_id: 8, author_association: "MEMBER", user: { login: "other-bot", type: "Bot" } };
+    expect(discoverPendingReplies({ pullRequest: pr, comments: [root, botReply], threads: [thread] }, { login: "reviewer[bot]" })).toEqual([]);
+  });
+
+
   it("decodes JSON-escaped Markdown line breaks in assistant replies", () => {
     expect(parseReplyAction({ action: "reply", body: "First paragraph\\n\\n- **second**" })).toEqual({
       action: "reply",
@@ -97,7 +164,10 @@ describe("review-comment reply action path", () => {
   });
   it("does not leave a resolved marker when the head moves after posting", async () => {
     const github = client();
-    github.getPullRequest.mockResolvedValueOnce(pr).mockResolvedValueOnce({ ...pr, head: { ...pr.head, sha: "new-head" } });
+    github.getPullRequest
+      .mockResolvedValueOnce(pr)
+      .mockResolvedValueOnce(pr)
+      .mockResolvedValueOnce({ ...pr, head: { ...pr.head, sha: "new-head" } });
     const generate = vi.fn(async () => ({ action: "resolve", body: "I am withdrawing this concern." }));
 
     expect(await handleReply({ event, repo: "owner/repo", pullRequest: pr, identity: { login: "reviewer[bot]" }, github, generate })).toBe(false);
