@@ -6,6 +6,11 @@ local linters = new Mapping<String, Step> {
     exclude = List("dist/**", "dist-ui/**")
     check = "mise run lint"
   }
+  ["vite-plus-fmt"] {
+    glob = List("**/*.js", "**/*.jsx", "**/*.ts", "**/*.tsx")
+    exclude = List("dist/**", "dist-ui/**")
+    check = "mise run fmt -- --check {{files}}"
+  }
 }
 
 local prepush = new Mapping<String, Step> {
@@ -16,6 +21,11 @@ local prepush = new Mapping<String, Step> {
     glob = List("**/*.js", "**/*.jsx", "**/*.ts", "**/*.tsx")
     exclude = List("dist/**", "dist-ui/**")
     check = "mise run lint"
+  }
+  ["vite-plus-fmt"] {
+    glob = List("**/*.js", "**/*.jsx", "**/*.ts", "**/*.tsx")
+    exclude = List("dist/**", "dist-ui/**")
+    check = "mise run fmt -- --check {{files}}"
   }
 }
 
