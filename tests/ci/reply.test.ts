@@ -1,9 +1,11 @@
-import { describe, expect, it, vi } from "vite-plus/test";
-import { discoverPendingReplies, handleReply, recoverPendingReplies } from "../../src/ci/reply.js";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+import { discoverPendingReplies, handleReply, recoverPendingReplies, resolveAuthorizedLogins } from "../../src/ci/reply.js";
 import { recoverSynchronizeReplies } from "../../src/ci/recovery.js";
 import { parseReplyAction } from "../../src/ci/review.js";
 import { replyMarker, type Event } from "../../src/ci/batch.js";
-import type { PullRequest, ReviewComment, ReviewThread } from "../../src/ci/github.js";
+import { GitHubClient, type PullRequest, type ReviewComment, type ReviewThread } from "../../src/ci/github.js";
+
+afterEach(() => vi.unstubAllGlobals());
 
 const pr: PullRequest = { number: 42, head: { sha: "head", repo: { full_name: "owner/repo" } }, base: { sha: "base", repo: { full_name: "owner/repo" } } };
 const event: Event = { kind: "reply", pr: 42, headSha: "head", draft: false, fork: false, commentId: 9, parentCommentId: 8, actor: { login: "human", association: "MEMBER", type: "User" } };
@@ -11,7 +13,7 @@ const root: ReviewComment = { id: 8, body: "<!-- pi-reviewer:finding:v1 --> find
 const triggering: ReviewComment = { id: 9, body: "Can you explain this?", in_reply_to_id: 8, user: { login: "human", type: "User" } };
 const thread: ReviewThread = { id: "thread-1", isResolved: false, comments: { nodes: [{ id: 8 }, { id: 9 }], pageInfo: { hasNextPage: false } } };
 
-function client(comments: ReviewComment[] = [root, triggering], current = pr) {
+function client(comments: ReviewComment[] = [root, triggering], current = pr, permissions: Record<string, string> = {}) {
   const all = [...comments];
   const reply = vi.fn(async (_repo: string, _number: number, id: number, body: string) => {
     all.push({ id: 10_000 + all.length, body, in_reply_to_id: id, user: { login: "reviewer[bot]", type: "Bot" } });
@@ -20,10 +22,12 @@ function client(comments: ReviewComment[] = [root, triggering], current = pr) {
   const createReviewCommentReaction = vi.fn(async () => ({ id: 11, content: "+1" }));
   const resolveThread = vi.fn(async () => undefined);
   const updateReviewComment = vi.fn(async (_repo: string, _number: number, id: number, body: string) => ({ id, body } as ReviewComment));
+  const getCollaboratorPermission = vi.fn(async (_repo: string, login: string) => permissions[login] ?? "write");
   return {
     listComments: vi.fn(async () => [...all]),
     listThreads: vi.fn(async () => [thread]),
     getPullRequest: vi.fn(async () => current),
+    getCollaboratorPermission,
     reply,
     updateReviewComment,
     resolveThread,
@@ -37,7 +41,37 @@ describe("review-comment reply action path", () => {
     const second: ReviewComment = { id: 10, body: "second", in_reply_to_id: 8, created_at: "2026-01-01T00:01:00Z", author_association: "MEMBER", user: { login: "human", type: "User" } };
     const handled: ReviewComment = { id: 11, body: replyMarker(9, 8, "thread-1"), in_reply_to_id: 8, user: { login: "reviewer[bot]", type: "Bot" } };
     const snapshot = { pullRequest: pr, comments: [root, first, second, handled], threads: [thread] };
-    expect(discoverPendingReplies(snapshot, { login: "reviewer[bot]" })).toEqual([expect.objectContaining({ commentId: 10, parentCommentId: 8, threadId: "thread-1", headSha: "head" })]);
+    expect(discoverPendingReplies(snapshot, { login: "reviewer[bot]" }, new Set(["human"]))).toEqual([expect.objectContaining({ commentId: 10, parentCommentId: 8, threadId: "thread-1", headSha: "head" })]);
+  });
+
+  it("discovers replies from real listThreads output with aliased numeric ids", async () => {
+    const body = {
+      data: {
+        repository: {
+          pullRequest: {
+            reviewThreads: {
+              nodes: [{
+                id: "PRRT_kwDOLlU_5s",
+                isResolved: false,
+                comments: {
+                  nodes: [{ id: "8" }, { id: "9" }],
+                  pageInfo: { hasNextPage: false },
+                },
+              }],
+              pageInfo: { hasNextPage: false },
+            },
+          },
+        },
+      },
+    };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, status: 200, statusText: "OK", text: vi.fn().mockResolvedValue(JSON.stringify(body)) }));
+    const threads = await new GitHubClient("token").listThreads("owner/repo", 42);
+    const humanReply: ReviewComment = { ...triggering, author_association: "MEMBER" };
+    const snapshot = { pullRequest: pr, comments: [root, humanReply], threads };
+    expect(threads[0].comments.nodes.map(comment => comment.id)).toEqual([8, 9]);
+    expect(discoverPendingReplies(snapshot, { login: "reviewer[bot]" }, new Set(["human"]))).toEqual([
+      expect.objectContaining({ commentId: 9, parentCommentId: 8, threadId: "PRRT_kwDOLlU_5s" }),
+    ]);
   });
 
   it("does not let nested, unauthorized, resolved, or spoofed replies suppress recovery", () => {
@@ -46,8 +80,8 @@ describe("review-comment reply action path", () => {
     const unauthorized: ReviewComment = { id: 20, body: "outsider", in_reply_to_id: 8, author_association: "NONE", user: { login: "outsider", type: "User" } };
     const resolvedThread: ReviewThread = { id: "thread-2", isResolved: true, comments: { nodes: [{ id: 18 }], pageInfo: { hasNextPage: false } } };
     const spoofed: ReviewComment = { id: 21, body: replyMarker(9, 8, "thread-1"), in_reply_to_id: 8, author_association: "MEMBER", user: { login: "human", type: "User" } };
-    const snapshot = { pullRequest: pr, comments: [root, triggering, nested, unauthorized, secondRoot, spoofed], threads: [thread, resolvedThread] };
-    expect(discoverPendingReplies(snapshot, { login: "reviewer[bot]" })).toEqual([expect.objectContaining({ commentId: 21, parentCommentId: 8 })]);
+    const snapshot = { pullRequest: pr, comments: [root, { ...triggering, user: { login: "other", type: "User" } }, nested, unauthorized, secondRoot, spoofed], threads: [thread, resolvedThread] };
+    expect(discoverPendingReplies(snapshot, { login: "reviewer[bot]" }, new Set(["human"]))).toEqual([expect.objectContaining({ commentId: 21, parentCommentId: 8 })]);
   });
 
   it("recovers a canceled reply event through the push path", async () => {
@@ -94,7 +128,79 @@ describe("review-comment reply action path", () => {
 
   it("does not discover bot-authored replies", () => {
     const botReply: ReviewComment = { id: 22, body: "bot reply", in_reply_to_id: 8, author_association: "MEMBER", user: { login: "other-bot", type: "Bot" } };
-    expect(discoverPendingReplies({ pullRequest: pr, comments: [root, botReply], threads: [thread] }, { login: "reviewer[bot]" })).toEqual([]);
+    expect(discoverPendingReplies({ pullRequest: pr, comments: [root, botReply], threads: [thread] }, { login: "reviewer[bot]" }, new Set(["other-bot"]))).toEqual([]);
+  });
+
+  // Regression: the webhook payload reports CONTRIBUTOR for an org owner/admin, so
+  // authorization must come from repository permission, not author_association.
+  it("authorizes a reply by repository permission even when the payload association is CONTRIBUTOR", async () => {
+    const github = client();
+    const generate = vi.fn(async () => ({ action: "reply", body: "acknowledged" }));
+    const contributor: Event = { ...event, actor: { login: "human", association: "CONTRIBUTOR", type: "User" } };
+
+    expect(await handleReply({ event: contributor, repo: "owner/repo", pullRequest: pr, identity: { login: "reviewer[bot]" }, github, generate })).toBe(true);
+    expect(github.getCollaboratorPermission).toHaveBeenCalledWith("owner/repo", "human");
+    expect(github.reply).toHaveBeenCalledTimes(1);
+  });
+
+  it("discovers a reply whose REST association is CONTRIBUTOR when permission authorizes it", () => {
+    const contributor: ReviewComment = { ...triggering, author_association: "CONTRIBUTOR" };
+    const snapshot = { pullRequest: pr, comments: [root, contributor], threads: [thread] };
+    expect(discoverPendingReplies(snapshot, { login: "reviewer[bot]" }, new Set(["human"]))).toEqual([
+      expect.objectContaining({ commentId: 9, parentCommentId: 8, threadId: "thread-1" }),
+    ]);
+  });
+
+  it("fails closed and logs when the permission lookup fails", async () => {
+    const github = client();
+    github.getCollaboratorPermission.mockRejectedValueOnce(new Error("403 Resource not accessible"));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      expect(await handleReply({ event, repo: "owner/repo", pullRequest: pr, identity: { login: "reviewer[bot]" }, github, generate: vi.fn() })).toBe(false);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("could not resolve permission"));
+      expect(github.reply).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("ignores a reply author without write permission and logs the association", () => {
+    const outsider: ReviewComment = { id: 30, body: "drive-by", in_reply_to_id: 8, author_association: "NONE", user: { login: "outsider", type: "User" } };
+    const snapshot = { pullRequest: pr, comments: [root, outsider], threads: [thread] };
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      expect(discoverPendingReplies(snapshot, { login: "reviewer[bot]" }, new Set(["human"]))).toEqual([]);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('"outsider" association=NONE is not authorized'));
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  // The recovery path resolves permissions itself when the caller does not inject a set.
+  it("denies recovery when the candidate author has no write permission", async () => {
+    const replyComment: ReviewComment = { ...triggering, author_association: "CONTRIBUTOR" };
+    const snapshot = { pullRequest: pr, comments: [root, replyComment], threads: [thread] };
+    const github = client([root, replyComment], pr, { human: "read" });
+    const generate = vi.fn();
+    const info = vi.spyOn(console, "log").mockImplementation(() => {});
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      expect(await recoverSynchronizeReplies({ repo: "owner/repo", pullRequest: pr, expectedHeadSha: "head", identity: { login: "reviewer[bot]" }, github, snapshot, generate })).toBe(0);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('"human" lacks write permission'));
+      expect(github.reply).not.toHaveBeenCalled();
+      expect(generate).not.toHaveBeenCalled();
+    } finally {
+      info.mockRestore();
+      warn.mockRestore();
+    }
+  });
+
+  it("resolves each candidate author once and excludes unknown permissions", async () => {
+    const github = client();
+    github.getCollaboratorPermission.mockImplementation(async (_repo: string, login: string) => login === "admin" ? "admin" : undefined);
+    const authorized = await resolveAuthorizedLogins(github, "owner/repo", ["admin", "admin", "ghost"]);
+    expect([...authorized]).toEqual(["admin"]);
+    expect(github.getCollaboratorPermission).toHaveBeenCalledTimes(2);
   });
 
 
@@ -191,15 +297,15 @@ describe("review-comment reply action path", () => {
   });
 
   it.each([
-    ["human-rooted", { ...root, user: { login: "human" }, body: "human finding" }, triggering, event],
-    ["quoted-marker-root", { ...root, body: "Quoted <!-- pi-reviewer:finding:v1 --> finding" }, triggering, event],
-    ["variant-marker-root", { ...root, body: "<!-- pi-reviewer :finding:v1 --> finding" }, triggering, event],
-    ["bot-authored", root, { ...triggering, user: { login: "other-bot", type: "Bot" } }, { ...event, actor: { login: "other-bot", association: "MEMBER", type: "Bot" } }],
-    ["unauthorized", root, triggering, { ...event, actor: { login: "human", association: "CONTRIBUTOR", type: "User" } }],
-    ["resolved", root, triggering, event],
-    ["stale head", root, triggering, { ...event, headSha: "old-head" }],
-  ])("posts nothing for %s replies", async (name, parent, replyComment, replyEvent) => {
-    const github = client([parent as ReviewComment, replyComment as ReviewComment], name === "resolved" ? pr : pr);
+    ["human-rooted", { ...root, user: { login: "human" }, body: "human finding" }, triggering, event, {}],
+    ["quoted-marker-root", { ...root, body: "Quoted <!-- pi-reviewer:finding:v1 --> finding" }, triggering, event, {}],
+    ["variant-marker-root", { ...root, body: "<!-- pi-reviewer :finding:v1 --> finding" }, triggering, event, {}],
+    ["bot-authored", root, { ...triggering, user: { login: "other-bot", type: "Bot" } }, { ...event, actor: { login: "other-bot", association: "MEMBER", type: "Bot" } }, {}],
+    ["no write permission", root, { ...triggering, user: { login: "outsider", type: "User" } }, { ...event, actor: { login: "outsider", association: "CONTRIBUTOR", type: "User" } }, { outsider: "read" }],
+    ["resolved", root, triggering, event, {}],
+    ["stale head", root, triggering, { ...event, headSha: "old-head" }, {}],
+  ])("posts nothing for %s replies", async (name, parent, replyComment, replyEvent, permissions) => {
+    const github = client([parent as ReviewComment, replyComment as ReviewComment], pr, permissions as Record<string, string>);
     if (name === "resolved") github.listThreads.mockResolvedValue([{ ...thread, isResolved: true }]);
 
     await handleReply({ event: replyEvent as Event, repo: "owner/repo", pullRequest: pr, identity: { login: "reviewer[bot]" }, github, generate: vi.fn(async () => ({ action: "reply", body: "answer" })) });

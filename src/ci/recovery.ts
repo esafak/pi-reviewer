@@ -17,9 +17,15 @@ export interface SynchronizeRecoveryOptions {
 
 /** Recovers conversation replies for a push while refusing stale PR heads. */
 export async function recoverSynchronizeReplies(options: SynchronizeRecoveryOptions): Promise<number> {
-  if (options.pullRequest.head.repo?.full_name !== options.repo || options.pullRequest.head.sha !== options.expectedHeadSha) return 0;
+  if (options.pullRequest.head.repo?.full_name !== options.repo || options.pullRequest.head.sha !== options.expectedHeadSha) {
+    console.warn("[pi-reviewer] reply recovery skipped: PR head or repository changed");
+    return 0;
+  }
   const snapshot = options.snapshot ?? await fetchReplySnapshot(options.github, options.repo, options.pullRequest.number, options.pullRequest);
-  if (snapshot.pullRequest.head.sha !== options.expectedHeadSha) return 0;
+  if (snapshot.pullRequest.head.sha !== options.expectedHeadSha) {
+    console.warn("[pi-reviewer] reply recovery skipped: snapshot head changed");
+    return 0;
+  }
   return recoverPendingReplies({
     ...options,
     snapshot,

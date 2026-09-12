@@ -92,16 +92,22 @@ describe("GitHubClient", () => {
     await expect(new GitHubClient("token").getReview("owner/repo", 1, 42)).resolves.toMatchObject({ body: "fresh body" });
     expect(fetchMock).toHaveBeenCalledWith("https://api.github.com/repos/owner/repo/pulls/1/reviews/42", expect.anything());
   });
+  it("fetches a collaborator's repository permission", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(response({ permission: "admin" }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(new GitHubClient("token").getCollaboratorPermission("owner/repo", "human")).resolves.toBe("admin");
+    expect(fetchMock).toHaveBeenCalledWith("https://api.github.com/repos/owner/repo/collaborators/human/permission", expect.anything());
+  });
   it("follows GraphQL thread cursors", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(response({
         data: { repository: { pullRequest: { reviewThreads: {
-          nodes: [{ id: "t1", isResolved: false, comments: { nodes: [{ id: "101", author: { login: "bot" } }], pageInfo: { hasNextPage: true, endCursor: "comment-1" } } }],
+          nodes: [{ id: "t1", isResolved: false, comments: { nodes: [{ id: "101" }], pageInfo: { hasNextPage: true, endCursor: "comment-1" } } }],
           pageInfo: { hasNextPage: true, endCursor: "cursor-1" },
         } } }, },
       }))
       .mockResolvedValueOnce(response({
-        data: { node: { comments: { nodes: [{ id: "102", author: { login: "bot" } }], pageInfo: { hasNextPage: false } } } },
+        data: { node: { comments: { nodes: [{ id: "102" }], pageInfo: { hasNextPage: false } } } },
       }))
       .mockResolvedValueOnce(response({
         data: { repository: { pullRequest: { reviewThreads: {
@@ -115,5 +121,21 @@ describe("GitHubClient", () => {
     expect(threads[0].comments.nodes.map(comment => comment.id)).toEqual([101, 102]);
     expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(fetchMock.mock.calls.every(([url, init]) => url === "https://api.github.com/graphql" && !JSON.parse((init as RequestInit).body as string).query.match(/\bdatabaseId\b|\bside\b/))).toBe(true);
+  });
+  it("keeps the fullDatabaseId alias that normalizeThreadComment reads", async () => {
+    // GitHub returns the numeric id under `id` because `fullDatabaseId` is aliased.
+    // Selecting both as `id fullDatabaseId` would put the opaque node id in `comment.id`
+    // and silently turn every thread-comment id into NaN.
+    expect(githubGraphqlDocuments.listThreads).toContain("nodes { id: fullDatabaseId }");
+    expect(githubGraphqlDocuments.listThreadComments).toContain("nodes { id: fullDatabaseId }");
+    const fetchMock = vi.fn().mockResolvedValue(response({
+      data: { repository: { pullRequest: { reviewThreads: {
+        nodes: [{ id: "t1", isResolved: false, comments: { nodes: [{ id: "2778522194" }], pageInfo: { hasNextPage: false } } }],
+        pageInfo: { hasNextPage: false },
+      } } } },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const threads = await new GitHubClient("token").listThreads("owner/repo", 1);
+    expect(threads[0].comments.nodes.map(comment => comment.id)).toEqual([2778522194]);
   });
 });
