@@ -1,0 +1,21 @@
+tests/ci/batch.test.ts
+  s_e8dd1027e20403::t_c544c2555b628b 5
+tests/ci/github.test.ts
+  s_e8dd1027e20403::t_a27de5c526310c 95-100,105,110,125-140
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "7116c4fd2c0cb0f0f0e8641c44774592de4a47d1",
+  "prompts": {},
+  "sessions": {
+    "s_e8dd1027e20403": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f6dd0f750ffeQ9L61ARxTlAyDj",
+        "model": "deepseek-v4.1-flash"
+      },
+      "human_author": "Emre Şafak <3928300+esafak@users.noreply.github.com>"
+    }
+  }
+}
