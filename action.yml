@@ -116,13 +116,18 @@ runs:
           printf 'node_ready=%s\n' "$node_ready"
           printf 'pnpm_ready=%s\n' "$pnpm_ready"
           printf 'vite_plus_ready=%s\n' "$vite_plus_ready"
+          printf 'expected_pnpm=%s\n' "$expected_pnpm"
         } >> "$GITHUB_OUTPUT"
 
     - name: Setup pnpm
       if: ${{ steps.toolchain.outputs.pnpm_ready != 'true' }}
       uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
       with:
-        version: 12.3.4
+        # Install the consumer's `packageManager` version. Passing a hardcoded
+        # version conflicts with package.json and forces Renovate to keep
+        # action.yml in lockstep; the fallback is only used when the consumer
+        # has no packageManager field.
+        version: ${{ steps.toolchain.outputs.expected_pnpm || '12.3.4' }}
         run_install: false
 
     - name: Setup Node
