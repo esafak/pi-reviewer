@@ -195,6 +195,21 @@ describe("review-comment reply action path", () => {
     }
   });
 
+  it("does not resolve permissions for replies on resolved threads", async () => {
+    const resolvedThread: ReviewThread = { ...thread, isResolved: true };
+    const replyComment: ReviewComment = { ...triggering, author_association: "MEMBER" };
+    const snapshot = { pullRequest: pr, comments: [root, replyComment], threads: [resolvedThread] };
+    const github = client([root, replyComment]);
+    const info = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      expect(await recoverPendingReplies({ repo: "owner/repo", pullRequest: pr, identity: { login: "reviewer[bot]" }, github, snapshot, refreshSnapshot: async () => snapshot, generate: vi.fn() })).toBe(0);
+      expect(github.getCollaboratorPermission).not.toHaveBeenCalled();
+      expect(github.reply).not.toHaveBeenCalled();
+    } finally {
+      info.mockRestore();
+    }
+  });
+
   it("resolves each candidate author once and excludes unknown permissions", async () => {
     const github = client();
     github.getCollaboratorPermission.mockImplementation(async (_repo: string, login: string) => login === "admin" ? "admin" : undefined);

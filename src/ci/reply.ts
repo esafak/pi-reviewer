@@ -47,7 +47,10 @@ export async function resolveAuthorizedLogins(github: ReplyClient, repo: string,
 
 /** Distinct human authors of direct replies to pi-reviewer findings in this snapshot. */
 function candidateReplyAuthors(snapshot: ReplySnapshot, identity: ReplyIdentity): string[] {
-  const rootIds = new Set(snapshot.comments.filter(comment => comment.id > 0 && comment.user?.login === identity.login && isPiReviewerRootComment(comment)).map(comment => comment.id));
+  // Mirror discovery's skip of thread-less and resolved roots so the permission
+  // lookup only covers roots that can actually yield a pending reply.
+  const actionableCommentIds = new Set(snapshot.threads.flatMap(thread => thread.isResolved ? [] : thread.comments.nodes.map(node => node.id)));
+  const rootIds = new Set(snapshot.comments.filter(comment => comment.id > 0 && comment.user?.login === identity.login && isPiReviewerRootComment(comment) && actionableCommentIds.has(comment.id)).map(comment => comment.id));
   const logins = new Set<string>();
   for (const comment of snapshot.comments) {
     if (comment.in_reply_to_id == null || !rootIds.has(comment.in_reply_to_id)) continue;
