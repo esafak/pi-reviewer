@@ -38,6 +38,13 @@ describe("createReplyTool", () => {
     await expect(tool.execute("tc-1", { action: "reply", body: "  " })).rejects.toThrow(/non-empty/);
   });
 
+  it("enforces the per-action requirements at execution time", async () => {
+    const { tool } = createReplyTool();
+    await expect(tool.execute("tc-1", { action: "reply" })).rejects.toThrow(/non-empty/);
+    await expect(tool.execute("tc-1", { action: "resolve" })).rejects.toThrow(/non-empty/);
+    await expect(tool.execute("tc-1", { action: "react" })).rejects.toThrow(/content/);
+  });
+
   it("accepts each valid action through schema validation", () => {
     const { tool } = createReplyTool();
     expect(() => validateToolArguments(tool, toolCall({ action: "react", content: "+1" }))).not.toThrow();
@@ -47,7 +54,6 @@ describe("createReplyTool", () => {
 
   it.each([
     { action: "react", content: "thumbs-up" },
-    { action: "reply" },
     { action: "reply", body: "" },
     { action: "reply", body: "x".repeat(4_001) },
     { action: "resolve", body: "   " },
