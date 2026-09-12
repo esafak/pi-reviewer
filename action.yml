@@ -82,6 +82,16 @@ runs:
             *) echo "[pi-reviewer] consumer packageManager \"$consumer_package_manager\" is not pnpm; using the action default pnpm" ;;
           esac
         fi
+        # The action ships a lockfileVersion 9.0 lockfile and installs its own
+        # dependencies in action_path, so the selected pnpm must be able to read
+        # it. Fail early instead of letting `vp install` reject the lockfile.
+        case "${expected_pnpm%%.*}" in
+          ''|*[!0-9]*) ;;
+          *) if [ "${expected_pnpm%%.*}" -lt 9 ]; then
+               echo "::error::[pi-reviewer] the action's pnpm-lock.yaml (lockfileVersion 9.0) requires pnpm >= 9; the consumer packageManager pins ${expected_pnpm}"
+               exit 1
+             fi ;;
+        esac
         pnpm_ready=false
         if command -v pnpm >/dev/null 2>&1; then
           actual_pnpm=$(pnpm --version 2>/dev/null || true)
