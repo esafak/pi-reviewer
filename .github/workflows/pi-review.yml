@@ -28,7 +28,7 @@ jobs:
   review:
     name: Review
     timeout-minutes: 30
-    if: (github.event_name != 'pull_request_review_comment' || github.event.comment.user.type != 'Bot') && (github.event_name != 'issue_comment' || github.event.comment.user.type != 'Bot') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && (github.event_name != 'pull_request' || github.event.pull_request.user.login != 'renovate[bot]') && (github.event_name != 'pull_request_review_comment' || github.event.pull_request.user.login != 'renovate[bot]') && (github.event_name != 'issue_comment' || github.event.issue.user.login != 'renovate[bot]')
+    if: (github.event_name != 'pull_request_review_comment' || github.event.comment.user.type != 'Bot') && (github.event_name != 'issue_comment' || github.event.comment.user.type != 'Bot') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && (github.event_name != 'pull_request_review_comment' || github.event.pull_request.head.repo.full_name == github.repository) && (github.event_name != 'pull_request' || github.event.pull_request.user.login != 'renovate[bot]') && (github.event_name != 'pull_request_review_comment' || github.event.pull_request.user.login != 'renovate[bot]') && (github.event_name != 'issue_comment' || github.event.issue.user.login != 'renovate[bot]')
     runs-on: ubuntu-latest
     environment: review
     permissions:
@@ -44,6 +44,11 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          # The Review step runs the local action (`uses: ./`). pull_request and
+          # pull_request_review_comment check out the PR head; issue_comment and
+          # workflow_dispatch have no pull_request payload and fall back to
+          # github.sha (default branch), so a comment can never execute PR-owned
+          # action code.
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Fetch PR refs for comment and manual events
