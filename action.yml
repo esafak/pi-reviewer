@@ -67,15 +67,20 @@ runs:
           esac
         fi
 
-        # CI.md contract: pnpm must match the consumer's package.json. Read the
-        # consumer manifest when present so the installed pnpm matches their
-        # packageManager; fall back to the action's own manifest only when the
-        # consumer has none.
+        # CI.md contract: pnpm must match the consumer's package.json. Honor the
+        # consumer's packageManager only when it pins pnpm; a foreign manager's
+        # version must never be passed to pnpm/action-setup. Fall back to the
+        # action's own manifest when the consumer has none or pins another manager.
         consumer_package_json="${{ github.workspace }}/package.json"
         [ -f "$consumer_package_json" ] || consumer_package_json="${{ github.action_path }}/package.json"
         expected_pnpm=""
         if [ -f "$consumer_package_json" ]; then
-          expected_pnpm=$(awk -F'"' '/"packageManager"/ { split($4, parts, "@"); sub(/\+.*/, "", parts[2]); print parts[2]; exit }' "$consumer_package_json")
+          consumer_package_manager=$(awk -F'"' '/"packageManager"/ { print $4; exit }' "$consumer_package_json")
+          case "$consumer_package_manager" in
+            pnpm@*) expected_pnpm="${consumer_package_manager#pnpm@}"; expected_pnpm="${expected_pnpm%%+*}" ;;
+            pnpm|"") ;;
+            *) echo "[pi-reviewer] consumer packageManager \"$consumer_package_manager\" is not pnpm; using the action default pnpm" ;;
+          esac
         fi
         pnpm_ready=false
         if command -v pnpm >/dev/null 2>&1; then
