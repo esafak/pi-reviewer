@@ -23,6 +23,7 @@ type GitHubPathRegistry = {
   issueComment: (repo: string, comment: number) => string;
   reviewComment: (repo: string, comment: number) => string;
   reviewCommentReactions: (repo: string, number: number, comment: number) => string;
+  collaboratorPermission: (repo: string, login: string) => string;
   issueReactions: (repo: string, number: number) => string;
   issueReaction: (repo: string, reaction: number) => string;
 };
@@ -38,11 +39,14 @@ export const githubPaths = {
   issueComment: (repo, comment) => githubPath("repos", repo, "issues", "comments", comment),
   reviewComment: (repo, comment) => githubPath("repos", repo, "pulls", "comments", comment),
   reviewCommentReactions: (repo, number, comment) => githubPath("repos", repo, "pulls", number, "comments", comment, "reactions"),
+  collaboratorPermission: (repo, login) => githubPath("repos", repo, "collaborators", login, "permission"),
   issueReactions: (repo, number) => githubPath("repos", repo, "issues", number, "reactions"),
   issueReaction: (repo, reaction) => githubPath("repos", repo, "issues", "reactions", reaction),
 } as const satisfies GitHubPathRegistry;
 
 function normalizeThreadComment(comment: any): ReviewThreadComment {
+  // `nodes { id: fullDatabaseId }` aliases the numeric database id to `id`, so the
+  // REST-facing id is already under `comment.id`; no `fullDatabaseId` key is returned.
   return { id: Number(comment.id) };
 }
 
@@ -104,6 +108,7 @@ export class GitHubClient {
   }
   getPullRequest(repo: string, number: number) { return this.request<PullRequest>(githubPaths.pullRequest(repo, number)); }
   getReview(repo: string, number: number, review: number) { return this.request<Review>(githubPaths.review(repo, number, review)); }
+  async getCollaboratorPermission(repo: string, login: string): Promise<string | undefined> { const data = await this.request<{ permission?: string }>(githubPaths.collaboratorPermission(repo, login)); return data.permission; }
   private async list<T>(url: string): Promise<T[]> { const all: T[] = []; for (let page = 1;; page++) { const pageUrl = new URL(this.resolveUrl(url)); pageUrl.searchParams.set("per_page", "100"); pageUrl.searchParams.set("page", String(page)); const values = await this.request<T[]>(pageUrl.toString()); all.push(...values); if (values.length < 100) return all; } }
   listReviews(repo: string, number: number) { return this.list<Review>(githubPaths.reviews(repo, number)); }
   listComments(repo: string, number: number) { return this.list<ReviewComment>(githubPaths.reviewComments(repo, number)); }

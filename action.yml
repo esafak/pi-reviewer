@@ -67,7 +67,31 @@ runs:
           esac
         fi
 
-        expected_pnpm=$(awk -F'"' '/"packageManager"/ { split($4, parts, "@"); print parts[2]; exit }' package.json)
+        # CI.md contract: pnpm must match the consumer's package.json. Honor the
+        # consumer's packageManager only when it pins pnpm; a foreign manager's
+        # version must never be passed to pnpm/action-setup. Fall back to the
+        # action's own manifest when the consumer has none or pins another manager.
+        consumer_package_json="${{ github.workspace }}/package.json"
+        [ -f "$consumer_package_json" ] || consumer_package_json="${{ github.action_path }}/package.json"
+        expected_pnpm=""
+        if [ -f "$consumer_package_json" ]; then
+          consumer_package_manager=$(awk -F'"' '/"packageManager"/ { print $4; exit }' "$consumer_package_json")
+          case "$consumer_package_manager" in
+            pnpm@*) expected_pnpm="${consumer_package_manager#pnpm@}"; expected_pnpm="${expected_pnpm%%+*}" ;;
+            pnpm|"") ;;
+            *) echo "[pi-reviewer] consumer packageManager \"$consumer_package_manager\" is not pnpm; using the action default pnpm" ;;
+          esac
+        fi
+        # The action ships a lockfileVersion 9.0 lockfile and installs its own
+        # dependencies in action_path, so the selected pnpm must be able to read
+        # it. Fail early instead of letting `vp install` reject the lockfile.
+        case "${expected_pnpm%%.*}" in
+          ''|*[!0-9]*) ;;
+          *) if [ "${expected_pnpm%%.*}" -lt 9 ]; then
+               echo "::error::[pi-reviewer] the action's pnpm-lock.yaml (lockfileVersion 9.0) requires pnpm >= 9; the consumer packageManager pins ${expected_pnpm}"
+               exit 1
+             fi ;;
+        esac
         pnpm_ready=false
         if command -v pnpm >/dev/null 2>&1; then
           actual_pnpm=$(pnpm --version 2>/dev/null || true)
@@ -116,13 +140,18 @@ runs:
           printf 'node_ready=%s\n' "$node_ready"
           printf 'pnpm_ready=%s\n' "$pnpm_ready"
           printf 'vite_plus_ready=%s\n' "$vite_plus_ready"
+          printf 'expected_pnpm=%s\n' "$expected_pnpm"
         } >> "$GITHUB_OUTPUT"
 
     - name: Setup pnpm
       if: ${{ steps.toolchain.outputs.pnpm_ready != 'true' }}
       uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
       with:
-        version: 12.3.4
+        # Install the consumer's `packageManager` version. Passing a hardcoded
+        # version conflicts with package.json and forces Renovate to keep
+        # action.yml in lockstep; the fallback is only used when the consumer
+        # has no packageManager field.
+        version: ${{ steps.toolchain.outputs.expected_pnpm || '12.3.4' }}
         run_install: false
 
     - name: Setup Node

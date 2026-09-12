@@ -61,7 +61,7 @@ if (event.kind === "reply") {
 let replySnapshot = await fetchReplySnapshot(github, repo, event.pr, pr);
 if (event.kind === "synchronize") {
   const expectedHead = event.targetHead ?? pr.head.sha;
-  await recoverSynchronizeReplies({
+  const recovered = await recoverSynchronizeReplies({
     repo,
     pullRequest: pr,
     expectedHeadSha: expectedHead,
@@ -71,6 +71,7 @@ if (event.kind === "synchronize") {
     thinking: parseThinkingLevel(process.env.PI_REVIEWER_THINKING),
     piApiKey: process.env.PI_API_KEY,
   });
+  if (recovered > 0) console.log(`[pi-reviewer] recovered ${recovered} review reply(ies) before review`);
   replySnapshot = await fetchReplySnapshot(github, repo, event.pr!);
   pr = replySnapshot.pullRequest;
   if (pr.head.repo?.full_name !== repo || pr.head.sha !== expectedHead) {
@@ -122,7 +123,7 @@ try {
     const latest = await github.getPullRequest(repo, event.pr!);
     if (latest.head.sha === head) {
       const latestSnapshot = await fetchReplySnapshot(github, repo, event.pr!, latest);
-      await recoverSynchronizeReplies({
+      const recovered = await recoverSynchronizeReplies({
         repo,
         pullRequest: latest,
         expectedHeadSha: head,
@@ -132,6 +133,7 @@ try {
         thinking: parseThinkingLevel(process.env.PI_REVIEWER_THINKING),
         piApiKey: process.env.PI_API_KEY,
       });
+      if (recovered > 0) console.log(`[pi-reviewer] recovered ${recovered} review reply(ies) after review`);
     } else {
       console.log("[pi-reviewer] skipping final reply recovery because the PR head changed");
     }

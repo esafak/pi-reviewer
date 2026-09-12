@@ -2,7 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { parseAgentResponseWithStatus } from "../../src/core/output.js";
-import { collectFindingHistory, decodeBatchMarker, encodeBatchMarker, encodeBodyFindingMarker, isAuthorizedReply, isAuthorizedReviewCommand, isEventRangeConsistent, isPiReviewerRootComment, isRenovatePullRequest, isSafePullRequestNumber, normalizeEvent, replyMarker, decodeReplyMarker, selectAuthenticatedBatchMarkers, selectBatchRange } from "../../src/ci/batch.js";
+import { collectFindingHistory, decodeBatchMarker, encodeBatchMarker, encodeBodyFindingMarker, isAuthorizedReviewCommand, isEventRangeConsistent, isPiReviewerRootComment, isRenovatePullRequest, isSafePullRequestNumber, normalizeEvent, replyMarker, decodeReplyMarker, selectAuthenticatedBatchMarkers, selectBatchRange } from "../../src/ci/batch.js";
 
 describe("batch markers", () => {
   it("round trips a versioned authenticated marker", () => {
@@ -190,11 +190,6 @@ describe("event normalization", () => {
     expect(isPiReviewerRootComment({ body: "<!--pi-reviewer:finding:v1--> finding" })).toBe(false);
     expect(isPiReviewerRootComment({ body: "<!-- pi-reviewer :finding:v1 --> finding" })).toBe(false);
     expect(decodeReplyMarker(replyMarker(9, 8, "thread-1"))).toEqual({ version: 1, commentId: 9, parentId: 8, threadId: "thread-1" });
-  });
-  it("gates replies to trusted human repository participants", () => {
-    expect(isAuthorizedReply({ kind: "reply", draft: false, fork: false, actor: { association: "MEMBER", type: "User" } })).toBe(true);
-    expect(isAuthorizedReply({ kind: "reply", draft: false, fork: false, actor: { association: "CONTRIBUTOR", type: "User" } })).toBe(false);
-    expect(isAuthorizedReply({ kind: "reply", draft: false, fork: false, actor: { association: "MEMBER", type: "Bot" } })).toBe(false);
   });
   it("accepts only positive safe PR numbers", () => {
     expect(isSafePullRequestNumber(1)).toBe(true);

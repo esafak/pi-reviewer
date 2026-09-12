@@ -113,7 +113,6 @@ export function normalizeEvent(payload: unknown): Event { const p = (payload ?? 
 export function isEventHeadConsistent(event: Event, head: string) { return !event.afterSha || event.afterSha === head; }
 export function isEventRangeConsistent(event: Event, fromSha: string, head: string) { return isEventHeadConsistent(event, head) && (!event.beforeSha || event.beforeSha === fromSha); }
 export function isAuthorizedReviewCommand(event: Event) { return event.command === "/pi-review" && event.actor?.type !== "Bot" && ["OWNER", "MEMBER", "COLLABORATOR"].includes(event.actor?.association ?? ""); }
-export function isAuthorizedReply(event: Event) { return event.kind === "reply" && event.actor?.type !== "Bot" && ["OWNER", "MEMBER", "COLLABORATOR"].includes(event.actor?.association ?? ""); }
 
 export const replyMarker = (commentId: number, parentId: number, threadId: string) => `<!-- pi-reviewer:reply:v1 ${JSON.stringify({ version: 1, commentId, parentId, threadId })} -->`;
 export function decodeReplyMarker(body: string | null | undefined): { version: 1; commentId: number; parentId: number; threadId: string } | undefined {
