@@ -1,0 +1,18 @@
+src/core/reply-tool.ts
+  h_ea91e2db23540f 11-47,51-61,78-79,82
+tests/core/reply-tool.test.ts
+  h_ea91e2db23540f 41-47
+tests/core/tool-schemas.test.ts
+  h_ea91e2db23540f 1-22
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "21a1502b7e74d8cdddbf776fa33d09bd74a715f4",
+  "prompts": {},
+  "humans": {
+    "h_ea91e2db23540f": {
+      "author": "Emre Şafak <3928300+esafak@users.noreply.github.com>"
+    }
+  }
+}
