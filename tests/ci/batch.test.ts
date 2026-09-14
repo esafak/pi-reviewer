@@ -180,7 +180,11 @@ describe("event normalization", () => {
     expect(isEventRangeConsistent(event, "wrong", "new")).toBe(false);
   });
   it("normalizes review-comment replies without treating them as reviews", () => {
-    expect(normalizeEvent({ action: "created", pull_request: { number: 3, head: { sha: "head", repo: { full_name: "o/r" } }, base: { repo: { full_name: "o/r" } } }, comment: { id: 9, in_reply_to_id: 8, body: "question", user: { login: "human", type: "User" } } })).toMatchObject({ kind: "reply", pr: 3, commentId: 9, parentCommentId: 8, fork: false });
+    const reply = normalizeEvent({ action: "created", pull_request: { number: 3, head: { sha: "head", repo: { full_name: "o/r" } }, base: { sha: "base", repo: { full_name: "o/r" } } }, comment: { id: 9, pull_request_review_id: 77, in_reply_to_id: 8, body: "question", author_association: "CONTRIBUTOR", user: { login: "human", type: "User" } } });
+    expect(reply).toMatchObject({ kind: "reply", pr: 3, headSha: "head", commentId: 9, parentCommentId: 8, fork: false, actor: { login: "human", association: "CONTRIBUTOR", type: "User" } });
+  });
+  it("normalizes a top-level review comment as an unusable reply with no parent", () => {
+    expect(normalizeEvent({ action: "created", pull_request: { number: 3, head: { sha: "head" } }, comment: { id: 9, body: "new finding", user: { login: "human", type: "User" } } })).toMatchObject({ kind: "reply", parentCommentId: undefined });
   });
   it("requires a root finding and authenticates reply marker ownership at selection time", () => {
     const root = { body: "<!-- pi-reviewer:finding:v1 --> finding" };
