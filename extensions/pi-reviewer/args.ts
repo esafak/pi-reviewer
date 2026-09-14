@@ -74,7 +74,8 @@ export function parseArgs(rawArgs: string): ReviewCommandArgs {
       const value = tokens[i + 1];
       if (!value) throw new Error("Missing value for --thinking");
       const valid = ["off", "minimal", "low", "medium", "high", "xhigh"];
-      if (!valid.includes(value)) throw new Error(`Invalid thinking level: ${value}. Expected: ${valid.join(", ")}`);
+      if (!valid.includes(value))
+        throw new Error(`Invalid thinking level: ${value}. Expected: ${valid.join(", ")}`);
       parsed.thinking = value;
       i += 1;
       continue;

@@ -15,13 +15,15 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
     <>
       <div className="layout-backdrop" onClick={onClose} />
       <div className="layout-panel" style={{ minWidth: 240 }}>
-
         <div className="layout-section-label">Layout</div>
         {(["unified", "split"] as const).map((mode) => (
           <button
             key={mode}
             className={`layout-option${viewMode === mode ? " layout-option-active" : ""}`}
-            onClick={() => { patchSettings({ viewMode: mode }); onClose(); }}
+            onClick={() => {
+              patchSettings({ viewMode: mode });
+              onClose();
+            }}
           >
             {viewMode === mode ? <Checkmark /> : <Spacer />}
             {mode.charAt(0).toUpperCase() + mode.slice(1)}
@@ -32,7 +34,14 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
         <div className="layout-section-label">Default model</div>
         <div className="model-list-scroll">
           {availableModels.length === 0 ? (
-            <span style={{ padding: "4px 14px", fontSize: 12, color: "var(--text-muted)", display: "block" }}>
+            <span
+              style={{
+                padding: "4px 14px",
+                fontSize: 12,
+                color: "var(--text-muted)",
+                display: "block",
+              }}
+            >
               No models available
             </span>
           ) : (
@@ -46,7 +55,10 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                     <button
                       key={id}
                       className={`layout-option${isDefault ? " layout-option-active" : ""}`}
-                      onClick={() => { patchSettings({ model: id }); onClose(); }}
+                      onClick={() => {
+                        patchSettings({ model: id });
+                        onClose();
+                      }}
                     >
                       {isDefault ? <Checkmark /> : <Spacer />}
                       <span style={{ flex: 1, textAlign: "left" }}>{m.name}</span>
@@ -64,7 +76,10 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
           <button
             key={level}
             className={`layout-option${thinking === level ? " layout-option-active" : ""}`}
-            onClick={() => { patchSettings({ thinking: level }); onClose(); }}
+            onClick={() => {
+              patchSettings({ thinking: level });
+              onClose();
+            }}
           >
             {thinking === level ? <Checkmark /> : <Spacer />}
             {level}
@@ -80,7 +95,6 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
           {autoCollapseViewed ? <Checkmark /> : <Spacer />}
           Auto-collapse viewed files
         </button>
-
       </div>
     </>
   );
@@ -97,7 +111,18 @@ function groupByProvider(models: ReturnType<typeof useSettings>["availableModels
 
 function Checkmark() {
   return (
-    <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ display: "block", flexShrink: 0 }}>
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="13"
+      height="13"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      style={{ display: "block", flexShrink: 0 }}
+    >
       <polyline points="20 6 9 17 4 12" />
     </svg>
   );

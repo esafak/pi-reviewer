@@ -9,7 +9,7 @@ export interface ContextOptions {
 }
 
 export interface ContextFile {
-  path: string;    // relative to cwd (local) or relative to remoteCwd (SSH)
+  path: string; // relative to cwd (local) or relative to remoteCwd (SSH)
   content: string;
 }
 
@@ -26,7 +26,12 @@ export interface ContextResult {
 
 export const CONTEXT_PROVIDER_EVENT = "pi-reviewer:collect-context-providers";
 
-export type ContextProvider = (opts: { cwd: string; diffFiles: string[]; fs: FsOps; gitRoot?: string }) => Promise<ContextFile[]>;
+export type ContextProvider = (opts: {
+  cwd: string;
+  diffFiles: string[];
+  fs: FsOps;
+  gitRoot?: string;
+}) => Promise<ContextFile[]>;
 
 export interface ContextProviderEvent {
   cwd: string;
@@ -51,9 +56,9 @@ async function readContextFile(
   dir: string,
   filename: string,
 ): Promise<{ path: string; content: string } | null> {
-  for (const candidate of [dir, ...CONFIG_DIRS.map(d => fs.join(dir, d))]) {
+  for (const candidate of [dir, ...CONFIG_DIRS.map((d) => fs.join(dir, d))]) {
     const entries = await fs.list(candidate);
-    const match = entries.find(e => e.toLowerCase() === filename.toLowerCase());
+    const match = entries.find((e) => e.toLowerCase() === filename.toLowerCase());
     if (!match) continue;
     const filePath = fs.join(candidate, match);
     const content = await fs.read(filePath);
@@ -131,8 +136,8 @@ export async function collectProviderContext(
   const merged = new Map<string, ContextFile[]>();
   for (const { name, files } of groups) {
     const existing = merged.get(name) ?? [];
-    const seen = new Set(existing.map(f => f.path));
-    merged.set(name, [...existing, ...files.filter(f => !seen.has(f.path))]);
+    const seen = new Set(existing.map((f) => f.path));
+    merged.set(name, [...existing, ...files.filter((f) => !seen.has(f.path))]);
   }
   return [...merged.entries()]
     .filter(([, files]) => files.length > 0)
@@ -152,11 +157,17 @@ export async function loadContext(options: ContextOptions = {}): Promise<Context
   return { conventions, reviewRules };
 }
 
-export async function loadContextSSH(remote: string, remoteCwd: string, gitRoot?: string): Promise<ContextResult> {
+export async function loadContextSSH(
+  remote: string,
+  remoteCwd: string,
+  gitRoot?: string,
+): Promise<ContextResult> {
   const fs = sshFs(remote);
-  const resolvedGitRoot = gitRoot ?? await sshExec(remote, `git -C ${JSON.stringify(remoteCwd)} rev-parse --show-toplevel`)
-    .then(out => out.trim())
-    .catch(() => remoteCwd);
+  const resolvedGitRoot =
+    gitRoot ??
+    (await sshExec(remote, `git -C ${JSON.stringify(remoteCwd)} rev-parse --show-toplevel`)
+      .then((out) => out.trim())
+      .catch(() => remoteCwd));
 
   const [conventions, reviewRules] = await Promise.all([
     walkUpContextFiles(fs, remoteCwd, ["AGENTS.md", "CLAUDE.md"], resolvedGitRoot),

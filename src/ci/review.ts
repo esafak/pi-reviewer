@@ -6,8 +6,21 @@ import { createReadOnlyTools } from "@earendil-works/pi-coding-agent";
 import { loadContext, mergeContextFiles } from "../core/context.js";
 import { resolveDiff, extractDiffFiles } from "../core/diff-resolver.js";
 import { loadDocContext } from "../core/doc-context.js";
-import { sendOutput, extractLastAssistantText, normalizeFinding, type OutputTarget, type Severity } from "../core/output.js";
-import { buildJSONSystemPrompt, buildUserPrompt, selectResolvedFindings, type MinSeverity, type ActiveFindingContext, type ResolvedFindingContext } from "../core/prompt-builder.js";
+import {
+  sendOutput,
+  extractLastAssistantText,
+  normalizeFinding,
+  type OutputTarget,
+  type Severity,
+} from "../core/output.js";
+import {
+  buildJSONSystemPrompt,
+  buildUserPrompt,
+  selectResolvedFindings,
+  type MinSeverity,
+  type ActiveFindingContext,
+  type ResolvedFindingContext,
+} from "../core/prompt-builder.js";
 import { createReviewTool } from "../core/review-tool.js";
 import { ALLOWED_REACTIONS, createReplyTool, type ReplyAction } from "../core/reply-tool.js";
 import { normalizeMarkdownText } from "../core/ai-fix-footer.js";
@@ -38,7 +51,14 @@ export interface ReviewOptions {
   reactOnNoFindings?: boolean;
 }
 
-const THINKING_LEVELS: readonly ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh"];
+const THINKING_LEVELS: readonly ThinkingLevel[] = [
+  "off",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+];
 
 export function parseThinkingLevel(raw: string | undefined): ThinkingLevel | undefined {
   const value = raw ?? "off";
@@ -51,7 +71,10 @@ export function parseThinkingLevel(raw: string | undefined): ThinkingLevel | und
 /** Parses a comma/newline-separated doc-dirs string into a trimmed, non-empty list. */
 export function parseDocDirs(raw: string | undefined): string[] {
   if (!raw) return [];
-  return raw.split(/[,\n]/).map(d => d.trim()).filter(Boolean);
+  return raw
+    .split(/[,\n]/)
+    .map((d) => d.trim())
+    .filter(Boolean);
 }
 
 export const REPLY_INPUT_LIMITS = { parent: 4_000, userReply: 4_000, thread: 8_000 } as const;
@@ -72,7 +95,9 @@ export function resolveProviderApiKey(provider: string, explicitKey?: string): s
   return explicitKey || process.env[PROVIDER_API_KEY_ENV[provider]] || process.env.PI_API_KEY;
 }
 
-export function buildReplyPrompt(options: Pick<ReplyOptions, "parent" | "userReply" | "thread">): string {
+export function buildReplyPrompt(
+  options: Pick<ReplyOptions, "parent" | "userReply" | "thread">,
+): string {
   return `${PROMPTS.reply.identity} ${PROMPTS.reply.output} Allowed reactions: ${ALLOWED_REACTIONS.join(", ")}. ${PROMPTS.reply.behavior}\n\n${PROMPTS.reply.contextSafety} ${PROMPTS.reply.markdown}\n\n<parent-finding>\n${truncateReplyInput(options.parent, REPLY_INPUT_LIMITS.parent)}\n</parent-finding>\n<user-reply>\n${truncateReplyInput(options.userReply, REPLY_INPUT_LIMITS.userReply)}\n</user-reply>\n<nearby-thread>\n${truncateReplyInput(options.thread, REPLY_INPUT_LIMITS.thread)}\n</nearby-thread>`;
 }
 
@@ -86,19 +111,43 @@ export interface ReplyOptions {
 export function parseReplyAction(raw: unknown): ReplyAction | undefined {
   let value: unknown = raw;
   if (typeof raw === "string") {
-    try { value = JSON.parse(raw.trim()); } catch { return undefined; }
+    try {
+      value = JSON.parse(raw.trim());
+    } catch {
+      return undefined;
+    }
   }
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
   const v = value as Record<string, unknown>;
-  if (v.action === "react" && typeof v.content === "string" && ALLOWED_REACTIONS.includes(v.content as typeof ALLOWED_REACTIONS[number]) && Object.keys(v).every(k => k === "action" || k === "content")) return { action: "react", content: v.content as typeof ALLOWED_REACTIONS[number] };
-  if ((v.action === "reply" || v.action === "resolve") && typeof v.body === "string" && v.body.trim() && Object.keys(v).every(k => k === "action" || k === "body")) {
-    return { action: v.action, body: defuseReplyMetadata(normalizeMarkdownText(v.body)).slice(0, 4000) } as ReplyAction;
+  if (
+    v.action === "react" &&
+    typeof v.content === "string" &&
+    ALLOWED_REACTIONS.includes(v.content as (typeof ALLOWED_REACTIONS)[number]) &&
+    Object.keys(v).every((k) => k === "action" || k === "content")
+  )
+    return { action: "react", content: v.content as (typeof ALLOWED_REACTIONS)[number] };
+  if (
+    (v.action === "reply" || v.action === "resolve") &&
+    typeof v.body === "string" &&
+    v.body.trim() &&
+    Object.keys(v).every((k) => k === "action" || k === "body")
+  ) {
+    return {
+      action: v.action,
+      body: defuseReplyMetadata(normalizeMarkdownText(v.body)).slice(0, 4000),
+    } as ReplyAction;
   }
   return undefined;
 }
 
 export function defuseReplyMetadata(body: string): string {
-  return body.replace(/<!--\s*pi-reviewer\s*:/gi, "<!-- pi-reviewer :").replace(/\bpi-reviewer\s*:\s*(?:batch|finding|body-finding|status|reply)\s*:\s*v1\b/gi, "pi-reviewer : reserved metadata").trim();
+  return body
+    .replace(/<!--\s*pi-reviewer\s*:/gi, "<!-- pi-reviewer :")
+    .replace(
+      /\bpi-reviewer\s*:\s*(?:batch|finding|body-finding|status|reply)\s*:\s*v1\b/gi,
+      "pi-reviewer : reserved metadata",
+    )
+    .trim();
 }
 
 export async function review(options: ReviewOptions): Promise<void> {
@@ -119,7 +168,7 @@ export async function review(options: ReviewOptions): Promise<void> {
   if (warning) console.warn(`[pi-reviewer] ${warning}`);
 
   const context = await loadContext({ cwd });
-  const loadedPaths = mergeContextFiles(context).map(f => f.path);
+  const loadedPaths = mergeContextFiles(context).map((f) => f.path);
   if (loadedPaths.length > 0) {
     console.log(`[pi-reviewer] context loaded: ${loadedPaths.join(", ")}`);
   } else {
@@ -127,15 +176,25 @@ export async function review(options: ReviewOptions): Promise<void> {
   }
 
   const docDirs = options.docDirs ?? parseDocDirs(process.env.PI_REVIEWER_DOC_DIRS);
-  const docContextFiles = docDirs.length > 0
-    ? await loadDocContext({ cwd, diffFiles: extractDiffFiles(diff), docDirs })
-    : [];
+  const docContextFiles =
+    docDirs.length > 0
+      ? await loadDocContext({ cwd, diffFiles: extractDiffFiles(diff), docDirs })
+      : [];
   if (docContextFiles.length > 0) {
-    console.log(`[pi-reviewer] doc-context loaded: ${docContextFiles.map(f => f.path).join(", ")}`);
+    console.log(
+      `[pi-reviewer] doc-context loaded: ${docContextFiles.map((f) => f.path).join(", ")}`,
+    );
   }
 
   const resolvedFindings = selectResolvedFindings(options.resolvedFindings ?? []);
-  const systemPrompt = buildJSONSystemPrompt(context, options.minSeverity, docContextFiles, options.activeFindings, options.priorSummary, resolvedFindings);
+  const systemPrompt = buildJSONSystemPrompt(
+    context,
+    options.minSeverity,
+    docContextFiles,
+    options.activeFindings,
+    options.priorSummary,
+    resolvedFindings,
+  );
   const userPrompt = buildUserPrompt(diff, skippedFiles);
 
   const target: OutputTarget =
@@ -167,7 +226,9 @@ export async function review(options: ReviewOptions): Promise<void> {
   // pi-ai 0.84 moved the static catalog helpers out of the package root.
   // Use the built-in catalog directly; dynamic model discovery is not needed
   // here because the action accepts the same provider/model catalog entries.
-  const resolvedModel = getBuiltinModel(provider as never, modelId as never) as Model<Api> | undefined;
+  const resolvedModel = getBuiltinModel(provider as never, modelId as never) as
+    | Model<Api>
+    | undefined;
   if (!resolvedModel) {
     throw new Error(`Unknown model "${modelStr}" — not found in the pi model registry.`);
   }
@@ -241,7 +302,12 @@ export async function review(options: ReviewOptions): Promise<void> {
           if (Array.isArray(lastAssistant?.content)) {
             shape = (lastAssistant!.content as Array<Record<string, unknown>>).map((p) => ({
               type: p?.type ?? typeof p,
-              len: typeof p?.text === "string" ? p.text.length : typeof p?.thinking === "string" ? p.thinking.length : 0,
+              len:
+                typeof p?.text === "string"
+                  ? p.text.length
+                  : typeof p?.thinking === "string"
+                    ? p.thinking.length
+                    : 0,
             }));
           }
           console.error(
@@ -283,9 +349,27 @@ export async function review(options: ReviewOptions): Promise<void> {
       minSeverity: options.minSeverity as Severity | undefined,
       diff,
       batchMarker: options.batchMarker,
-      existingFindings: options.activeFindings?.map(f => ({ commentId: f.commentId, threadId: f.threadId, reviewId: f.reviewId, issueCommentId: f.issueCommentId, bodyFinding: f.bodyFinding, reviewBody: f.reviewBody })),
-      existingFindingKeys: new Set(options.activeFindings?.filter(f => f.file && f.line && f.side).map(f => normalizeFinding({ file: f.file!, line: f.line!, side: f.side as "LEFT" | "RIGHT", body: f.body }))),
-      allowedFindingIds: new Set(options.activeFindings?.map(f => f.commentId)),
+      existingFindings: options.activeFindings?.map((f) => ({
+        commentId: f.commentId,
+        threadId: f.threadId,
+        reviewId: f.reviewId,
+        issueCommentId: f.issueCommentId,
+        bodyFinding: f.bodyFinding,
+        reviewBody: f.reviewBody,
+      })),
+      existingFindingKeys: new Set(
+        options.activeFindings
+          ?.filter((f) => f.file && f.line && f.side)
+          .map((f) =>
+            normalizeFinding({
+              file: f.file!,
+              line: f.line!,
+              side: f.side as "LEFT" | "RIGHT",
+              body: f.body,
+            }),
+          ),
+      ),
+      allowedFindingIds: new Set(options.activeFindings?.map((f) => f.commentId)),
       resolvedFindings,
       reactOnNoFindings: options.reactOnNoFindings,
     });
@@ -295,18 +379,42 @@ export async function review(options: ReviewOptions): Promise<void> {
 }
 
 /** Generate only a short conversational answer; deliberately has no review tools or diff. */
-export async function generateReplyResponse(options: ReplyOptions & { model?: string; thinking?: ThinkingLevel; piApiKey?: string; replyTimeoutMs?: number }): Promise<ReplyAction> {
+export async function generateReplyResponse(
+  options: ReplyOptions & {
+    model?: string;
+    thinking?: ThinkingLevel;
+    piApiKey?: string;
+    replyTimeoutMs?: number;
+  },
+): Promise<ReplyAction> {
   const modelStr = options.model ?? process.env.PI_REVIEWER_MODEL;
   if (!modelStr) throw new Error("No model configured.");
   const slash = modelStr.indexOf("/");
-  if (slash <= 0 || slash === modelStr.length - 1) throw new Error(`Invalid model format "${modelStr}".`);
-  const resolvedModel = getBuiltinModel(modelStr.slice(0, slash) as never, modelStr.slice(slash + 1) as never) as Model<Api> | undefined;
+  if (slash <= 0 || slash === modelStr.length - 1)
+    throw new Error(`Invalid model format "${modelStr}".`);
+  const resolvedModel = getBuiltinModel(
+    modelStr.slice(0, slash) as never,
+    modelStr.slice(slash + 1) as never,
+  ) as Model<Api> | undefined;
   if (!resolvedModel) throw new Error(`Unknown model "${modelStr}".`);
   const prompt = buildReplyPrompt(options);
   const models = builtinModels();
   const provider = modelStr.slice(0, slash);
   const { tool: replyTool, getResult } = createReplyTool();
-  const agent = new Agent({ initialState: { systemPrompt: "You are Pi Reviewer’s concise thread assistant.", model: resolvedModel, tools: [replyTool], thinkingLevel: options.thinking ?? "off" }, streamFn: models.streamSimple.bind(models), getApiKey: async () => { const key = resolveProviderApiKey(provider, options.piApiKey); if (!key) throw new Error(`No API key is set for provider "${provider}".`); return key; } });
+  const agent = new Agent({
+    initialState: {
+      systemPrompt: "You are Pi Reviewer’s concise thread assistant.",
+      model: resolvedModel,
+      tools: [replyTool],
+      thinkingLevel: options.thinking ?? "off",
+    },
+    streamFn: models.streamSimple.bind(models),
+    getApiKey: async () => {
+      const key = resolveProviderApiKey(provider, options.piApiKey);
+      if (!key) throw new Error(`No API key is set for provider "${provider}".`);
+      return key;
+    },
+  });
   let answer = "";
   let structuredAction: ReplyAction | undefined;
   await new Promise<void>((resolve, reject) => {
@@ -319,16 +427,23 @@ export async function generateReplyResponse(options: ReplyOptions & { model?: st
       if (timer) clearTimeout(timer);
       unsubscribe?.();
       unsubscribe = undefined;
-      if (error) reject(error); else resolve();
+      if (error) reject(error);
+      else resolve();
     };
     unsubscribe = agent.subscribe((event: unknown) => {
       if (settled) return;
       if ((event as { type?: string })?.type !== "agent_end") return;
       const e = event as { messages?: unknown[]; stopReason?: string; errorMessage?: string };
       const lastAssistant = Array.isArray(e.messages)
-        ? [...e.messages].reverse().find((message) => (message as { role?: string })?.role === "assistant") as { stopReason?: string; errorMessage?: string } | undefined
+        ? ([...e.messages]
+            .reverse()
+            .find((message) => (message as { role?: string })?.role === "assistant") as
+            | { stopReason?: string; errorMessage?: string }
+            | undefined)
         : undefined;
-      const errorMessage = (e.stopReason === "error" ? e.errorMessage : undefined) ?? (lastAssistant?.stopReason === "error" ? lastAssistant.errorMessage : undefined);
+      const errorMessage =
+        (e.stopReason === "error" ? e.errorMessage : undefined) ??
+        (lastAssistant?.stopReason === "error" ? lastAssistant.errorMessage : undefined);
       if (errorMessage) {
         settle(new Error(`Agent failed: ${errorMessage}`));
         return;
@@ -368,7 +483,9 @@ export async function generateReplyResponse(options: ReplyOptions & { model?: st
         reject(new Error(`Reply agent timed out after ${timeoutMs}ms`));
       }, timeoutMs);
     }
-    agent.prompt(prompt).catch((error: unknown) => settle(error instanceof Error ? error : new Error(String(error))));
+    agent
+      .prompt(prompt)
+      .catch((error: unknown) => settle(error instanceof Error ? error : new Error(String(error))));
   });
   if (structuredAction) return structuredAction;
   const action = parseReplyAction(answer);

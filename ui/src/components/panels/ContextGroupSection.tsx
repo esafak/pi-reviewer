@@ -10,7 +10,7 @@ export function ContextGroupSection({ name, files }: Props) {
   return (
     <div className="ctx-group">
       <div className="ctx-group-name">{name}</div>
-      {files.map(f => (
+      {files.map((f) => (
         <ContextFileItem key={f.path} path={f.path} content={f.content} />
       ))}
     </div>

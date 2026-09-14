@@ -1,5 +1,10 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { readVerbose, readMinSeverity, readModel, readThinking } from "../../src/core/ui/server/index.js";
+import {
+  readVerbose,
+  readMinSeverity,
+  readModel,
+  readThinking,
+} from "../../src/core/ui/server/index.js";
 import { parseArgs } from "./args.js";
 import { resolveCurrentModelId } from "./model.js";
 import { handleDryRun } from "./handlers/dry-run.js";
@@ -26,15 +31,30 @@ function resolveCommonOpts(
     name: (m.name ?? m.id) as string,
     provider: m.provider as string,
   }));
-  const sessionModel = ctx.model ? { id: ctx.model.id as string, provider: ctx.model.provider as string } : undefined;
+  const sessionModel = ctx.model
+    ? { id: ctx.model.id as string, provider: ctx.model.provider as string }
+    : undefined;
   const currentModelId = resolveCurrentModelId(model, availableModels, sessionModel);
   const defaultThinking = readThinking();
-  return { pi, loaderState, notify, minSeverity, verbose, model, thinking, currentModelId, defaultModel, availableModels, defaultThinking };
+  return {
+    pi,
+    loaderState,
+    notify,
+    minSeverity,
+    verbose,
+    model,
+    thinking,
+    currentModelId,
+    defaultModel,
+    availableModels,
+    defaultThinking,
+  };
 }
 
 export default function (pi: ExtensionAPI): void {
   pi.registerCommand("review", {
-    description: "Review a PR diff with pi-reviewer (flags: --diff, --branch, --pr, --ssh, --ui, --dry-run)",
+    description:
+      "Review a PR diff with pi-reviewer (flags: --diff, --branch, --pr, --ssh, --ui, --dry-run)",
     async handler(args, ctx) {
       const notify = ctx.ui.notify.bind(ctx.ui);
       const loaderState = { stop: () => {} };
@@ -45,14 +65,15 @@ export default function (pi: ExtensionAPI): void {
         const common = resolveCommonOpts(parsed, ctx, pi, notify, loaderState);
 
         if (parsed.dryRun) return void (await handleDryRun({ parsed, cwd: ctx.cwd, ...common }));
-        if (parsed.ssh)    return void (await handleSSHReview({ parsed, ctx, ...common }));
-                           return void (await handleLocalReview({ parsed, ctx, ...common }));
+        if (parsed.ssh) return void (await handleSSHReview({ parsed, ctx, ...common }));
+        return void (await handleLocalReview({ parsed, ctx, ...common }));
       } catch (error) {
         loaderState.stop();
         const message = error instanceof Error ? error.message : String(error);
-        const hint = !sshMode && message.includes("not a git repository")
-          ? "\n\nNot in a git repository — if you're in an SSH session, try adding --ssh."
-          : "";
+        const hint =
+          !sshMode && message.includes("not a git repository")
+            ? "\n\nNot in a git repository — if you're in an SSH session, try adding --ssh."
+            : "";
         notify(`Review failed: ${message}${hint}`, "error");
       }
     },

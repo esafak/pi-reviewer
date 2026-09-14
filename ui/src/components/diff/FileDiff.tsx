@@ -1,6 +1,12 @@
 import { useState, useMemo, useEffect, useRef } from "react";
 import { ReviewComment } from "../../types";
-import { ParsedFile, SplitRow, UnifiedRow, buildSplitRows, buildUnifiedRows } from "../../utils/diff-parser";
+import {
+  ParsedFile,
+  SplitRow,
+  UnifiedRow,
+  buildSplitRows,
+  buildUnifiedRows,
+} from "../../utils/diff-parser";
 import { CommentCard } from "../CommentCard";
 import { getLanguage, highlightLine } from "../../utils/highlight";
 import { useSettings } from "../../context/SettingsContext";
@@ -30,7 +36,7 @@ type PlacementMap = Map<number, PlacedComment[]>;
 
 function buildSplitPlacements(
   fc: Array<{ comment: ReviewComment; idx: number }>,
-  rows: SplitRow[]
+  rows: SplitRow[],
 ): PlacementMap {
   const map: PlacementMap = new Map();
   for (const item of fc) {
@@ -40,29 +46,54 @@ function buildSplitPlacements(
       const row = rows[ri];
       if (row.type === "hunk") continue;
       if (row.type === "ctx") {
-        if (c.side === "LEFT" && row.oln === c.line) { exactIdx = ri; break; }
-        if (c.side === "RIGHT" && row.nln === c.line) { exactIdx = ri; break; }
+        if (c.side === "LEFT" && row.oln === c.line) {
+          exactIdx = ri;
+          break;
+        }
+        if (c.side === "RIGHT" && row.nln === c.line) {
+          exactIdx = ri;
+          break;
+        }
       } else {
-        if (c.side === "LEFT" && row.del?.ln === c.line) { exactIdx = ri; break; }
-        if (c.side === "RIGHT" && row.add?.ln === c.line) { exactIdx = ri; break; }
+        if (c.side === "LEFT" && row.del?.ln === c.line) {
+          exactIdx = ri;
+          break;
+        }
+        if (c.side === "RIGHT" && row.add?.ln === c.line) {
+          exactIdx = ri;
+          break;
+        }
       }
     }
     if (exactIdx !== -1) {
-      const arr = map.get(exactIdx) ?? []; arr.push({ ...item, snapped: false }); map.set(exactIdx, arr);
+      const arr = map.get(exactIdx) ?? [];
+      arr.push({ ...item, snapped: false });
+      map.set(exactIdx, arr);
     } else {
-      let bestIdx = -1, bestDist = Infinity;
+      let bestIdx = -1,
+        bestDist = Infinity;
       for (let ri = 0; ri < rows.length; ri++) {
         const row = rows[ri];
         if (row.type === "hunk") continue;
-        const ln = c.side === "LEFT"
-          ? (row.type === "ctx" ? row.oln : row.del?.ln)
-          : (row.type === "ctx" ? row.nln : row.add?.ln);
+        const ln =
+          c.side === "LEFT"
+            ? row.type === "ctx"
+              ? row.oln
+              : row.del?.ln
+            : row.type === "ctx"
+              ? row.nln
+              : row.add?.ln;
         if (ln === undefined) continue;
         const dist = Math.abs(ln - c.line);
-        if (dist < bestDist) { bestDist = dist; bestIdx = ri; }
+        if (dist < bestDist) {
+          bestDist = dist;
+          bestIdx = ri;
+        }
       }
       if (bestIdx !== -1) {
-        const arr = map.get(bestIdx) ?? []; arr.push({ ...item, snapped: true }); map.set(bestIdx, arr);
+        const arr = map.get(bestIdx) ?? [];
+        arr.push({ ...item, snapped: true });
+        map.set(bestIdx, arr);
       }
     }
   }
@@ -71,7 +102,7 @@ function buildSplitPlacements(
 
 function buildUnifiedPlacements(
   fc: Array<{ comment: ReviewComment; idx: number }>,
-  rows: UnifiedRow[]
+  rows: UnifiedRow[],
 ): PlacementMap {
   const map: PlacementMap = new Map();
   for (const item of fc) {
@@ -80,27 +111,47 @@ function buildUnifiedPlacements(
     for (let ri = 0; ri < rows.length; ri++) {
       const row = rows[ri];
       if (row.type === "hunk") continue;
-      if (row.type === "del" && c.side === "LEFT" && row.oln === c.line) { exactIdx = ri; break; }
-      if (row.type === "add" && c.side === "RIGHT" && row.nln === c.line) { exactIdx = ri; break; }
+      if (row.type === "del" && c.side === "LEFT" && row.oln === c.line) {
+        exactIdx = ri;
+        break;
+      }
+      if (row.type === "add" && c.side === "RIGHT" && row.nln === c.line) {
+        exactIdx = ri;
+        break;
+      }
       if (row.type === "ctx") {
-        if (c.side === "LEFT" && row.oln === c.line) { exactIdx = ri; break; }
-        if (c.side === "RIGHT" && row.nln === c.line) { exactIdx = ri; break; }
+        if (c.side === "LEFT" && row.oln === c.line) {
+          exactIdx = ri;
+          break;
+        }
+        if (c.side === "RIGHT" && row.nln === c.line) {
+          exactIdx = ri;
+          break;
+        }
       }
     }
     if (exactIdx !== -1) {
-      const arr = map.get(exactIdx) ?? []; arr.push({ ...item, snapped: false }); map.set(exactIdx, arr);
+      const arr = map.get(exactIdx) ?? [];
+      arr.push({ ...item, snapped: false });
+      map.set(exactIdx, arr);
     } else {
-      let bestIdx = -1, bestDist = Infinity;
+      let bestIdx = -1,
+        bestDist = Infinity;
       for (let ri = 0; ri < rows.length; ri++) {
         const row = rows[ri];
         if (row.type === "hunk") continue;
         const ln = c.side === "LEFT" ? row.oln : row.nln;
         if (ln === undefined) continue;
         const dist = Math.abs(ln - c.line);
-        if (dist < bestDist) { bestDist = dist; bestIdx = ri; }
+        if (dist < bestDist) {
+          bestDist = dist;
+          bestIdx = ri;
+        }
       }
       if (bestIdx !== -1) {
-        const arr = map.get(bestIdx) ?? []; arr.push({ ...item, snapped: true }); map.set(bestIdx, arr);
+        const arr = map.get(bestIdx) ?? [];
+        arr.push({ ...item, snapped: true });
+        map.set(bestIdx, arr);
       }
     }
   }
@@ -113,10 +164,24 @@ function hl(content: string | undefined, lang: string | null): React.ReactNode {
   return <span dangerouslySetInnerHTML={{ __html: highlightLine(content, lang) }} />;
 }
 
-export function FileDiff({ file, comments: fc, decisions, onDecide, selected, forceOpen, viewed, onToggleViewed, collapseSignal }: Props) {
-  const { settings: { viewMode, autoCollapseViewed } } = useSettings();
+export function FileDiff({
+  file,
+  comments: fc,
+  decisions,
+  onDecide,
+  selected,
+  forceOpen,
+  viewed,
+  onToggleViewed,
+  collapseSignal,
+}: Props) {
+  const {
+    settings: { viewMode, autoCollapseViewed },
+  } = useSettings();
   const autoCollapseRef = useRef(autoCollapseViewed);
-  useEffect(() => { autoCollapseRef.current = autoCollapseViewed; }, [autoCollapseViewed]);
+  useEffect(() => {
+    autoCollapseRef.current = autoCollapseViewed;
+  }, [autoCollapseViewed]);
   const allRows = useMemo(() => buildSplitRows(file), [file]);
   const allUnifiedRows = useMemo(() => buildUnifiedRows(file), [file]);
   const lang = useMemo(() => getLanguage(file.file), [file.file]);
@@ -150,14 +215,15 @@ export function FileDiff({ file, comments: fc, decisions, onDecide, selected, fo
       </span>
     ) : null;
 
-  const sizeBadge = isLarge ? (
-    <span className="cbadge">{activeRows.length} lines</span>
-  ) : null;
+  const sizeBadge = isLarge ? <span className="cbadge">{activeRows.length} lines</span> : null;
 
   const hasUnresolved = fc.some(({ idx }) => !decisions[idx]?.decision);
 
   const splitPlacements = useMemo(() => buildSplitPlacements(fc, allRows), [fc, allRows]);
-  const unifiedPlacements = useMemo(() => buildUnifiedPlacements(fc, allUnifiedRows), [fc, allUnifiedRows]);
+  const unifiedPlacements = useMemo(
+    () => buildUnifiedPlacements(fc, allUnifiedRows),
+    [fc, allUnifiedRows],
+  );
 
   const trows: React.ReactNode[] = [];
   rows.forEach(function (row, ri) {
@@ -165,7 +231,7 @@ export function FileDiff({ file, comments: fc, decisions, onDecide, selected, fo
       trows.push(
         <tr key={`h${ri}`} className="hunk-hdr">
           <td colSpan={5}>{row.label}</td>
-        </tr>
+        </tr>,
       );
       return;
     }
@@ -173,8 +239,10 @@ export function FileDiff({ file, comments: fc, decisions, onDecide, selected, fo
     if (row.type === "expand") {
       trows.push(
         <tr key={`e${ri}`} className="expand-hdr">
-          <td colSpan={5}>··· {row.hiddenCount} hidden lines ({row.fromOln}–{row.toOln}) ···</td>
-        </tr>
+          <td colSpan={5}>
+            ··· {row.hiddenCount} hidden lines ({row.fromOln}–{row.toOln}) ···
+          </td>
+        </tr>,
       );
       return;
     }
@@ -191,7 +259,7 @@ export function FileDiff({ file, comments: fc, decisions, onDecide, selected, fo
           <td className="sep" />
           <td className="ln ln-ctx">{String(row.nln)}</td>
           <td className="code code-ctx">{hl(row.content, lang)}</td>
-        </tr>
+        </tr>,
       );
     } else {
       const d = row.del;
@@ -203,7 +271,7 @@ export function FileDiff({ file, comments: fc, decisions, onDecide, selected, fo
           <td className="sep" />
           <td className={`ln ${a ? "ln-add" : "ln-add-empty"}`}>{a ? String(a.ln) : ""}</td>
           <td className={`code ${a ? "code-add" : "code-add-empty"}`}>{hl(a?.content, lang)}</td>
-        </tr>
+        </tr>,
       );
     }
 
@@ -225,7 +293,9 @@ export function FileDiff({ file, comments: fc, decisions, onDecide, selected, fo
           <tr key={`c${item.idx}`} className="cmt-row">
             {isLeft ? (
               <>
-                <td colSpan={2} className="cmt-cell">{card}</td>
+                <td colSpan={2} className="cmt-cell">
+                  {card}
+                </td>
                 <td className="sep" />
                 <td colSpan={2} className="cmt-empty" />
               </>
@@ -233,10 +303,12 @@ export function FileDiff({ file, comments: fc, decisions, onDecide, selected, fo
               <>
                 <td colSpan={2} className="cmt-empty" />
                 <td className="sep" />
-                <td colSpan={2} className="cmt-cell">{card}</td>
+                <td colSpan={2} className="cmt-cell">
+                  {card}
+                </td>
               </>
             )}
-          </tr>
+          </tr>,
         );
       });
     }
@@ -248,7 +320,7 @@ export function FileDiff({ file, comments: fc, decisions, onDecide, selected, fo
       unifiedTrows.push(
         <tr key={`uh${ri}`} className="hunk-hdr">
           <td colSpan={4}>{row.label}</td>
-        </tr>
+        </tr>,
       );
       return;
     }
@@ -256,8 +328,10 @@ export function FileDiff({ file, comments: fc, decisions, onDecide, selected, fo
     if (row.type === "expand") {
       unifiedTrows.push(
         <tr key={`ue${ri}`} className="expand-hdr">
-          <td colSpan={4}>··· {row.hiddenCount} hidden lines ({row.fromOln}–{row.toOln}) ···</td>
-        </tr>
+          <td colSpan={4}>
+            ··· {row.hiddenCount} hidden lines ({row.fromOln}–{row.toOln}) ···
+          </td>
+        </tr>,
       );
       return;
     }
@@ -273,7 +347,7 @@ export function FileDiff({ file, comments: fc, decisions, onDecide, selected, fo
           <td className="ln ln-del-empty" />
           <td className="sign sign-del">-</td>
           <td className="code code-del">{hl(row.content, lang)}</td>
-        </tr>
+        </tr>,
       );
     } else if (row.type === "add") {
       unifiedTrows.push(
@@ -282,7 +356,7 @@ export function FileDiff({ file, comments: fc, decisions, onDecide, selected, fo
           <td className="ln ln-add">{String(row.nln)}</td>
           <td className="sign sign-add">+</td>
           <td className="code code-add">{hl(row.content, lang)}</td>
-        </tr>
+        </tr>,
       );
     } else {
       unifiedTrows.push(
@@ -291,7 +365,7 @@ export function FileDiff({ file, comments: fc, decisions, onDecide, selected, fo
           <td className="ln ln-ctx">{String(row.nln)}</td>
           <td className="sign sign-ctx"> </td>
           <td className="code code-ctx">{hl(row.content, lang)}</td>
-        </tr>
+        </tr>,
       );
     }
 
@@ -310,18 +384,36 @@ export function FileDiff({ file, comments: fc, decisions, onDecide, selected, fo
         );
         unifiedTrows.push(
           <tr key={`uc${item.idx}`} className="cmt-row">
-            <td colSpan={4} className="cmt-cell">{card}</td>
-          </tr>
+            <td colSpan={4} className="cmt-cell">
+              {card}
+            </td>
+          </tr>,
         );
       });
     }
   });
 
   return (
-    <div className={`fblock${selected ? " fblock-selected" : ""}${viewed ? " fblock-viewed" : ""}`} id={`file-${CSS.escape(file.file)}`}>
+    <div
+      className={`fblock${selected ? " fblock-selected" : ""}${viewed ? " fblock-viewed" : ""}`}
+      id={`file-${CSS.escape(file.file)}`}
+    >
       <div className="fhdr" onClick={() => setCollapsed((c) => !c)} style={{ cursor: "pointer" }}>
         <span className={`collapse-icon${collapsed ? " collapse-icon--collapsed" : ""}`}>
-          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{display:"block"}}><polyline points="6 9 12 15 18 9"/></svg>
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            style={{ display: "block" }}
+          >
+            <polyline points="6 9 12 15 18 9" />
+          </svg>
         </span>
         <span className="fname">{file.file}</span>
         {badge}

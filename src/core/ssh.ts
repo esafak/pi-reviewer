@@ -1,7 +1,11 @@
 import { execFile } from "node:child_process";
 import { readFile, readdir } from "node:fs/promises";
 import { dirname, join, relative } from "node:path";
-import { dirname as posixDirname, join as posixJoin, relative as posixRelative } from "node:path/posix";
+import {
+  dirname as posixDirname,
+  join as posixJoin,
+  relative as posixRelative,
+} from "node:path/posix";
 
 export interface FsOps {
   read(p: string): Promise<string | null>;
@@ -19,12 +23,18 @@ export interface SshState {
 export function localFs(): FsOps {
   return {
     async read(p) {
-      try { return await readFile(p, "utf-8"); }
-      catch { return null; }
+      try {
+        return await readFile(p, "utf-8");
+      } catch {
+        return null;
+      }
     },
     async list(dir) {
-      try { return await readdir(dir); }
-      catch { return []; }
+      try {
+        return await readdir(dir);
+      } catch {
+        return [];
+      }
     },
     join,
     dirname,
@@ -44,14 +54,22 @@ export function sshExec(remote: string, command: string): Promise<string> {
 export function sshFs(remote: string): FsOps {
   return {
     async read(p) {
-      try { return await sshExec(remote, `cat ${JSON.stringify(p)}`); }
-      catch { return null; }
+      try {
+        return await sshExec(remote, `cat ${JSON.stringify(p)}`);
+      } catch {
+        return null;
+      }
     },
     async list(dir) {
       try {
         const out = await sshExec(remote, `ls -1 ${JSON.stringify(dir)}`);
-        return out.split("\n").map(l => l.trim()).filter(Boolean);
-      } catch { return []; }
+        return out
+          .split("\n")
+          .map((l) => l.trim())
+          .filter(Boolean);
+      } catch {
+        return [];
+      }
     },
     join: posixJoin,
     dirname: posixDirname,

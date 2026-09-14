@@ -12,7 +12,14 @@ export interface EventAccumulatorOptions {
   onProgress?: (text: string) => void;
 }
 
-type RawUsage = { input: number; output: number; cacheRead: number; cacheWrite: number; totalTokens: number; cost: { total: number } };
+type RawUsage = {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  totalTokens: number;
+  cost: { total: number };
+};
 type RawUsageMessage = { role?: string; usage?: RawUsage };
 
 function accumulateUsage(acc: TokenUsage, u: RawUsage): void {
@@ -26,12 +33,20 @@ function accumulateUsage(acc: TokenUsage, u: RawUsage): void {
 }
 
 function emptyUsage(): TokenUsage {
-  return { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens: 0, cost: 0, turns: 0 };
+  return {
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    totalTokens: 0,
+    cost: 0,
+    turns: 0,
+  };
 }
 
 export function createEventAccumulator(
   onUnexpected: (line: string) => void,
-  options?: EventAccumulatorOptions
+  options?: EventAccumulatorOptions,
 ): EventAccumulator {
   let lastReviewText = "";
   let tokenUsage: TokenUsage | undefined;
@@ -82,7 +97,10 @@ export function createEventAccumulator(
           options.onProgress("Thinking…");
         } else if (aev.type === "thinking_delta" && aev.delta) {
           thinkingBuf += aev.delta;
-          const sentenceEnd = Math.max(thinkingBuf.lastIndexOf(". "), thinkingBuf.lastIndexOf(".\n"));
+          const sentenceEnd = Math.max(
+            thinkingBuf.lastIndexOf(". "),
+            thinkingBuf.lastIndexOf(".\n"),
+          );
           if (sentenceEnd > 60) {
             options.onProgress(thinkingBuf.slice(0, sentenceEnd + 1).trim());
             thinkingBuf = thinkingBuf.slice(sentenceEnd + 1);

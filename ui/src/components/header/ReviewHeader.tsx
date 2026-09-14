@@ -30,15 +30,62 @@ interface ReviewHeaderProps {
 }
 
 export function ReviewHeader(props: ReviewHeaderProps) {
-  const { theme, onThemeToggle, source, ssh, sidebarOpen, onSidebarToggle, currentModel, currentThinking, tokenUsage, severityCounts, decidedCount, totalComments, allDone, hasAccepted, onJumpToNext, onAction, allCollapsed, onToggleCollapse, onSummaryToggle, onContextToggle, contextCount, contextGroups } = props;
+  const {
+    theme,
+    onThemeToggle,
+    source,
+    ssh,
+    sidebarOpen,
+    onSidebarToggle,
+    currentModel,
+    currentThinking,
+    tokenUsage,
+    severityCounts,
+    decidedCount,
+    totalComments,
+    allDone,
+    hasAccepted,
+    onJumpToNext,
+    onAction,
+    allCollapsed,
+    onToggleCollapse,
+    onSummaryToggle,
+    onContextToggle,
+    contextCount,
+    contextGroups,
+  } = props;
 
   return (
     <div id="sticky-top">
       <HeaderBrand theme={theme} onThemeToggle={onThemeToggle} />
       <div id="hdr2">
-        <HeaderSource source={source} ssh={ssh} sidebarOpen={sidebarOpen} onSidebarToggle={onSidebarToggle} currentModel={currentModel} currentThinking={currentThinking} tokenUsage={tokenUsage} />
-        <HeaderProgress severityCounts={severityCounts} decidedCount={decidedCount} totalComments={totalComments} allDone={allDone} onJumpToNext={onJumpToNext} />
-        <HeaderActions allDone={allDone} hasAccepted={hasAccepted} onAction={onAction} allCollapsed={allCollapsed} onToggleCollapse={onToggleCollapse} onSummaryToggle={onSummaryToggle} onContextToggle={onContextToggle} contextCount={contextCount} contextGroups={contextGroups} />
+        <HeaderSource
+          source={source}
+          ssh={ssh}
+          sidebarOpen={sidebarOpen}
+          onSidebarToggle={onSidebarToggle}
+          currentModel={currentModel}
+          currentThinking={currentThinking}
+          tokenUsage={tokenUsage}
+        />
+        <HeaderProgress
+          severityCounts={severityCounts}
+          decidedCount={decidedCount}
+          totalComments={totalComments}
+          allDone={allDone}
+          onJumpToNext={onJumpToNext}
+        />
+        <HeaderActions
+          allDone={allDone}
+          hasAccepted={hasAccepted}
+          onAction={onAction}
+          allCollapsed={allCollapsed}
+          onToggleCollapse={onToggleCollapse}
+          onSummaryToggle={onSummaryToggle}
+          onContextToggle={onContextToggle}
+          contextCount={contextCount}
+          contextGroups={contextGroups}
+        />
       </div>
     </div>
   );

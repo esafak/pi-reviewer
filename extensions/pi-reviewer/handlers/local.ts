@@ -5,10 +5,18 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { parseAgentResponse, formatForTerminal, type ReviewResult } from "../../../src/core/output.js";
+import {
+  parseAgentResponse,
+  formatForTerminal,
+  type ReviewResult,
+} from "../../../src/core/output.js";
 import { loadContext } from "../../../src/core/context.js";
 import { resolveDiff, extractDiffFiles } from "../../../src/core/diff-resolver.js";
-import { buildJSONSystemPrompt, buildUserPrompt, type MinSeverity } from "../../../src/core/prompt-builder.js";
+import {
+  buildJSONSystemPrompt,
+  buildUserPrompt,
+  type MinSeverity,
+} from "../../../src/core/prompt-builder.js";
 import { readDefaultBranch } from "../../../src/core/ui/server/index.js";
 import { createEventAccumulator } from "../events.js";
 import { setReviewFooter } from "../footer.js";
@@ -30,30 +38,53 @@ export interface RunLocalOptions {
 }
 
 export async function runLocalReview(opts: RunLocalOptions): Promise<ReviewResult> {
-  const { systemPrompt, userPrompt, cwd, minSeverity, verbose, model, thinking, stopLoader, notify } = opts;
+  const {
+    systemPrompt,
+    userPrompt,
+    cwd,
+    minSeverity,
+    verbose,
+    model,
+    thinking,
+    stopLoader,
+    notify,
+  } = opts;
 
   const tempPath = path.join(tmpdir(), `pi-reviewer-system-prompt-${randomUUID()}.md`);
   await writeFile(tempPath, systemPrompt, { encoding: "utf-8", mode: 0o600 });
 
   try {
     const piArgs = [
-      "--mode", "json", "-p", "--no-session",
+      "--mode",
+      "json",
+      "-p",
+      "--no-session",
       ...(verbose ? ["--verbose"] : []),
       ...(model ? ["--model", model] : []),
       ...(thinking ? ["--thinking", thinking] : []),
-      "--append-system-prompt", tempPath,
+      "--append-system-prompt",
+      tempPath,
       userPrompt,
     ];
-    const proc = spawn("pi", piArgs, { cwd, env: process.env, shell: false, stdio: ["ignore", "pipe", "pipe"] });
+    const proc = spawn("pi", piArgs, {
+      cwd,
+      env: process.env,
+      shell: false,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
 
     let stderr = "";
     let stdoutBuffer = "";
     let rawLines: string[] = [];
     const accumulator = createEventAccumulator(
-      (line) => { rawLines.push(line); },
+      (line) => {
+        rawLines.push(line);
+      },
       {
-        onProgress(text) { notify(text); },
-      }
+        onProgress(text) {
+          notify(text);
+        },
+      },
     );
 
     return await new Promise<ReviewResult>((resolve, reject) => {
@@ -64,7 +95,9 @@ export async function runLocalReview(opts: RunLocalOptions): Promise<ReviewResul
         for (const line of lines) accumulator.process(line);
       });
 
-      proc.stderr.on("data", (chunk) => { stderr += chunk.toString(); });
+      proc.stderr.on("data", (chunk) => {
+        stderr += chunk.toString();
+      });
 
       proc.on("error", (error) => {
         if ((error as NodeJS.ErrnoException).code === "ENOENT") {
@@ -84,7 +117,9 @@ export async function runLocalReview(opts: RunLocalOptions): Promise<ReviewResul
         }
 
         if (code && code !== 0) {
-          reject(new Error(`pi process exited with code ${code}${stderr ? `: ${stderr.trim()}` : ""}`));
+          reject(
+            new Error(`pi process exited with code ${code}${stderr ? `: ${stderr.trim()}` : ""}`),
+          );
           return;
         }
 
@@ -93,17 +128,30 @@ export async function runLocalReview(opts: RunLocalOptions): Promise<ReviewResul
         if (!reviewText) {
           const modelLabel = model ? `"${model}"` : "the current model";
           if (accumulator.hadAPIError()) {
-            reject(new Error(`${modelLabel} returned an API error. Check your API key or switch models with /review --model anthropic/claude-sonnet-4-6. You can also change the default in the settings panel or delete ~/.pi/pi-reviewer/config.json.`));
+            reject(
+              new Error(
+                `${modelLabel} returned an API error. Check your API key or switch models with /review --model anthropic/claude-sonnet-4-6. You can also change the default in the settings panel or delete ~/.pi/pi-reviewer/config.json.`,
+              ),
+            );
             return;
           }
           if (accumulator.hadThinkingOnly()) {
-            reject(new Error(`${modelLabel} produced thinking output but no text response — it may not support structured JSON output. Try /review --model anthropic/claude-sonnet-4-6.`));
+            reject(
+              new Error(
+                `${modelLabel} produced thinking output but no text response — it may not support structured JSON output. Try /review --model anthropic/claude-sonnet-4-6.`,
+              ),
+            );
             return;
           }
           const parts: string[] = [];
           if (stderr.trim()) parts.push(stderr.trim());
-          if (rawLines.length > 0) parts.push(`unexpected output:\n${rawLines.slice(-5).join("\n")}`);
-          reject(new Error(`pi process exited without producing a review.${parts.length ? `\n${parts.join("\n")}` : ""}`));
+          if (rawLines.length > 0)
+            parts.push(`unexpected output:\n${rawLines.slice(-5).join("\n")}`);
+          reject(
+            new Error(
+              `pi process exited without producing a review.${parts.length ? `\n${parts.join("\n")}` : ""}`,
+            ),
+          );
           return;
         }
 
@@ -122,7 +170,21 @@ export interface HandleLocalReviewOptions extends CommonHandlerOptions {
 }
 
 export async function handleLocalReview(opts: HandleLocalReviewOptions): Promise<void> {
-  const { parsed, ctx, pi, loaderState, minSeverity, verbose, model, thinking, currentModelId, defaultModel, availableModels, defaultThinking, notify } = opts;
+  const {
+    parsed,
+    ctx,
+    pi,
+    loaderState,
+    minSeverity,
+    verbose,
+    model,
+    thinking,
+    currentModelId,
+    defaultModel,
+    availableModels,
+    defaultThinking,
+    notify,
+  } = opts;
 
   notify("Fetching diff…");
   const { diff, source, warning, skippedFiles } = await resolveDiff({
@@ -141,8 +203,17 @@ export async function handleLocalReview(opts: HandleLocalReviewOptions): Promise
   });
   const diffFiles = extractDiffFiles(diff);
   const providerCwd = parsed.dir ? path.resolve(ctx.cwd, parsed.dir) : ctx.cwd;
-  const { groups: allContextGroups, contextFiles, contextPaths } = await buildContextGroups(
-    pi.events, providerCwd, context, diffFiles, undefined, parsed.dir ? ctx.cwd : undefined,
+  const {
+    groups: allContextGroups,
+    contextFiles,
+    contextPaths,
+  } = await buildContextGroups(
+    pi.events,
+    providerCwd,
+    context,
+    diffFiles,
+    undefined,
+    parsed.dir ? ctx.cwd : undefined,
   );
   if (contextPaths.length > 0) notify(`Context:\n${contextPaths.map((p) => `  ${p}`).join("\n")}`);
 
@@ -150,13 +221,30 @@ export async function handleLocalReview(opts: HandleLocalReviewOptions): Promise
   const userPrompt = buildUserPrompt(diff, skippedFiles);
 
   loaderState.stop = setReviewFooter(ctx, source, { model: currentModelId, thinking });
-  const result = await runLocalReview({ systemPrompt, userPrompt, cwd: ctx.cwd, minSeverity, verbose, model, thinking, stopLoader: loaderState.stop, notify });
+  const result = await runLocalReview({
+    systemPrompt,
+    userPrompt,
+    cwd: ctx.cwd,
+    minSeverity,
+    verbose,
+    model,
+    thinking,
+    stopLoader: loaderState.stop,
+    notify,
+  });
 
   if (parsed.ui) {
     const injectionMsg = await handleUIReview({
-      result, diff, source, cwd: ctx.cwd, notify,
-      currentModel: currentModelId, defaultModel, availableModels,
-      defaultThinking, contextGroups: allContextGroups,
+      result,
+      diff,
+      source,
+      cwd: ctx.cwd,
+      notify,
+      currentModel: currentModelId,
+      defaultModel,
+      availableModels,
+      defaultThinking,
+      contextGroups: allContextGroups,
     });
     if (injectionMsg) pi.sendUserMessage(injectionMsg);
     return;
@@ -164,6 +252,10 @@ export async function handleLocalReview(opts: HandleLocalReviewOptions): Promise
 
   const formatted = formatForTerminal(result);
   const date = new Date().toISOString().replace("T", " ").slice(0, 19);
-  await writeFile(path.join(ctx.cwd, "pi-review.md"), `# Pi Review — ${source}\n\n> ${date}\n\n---\n\n${formatted}\n`, "utf-8");
+  await writeFile(
+    path.join(ctx.cwd, "pi-review.md"),
+    `# Pi Review — ${source}\n\n> ${date}\n\n---\n\n${formatted}\n`,
+    "utf-8",
+  );
   notify("Review saved → pi-review.md");
 }

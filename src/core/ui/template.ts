@@ -7,9 +7,27 @@ import type { ContextGroup } from "../context.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-export function buildHTML(result: ReviewResult, diff: string, source?: string, ssh?: boolean, theme?: "dark" | "light", viewMode?: "split" | "unified", modelConfig?: UIModelConfig, contextGroups?: ContextGroup[]): string {
+export function buildHTML(
+  result: ReviewResult,
+  diff: string,
+  source?: string,
+  ssh?: boolean,
+  theme?: "dark" | "light",
+  viewMode?: "split" | "unified",
+  modelConfig?: UIModelConfig,
+  contextGroups?: ContextGroup[],
+): string {
   const templateHtml = readFileSync(join(__dirname, "../../../dist-ui/index.html"), "utf-8");
-  const escaped = JSON.stringify({ result, diff, source, ssh, theme, viewMode, ...modelConfig, contextGroups })
+  const escaped = JSON.stringify({
+    result,
+    diff,
+    source,
+    ssh,
+    theme,
+    viewMode,
+    ...modelConfig,
+    contextGroups,
+  })
     .replace(/</g, "\\u003c")
     .replace(/>/g, "\\u003e")
     .replace(/&/g, "\\u0026");

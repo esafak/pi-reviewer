@@ -127,7 +127,9 @@ function getPath(baseUrl: string, path: string): Promise<{ status: number; body:
     http
       .get({ hostname: base.hostname, port: base.port, path }, (res) => {
         let body = "";
-        res.on("data", (chunk) => { body += chunk; });
+        res.on("data", (chunk) => {
+          body += chunk;
+        });
         res.on("end", () => resolve({ status: res.statusCode ?? 0, body }));
       })
       .on("error", reject);
@@ -205,14 +207,16 @@ describe("startUIServer", () => {
 
   it("returns 405 and Allow for an unsupported method on a known route", async () => {
     const handle = await startUIServer(RESULT, DIFF);
-    const { status, allow } = await new Promise<{ status: number; allow: string | undefined }>((resolve, reject) => {
-      const req = http.request(handle.url + "/ping", { method: "POST" }, (res) => {
-        res.resume();
-        res.on("end", () => resolve({ status: res.statusCode ?? 0, allow: res.headers.allow }));
-      });
-      req.on("error", reject);
-      req.end();
-    });
+    const { status, allow } = await new Promise<{ status: number; allow: string | undefined }>(
+      (resolve, reject) => {
+        const req = http.request(handle.url + "/ping", { method: "POST" }, (res) => {
+          res.resume();
+          res.on("end", () => resolve({ status: res.statusCode ?? 0, allow: res.headers.allow }));
+        });
+        req.on("error", reject);
+        req.end();
+      },
+    );
     expect(status).toBe(405);
     expect(allow).toBe("GET");
     await handle.close();
@@ -264,7 +268,10 @@ describe("startUIServer", () => {
 
   it("POST /action with an invalid action shape returns 400", async () => {
     const handle = await startUIServer(RESULT, DIFF);
-    const { status } = await post(handle.url + "/action", { type: "send", decisions: [{ index: "0" }] });
+    const { status } = await post(handle.url + "/action", {
+      type: "send",
+      decisions: [{ index: "0" }],
+    });
     expect(status).toBe(400);
     await handle.close();
   });

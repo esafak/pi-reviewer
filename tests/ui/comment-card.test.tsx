@@ -58,13 +58,7 @@ describe("CommentCard response disclosure", () => {
 
   it("renders the same disclosure for orphan comments", () => {
     const onDecide = vi.fn();
-    render(
-      <OrphanComments
-        comments={[{ comment, idx: 3 }]}
-        decisions={{}}
-        onDecide={onDecide}
-      />,
-    );
+    render(<OrphanComments comments={[{ comment, idx: 3 }]} decisions={{}} onDecide={onDecide} />);
 
     expect(document.querySelector("#cmt-3 details")).toBeTruthy();
   });
@@ -75,7 +69,10 @@ describe("CommentCard response disclosure", () => {
       "diff --git a/src/example.ts b/src/example.ts\n@@ -12,1 +12,1 @@\n-old\n+new\n",
     );
     render(
-      <SettingsProvider initial={{ viewMode: "split", autoCollapseViewed: false }} availableModels={[]}>
+      <SettingsProvider
+        initial={{ viewMode: "split", autoCollapseViewed: false }}
+        availableModels={[]}
+      >
         <FileDiff
           file={file}
           comments={[{ comment: { ...comment, side: "RIGHT" }, idx: 4 }]}
@@ -93,7 +90,9 @@ describe("CommentCard response disclosure", () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
     const onDecide = vi.fn();
-    const view = render(<CommentCard comment={{ ...comment, side: "RIGHT" }} idx={6} onDecide={onDecide} />);
+    const view = render(
+      <CommentCard comment={{ ...comment, side: "RIGHT" }} idx={6} onDecide={onDecide} />,
+    );
 
     const disclosure = view.container.querySelector(".cc-body");
     expect(disclosure?.textContent).toContain("WARN: src/example.ts:12");

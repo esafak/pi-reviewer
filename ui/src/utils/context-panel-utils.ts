@@ -7,5 +7,5 @@ export function countContextFiles(groups: ContextGroup[]): number {
 export function flattenContextFiles(
   groups: ContextGroup[],
 ): Array<ContextFile & { group: string }> {
-  return groups.flatMap(g => g.files.map(f => ({ ...f, group: g.name })));
+  return groups.flatMap((g) => g.files.map((f) => ({ ...f, group: g.name })));
 }

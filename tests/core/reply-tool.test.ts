@@ -35,7 +35,9 @@ describe("createReplyTool", () => {
 
   it("rejects blank bodies at execution time", async () => {
     const { tool } = createReplyTool();
-    await expect(tool.execute("tc-1", { action: "reply", body: "  " })).rejects.toThrow(/non-empty/);
+    await expect(tool.execute("tc-1", { action: "reply", body: "  " })).rejects.toThrow(
+      /non-empty/,
+    );
   });
 
   it("enforces the per-action requirements at execution time", async () => {
@@ -47,9 +49,15 @@ describe("createReplyTool", () => {
 
   it("accepts each valid action through schema validation", () => {
     const { tool } = createReplyTool();
-    expect(() => validateToolArguments(tool, toolCall({ action: "react", content: "+1" }))).not.toThrow();
-    expect(() => validateToolArguments(tool, toolCall({ action: "reply", body: "Answer" }))).not.toThrow();
-    expect(() => validateToolArguments(tool, toolCall({ action: "resolve", body: "Closed" }))).not.toThrow();
+    expect(() =>
+      validateToolArguments(tool, toolCall({ action: "react", content: "+1" })),
+    ).not.toThrow();
+    expect(() =>
+      validateToolArguments(tool, toolCall({ action: "reply", body: "Answer" })),
+    ).not.toThrow();
+    expect(() =>
+      validateToolArguments(tool, toolCall({ action: "resolve", body: "Closed" })),
+    ).not.toThrow();
   });
 
   it.each([

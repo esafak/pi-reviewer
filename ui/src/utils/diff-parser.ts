@@ -83,7 +83,8 @@ export function buildUnifiedRows(file: ParsedFile): UnifiedRow[] {
     const next = file.hunks[hi + 1];
     if (next) {
       const hidden = next.os - o;
-      if (hidden > 0) rows.push({ type: "expand", hiddenCount: hidden, fromOln: o, toOln: next.os - 1 });
+      if (hidden > 0)
+        rows.push({ type: "expand", hiddenCount: hidden, fromOln: o, toOln: next.os - 1 });
     }
   }
 
@@ -128,7 +129,8 @@ export function buildSplitRows(file: ParsedFile): SplitRow[] {
     const next = file.hunks[hi + 1];
     if (next) {
       const hidden = next.os - o;
-      if (hidden > 0) rows.push({ type: "expand", hiddenCount: hidden, fromOln: o, toOln: next.os - 1 });
+      if (hidden > 0)
+        rows.push({ type: "expand", hiddenCount: hidden, fromOln: o, toOln: next.os - 1 });
     }
   }
 

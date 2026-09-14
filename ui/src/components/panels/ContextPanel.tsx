@@ -15,9 +15,7 @@ export function ContextPanel({ groups, onClose }: Props) {
       {groups.length === 0 ? (
         <p className="ctx-empty">No context files loaded.</p>
       ) : (
-        groups.map(g => (
-          <ContextGroupSection key={g.name} name={g.name} files={g.files} />
-        ))
+        groups.map((g) => <ContextGroupSection key={g.name} name={g.name} files={g.files} />)
       )}
     </SidePanel>
   );

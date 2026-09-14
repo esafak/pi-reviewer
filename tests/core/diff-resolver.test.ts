@@ -37,7 +37,11 @@ describe("resolveDiff", () => {
   it("resolves an exact SHA-to-SHA diff", async () => {
     execFileSyncMock.mockReturnValue("diff --git a/a.ts b/a.ts\n");
     const result = await resolveDiff({ fromSha: "base", toSha: "head", cwd: "/repo" });
-    expect(execFileSyncMock).toHaveBeenCalledWith("git", ["diff", "base..head"], expect.objectContaining({ cwd: "/repo" }));
+    expect(execFileSyncMock).toHaveBeenCalledWith(
+      "git",
+      ["diff", "base..head"],
+      expect.objectContaining({ cwd: "/repo" }),
+    );
     expect(result.source).toBe("git diff base..head");
   });
 

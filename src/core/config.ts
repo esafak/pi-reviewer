@@ -31,7 +31,9 @@ export function saveConfig(config: PiReviewerConfig): void {
   try {
     mkdirSync(CONFIG_DIR, { recursive: true });
     writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2), "utf-8");
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
 }
 
 const VALID: { [K in keyof PiReviewerConfig]?: readonly string[] } = {
@@ -47,7 +49,8 @@ export function applyConfigPatch(patch: Partial<PiReviewerConfig>): void {
     const value = patch[key];
     const allowed = VALID[key];
     if (allowed) {
-      if (typeof value === "string" && allowed.includes(value)) (next as Record<string, unknown>)[key] = value;
+      if (typeof value === "string" && allowed.includes(value))
+        (next as Record<string, unknown>)[key] = value;
     } else if (key === "branch") {
       if (typeof value === "string") next.branch = value || undefined;
     } else if (typeof value === "string" || typeof value === "boolean") {
@@ -57,11 +60,27 @@ export function applyConfigPatch(patch: Partial<PiReviewerConfig>): void {
   saveConfig(next);
 }
 
-export function readTheme(): "dark" | "light" { return readConfig().theme ?? "dark"; }
-export function readViewMode(): "split" | "unified" { return readConfig().viewMode ?? "split"; }
-export function readVerbose(): boolean { return readConfig().verbose ?? false; }
-export function readMinSeverity(): MinSeverity { return readConfig().minSeverity ?? "INFO"; }
-export function readModel(): string | undefined { return readConfig().model; }
-export function readThinking(): string | undefined { return readConfig().thinking as ThinkingLevel | undefined; }
-export function readAutoCollapseViewed(): boolean { return readConfig().autoCollapseViewed ?? false; }
-export function readDefaultBranch(): string | undefined { return readConfig().branch; }
+export function readTheme(): "dark" | "light" {
+  return readConfig().theme ?? "dark";
+}
+export function readViewMode(): "split" | "unified" {
+  return readConfig().viewMode ?? "split";
+}
+export function readVerbose(): boolean {
+  return readConfig().verbose ?? false;
+}
+export function readMinSeverity(): MinSeverity {
+  return readConfig().minSeverity ?? "INFO";
+}
+export function readModel(): string | undefined {
+  return readConfig().model;
+}
+export function readThinking(): string | undefined {
+  return readConfig().thinking as ThinkingLevel | undefined;
+}
+export function readAutoCollapseViewed(): boolean {
+  return readConfig().autoCollapseViewed ?? false;
+}
+export function readDefaultBranch(): string | undefined {
+  return readConfig().branch;
+}

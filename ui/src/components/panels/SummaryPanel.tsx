@@ -9,7 +9,10 @@ interface Props {
 export function SummaryPanel({ summary, onClose }: Props) {
   return (
     <SidePanel title="Overview" onClose={onClose}>
-      <div className="summary-body md" dangerouslySetInnerHTML={{ __html: renderMarkdown(summary) }} />
+      <div
+        className="summary-body md"
+        dangerouslySetInnerHTML={{ __html: renderMarkdown(summary) }}
+      />
     </SidePanel>
   );
 }

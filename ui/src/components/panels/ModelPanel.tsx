@@ -8,14 +8,22 @@ interface ModelPanelProps {
   onClose: () => void;
 }
 
-export function ModelPanel({ currentModel, defaultModel, availableModels, onModelChange, onClose }: ModelPanelProps) {
+export function ModelPanel({
+  currentModel,
+  defaultModel,
+  availableModels,
+  onModelChange,
+  onClose,
+}: ModelPanelProps) {
   return (
     <>
       <div className="layout-backdrop" onClick={onClose} />
       <div className="layout-panel">
         <div className="layout-section-label">Model</div>
         {availableModels.length === 0 ? (
-          <span className="layout-section-label" style={{ fontStyle: "italic" }}>No models available</span>
+          <span className="layout-section-label" style={{ fontStyle: "italic" }}>
+            No models available
+          </span>
         ) : (
           availableModels.map((m) => {
             const id = `${m.provider}/${m.id}`;
@@ -25,7 +33,10 @@ export function ModelPanel({ currentModel, defaultModel, availableModels, onMode
               <button
                 key={id}
                 className={`layout-option${isDefault ? " layout-option-active" : ""}`}
-                onClick={() => { onModelChange(id); onClose(); }}
+                onClick={() => {
+                  onModelChange(id);
+                  onClose();
+                }}
               >
                 {isDefault ? <Checkmark /> : <Spacer />}
                 <span style={{ flex: 1, textAlign: "left" }}>{m.name}</span>
@@ -43,7 +54,18 @@ export function ModelPanel({ currentModel, defaultModel, availableModels, onMode
 
 function Checkmark() {
   return (
-    <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ display: "block", flexShrink: 0 }}>
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="13"
+      height="13"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      style={{ display: "block", flexShrink: 0 }}
+    >
       <polyline points="20 6 9 17 4 12" />
     </svg>
   );

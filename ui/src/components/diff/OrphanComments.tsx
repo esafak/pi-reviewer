@@ -19,9 +19,12 @@ export function OrphanComments({ comments, decisions, onDecide }: Props) {
   if (comments.length === 0) return null;
 
   const pendingCount = comments.filter(({ idx }) => !decisions[idx]?.decision).length;
-  const badge = pendingCount > 0
-    ? <span className="badge badge-pending">{pendingCount} pending</span>
-    : <span className="badge badge-ok">all decided</span>;
+  const badge =
+    pendingCount > 0 ? (
+      <span className="badge badge-pending">{pendingCount} pending</span>
+    ) : (
+      <span className="badge badge-ok">all decided</span>
+    );
 
   return (
     <div className="fblock fblock-orphan">
