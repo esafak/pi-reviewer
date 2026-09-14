@@ -13,7 +13,7 @@ function makeLargeDiff(): string {
 
   // Simulate ~6 hunks spread across lines 80-580 of a large file
   const hunks = [
-    { start: 80,  count: 40 },
+    { start: 80, count: 40 },
     { start: 150, count: 35 },
     { start: 240, count: 45 },
     { start: 340, count: 30 },
@@ -25,9 +25,9 @@ function makeLargeDiff(): string {
     const ctx = 3;
     const changed = hunk.count - ctx * 2;
     const origStart = hunk.start;
-    const newStart  = hunk.start;
-    const origLen   = hunk.count;
-    const newLen    = hunk.count + changed; // each del gets a replacement add
+    const newStart = hunk.start;
+    const origLen = hunk.count;
+    const newLen = hunk.count + changed; // each del gets a replacement add
 
     lines.push(`@@ -${origStart},${origLen} +${newStart},${newLen} @@`);
 
@@ -116,7 +116,9 @@ function makeFirstFileDiff(): string {
   lines.push(`+    if (!valid) {`);
   lines.push(`+      record.count += 1;`);
   lines.push(`+      if (record.count >= (this.config.maxAttempts ?? MAX_LOGIN_ATTEMPTS)) {`);
-  lines.push(`+        record.lockedUntil = Date.now() + (this.config.lockoutDuration ?? LOCKOUT_MS);`);
+  lines.push(
+    `+        record.lockedUntil = Date.now() + (this.config.lockoutDuration ?? LOCKOUT_MS);`,
+  );
   lines.push(`+      }`);
   lines.push(`+      this.attempts.set(email, record);`);
   lines.push(`+      throw new Error("Invalid credentials");`);
@@ -135,7 +137,9 @@ function makeFirstFileDiff(): string {
   lines.push(`-  private generateToken(user: User): string {`);
   lines.push(`-    return crypto.randomBytes(16).toString("hex");`);
   lines.push(`+  private generateToken(user: User): string {`);
-  lines.push(`+    const payload = \`\${user.id}:\${Date.now()}:\${crypto.randomBytes(8).toString("hex")}\`;`);
+  lines.push(
+    `+    const payload = \`\${user.id}:\${Date.now()}:\${crypto.randomBytes(8).toString("hex")}\`;`,
+  );
   lines.push(`+    return crypto.createHmac("sha256", this.secret).update(payload).digest("hex");`);
   lines.push(`   }`);
   lines.push(` `);
@@ -223,7 +227,9 @@ function makeFirstFileDiff(): string {
   lines.push(`     return token;`);
   lines.push(`   }`);
   lines.push(` `);
-  lines.push(`   async resetPassword(email: string, token: string, newPassword: string): Promise<void> {`);
+  lines.push(
+    `   async resetPassword(email: string, token: string, newPassword: string): Promise<void> {`,
+  );
   lines.push(`-    const stored = this.store.get("reset:" + email);`);
   lines.push(`-    if (stored !== token) throw new Error("Invalid reset token");`);
   lines.push(`+    const entry = await this.store.get("reset:" + email);`);
@@ -285,14 +291,26 @@ export const mockData: UIData = {
       name: "built-in",
       description: "AGENTS.md / CLAUDE.md found in this repo",
       files: [
-        { path: "AGENTS.md", content: "# Project conventions\n- Use strict TypeScript\n- All public functions must be typed\n- Prefer functional patterns over classes" },
-        { path: "REVIEW.md", content: "# Review rules\n- Always check error handling\n- Validate inputs at system boundaries" },
+        {
+          path: "AGENTS.md",
+          content:
+            "# Project conventions\n- Use strict TypeScript\n- All public functions must be typed\n- Prefer functional patterns over classes",
+        },
+        {
+          path: "REVIEW.md",
+          content:
+            "# Review rules\n- Always check error handling\n- Validate inputs at system boundaries",
+        },
       ],
     },
     {
       name: "pi-context",
       files: [
-        { path: "docs/architecture.md", content: "# Architecture\n\nThis project follows a layered architecture:\n1. Extensions layer (extensions/)\n2. Core layer (src/core/)\n3. CI layer (src/ci/)" },
+        {
+          path: "docs/architecture.md",
+          content:
+            "# Architecture\n\nThis project follows a layered architecture:\n1. Extensions layer (extensions/)\n2. Core layer (src/core/)\n3. CI layer (src/ci/)",
+        },
       ],
     },
   ],
@@ -367,7 +385,10 @@ export const mockData: UIData = {
       },
     ],
   },
-  diff: makeFirstFileDiff() + makeLargeDiff() + `diff --git a/src/core/output.ts b/src/core/output.ts
+  diff:
+    makeFirstFileDiff() +
+    makeLargeDiff() +
+    `diff --git a/src/core/output.ts b/src/core/output.ts
 index 111aaaa..222bbbb 100644
 --- a/src/core/output.ts
 +++ b/src/core/output.ts

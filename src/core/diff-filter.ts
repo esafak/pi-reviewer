@@ -51,7 +51,9 @@ export function filterDiff(raw: string, maxChars = DEFAULT_MAX_CHARS): FilterRes
   const warnings: string[] = [];
 
   if (excluded.length > 0) {
-    warnings.push(`${excluded.length} noise file${excluded.length > 1 ? "s" : ""} excluded (${excluded.join(", ")})`);
+    warnings.push(
+      `${excluded.length} noise file${excluded.length > 1 ? "s" : ""} excluded (${excluded.join(", ")})`,
+    );
   }
 
   const included: string[] = [];
@@ -71,7 +73,7 @@ export function filterDiff(raw: string, maxChars = DEFAULT_MAX_CHARS): FilterRes
 
   if (skippedFiles.length > 0) {
     warnings.push(
-      `${skippedFiles.length} file${skippedFiles.length > 1 ? "s" : ""} skipped — diff exceeded ${maxChars.toLocaleString()} chars (${skippedFiles.join(", ")})`
+      `${skippedFiles.length} file${skippedFiles.length > 1 ? "s" : ""} skipped — diff exceeded ${maxChars.toLocaleString()} chars (${skippedFiles.join(", ")})`,
     );
   }
 

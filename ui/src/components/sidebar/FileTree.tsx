@@ -12,7 +12,13 @@ export function buildTree(files: string[], commentsByFile: Record<string, number
   function insert(nodes: TreeNode[], segments: string[], fullPath: string): void {
     const [head, ...rest] = segments;
     if (rest.length === 0) {
-      nodes.push({ name: head, fullPath, isDir: false, children: [], commentCount: commentsByFile[fullPath] ?? 0 });
+      nodes.push({
+        name: head,
+        fullPath,
+        isDir: false,
+        children: [],
+        commentCount: commentsByFile[fullPath] ?? 0,
+      });
       return;
     }
     let dir = nodes.find((n) => n.isDir && n.name === head);
@@ -49,13 +55,27 @@ export function buildTree(files: string[], commentsByFile: Record<string, number
 }
 
 const FolderIcon = () => (
-  <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" style={{ color: "#54aeff", flexShrink: 0 }}>
+  <svg
+    width="13"
+    height="13"
+    viewBox="0 0 24 24"
+    fill="currentColor"
+    style={{ color: "#54aeff", flexShrink: 0 }}
+  >
     <path d="M2 6a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6z" />
   </svg>
 );
 
 const FileIcon = () => (
-  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ color: "var(--text-muted)", flexShrink: 0 }}>
+  <svg
+    width="13"
+    height="13"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    style={{ color: "var(--text-muted)", flexShrink: 0 }}
+  >
     <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
     <polyline points="14 2 14 8 20 8" />
   </svg>
@@ -71,7 +91,15 @@ interface TreeNodesProps {
   onSelectFile: (path: string) => void;
 }
 
-function TreeNodes({ nodes, depth, collapsedFolders, toggleFolder, folderPrefix, selectedFile, onSelectFile }: TreeNodesProps) {
+function TreeNodes({
+  nodes,
+  depth,
+  collapsedFolders,
+  toggleFolder,
+  folderPrefix,
+  selectedFile,
+  onSelectFile,
+}: TreeNodesProps) {
   return (
     <>
       {nodes.map((node) => {
@@ -87,14 +115,43 @@ function TreeNodes({ nodes, depth, collapsedFolders, toggleFolder, folderPrefix,
                 onClick={() => toggleFolder(folderPath)}
               >
                 <span className="tree-chevron">
-                  {collapsed
-                    ? <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{display:"block"}}><polyline points="9 18 15 12 9 6"/></svg>
-                    : <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{display:"block"}}><polyline points="6 9 12 15 18 9"/></svg>
-                  }
+                  {collapsed ? (
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      width="12"
+                      height="12"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      style={{ display: "block" }}
+                    >
+                      <polyline points="9 18 15 12 9 6" />
+                    </svg>
+                  ) : (
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      width="12"
+                      height="12"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      style={{ display: "block" }}
+                    >
+                      <polyline points="6 9 12 15 18 9" />
+                    </svg>
+                  )}
                 </span>
                 <FolderIcon />
                 <span className="tree-name">{node.name}</span>
-                {node.commentCount > 0 && collapsed && <span className="cbadge">{node.commentCount}</span>}
+                {node.commentCount > 0 && collapsed && (
+                  <span className="cbadge">{node.commentCount}</span>
+                )}
               </div>
               {!collapsed && (
                 <TreeNodes
@@ -117,7 +174,10 @@ function TreeNodes({ nodes, depth, collapsedFolders, toggleFolder, folderPrefix,
             className={`tree-file${node.fullPath === selectedFile ? " tree-file-active" : ""}`}
             style={{ paddingLeft: `${12 + depth * 16}px` }}
             href={`#file-${CSS.escape(node.fullPath!)}`}
-            onClick={(e) => { e.stopPropagation(); onSelectFile(node.fullPath!); }}
+            onClick={(e) => {
+              e.stopPropagation();
+              onSelectFile(node.fullPath!);
+            }}
           >
             <FileIcon />
             <span className="tree-name">{node.name}</span>
@@ -137,7 +197,13 @@ interface FileTreeProps {
   onSelectFile: (path: string) => void;
 }
 
-export function FileTree({ tree, collapsedFolders, toggleFolder, selectedFile, onSelectFile }: FileTreeProps) {
+export function FileTree({
+  tree,
+  collapsedFolders,
+  toggleFolder,
+  selectedFile,
+  onSelectFile,
+}: FileTreeProps) {
   return (
     <div id="file-sidebar">
       <TreeNodes

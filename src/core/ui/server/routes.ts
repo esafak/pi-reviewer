@@ -84,7 +84,8 @@ export function compileRoute(route: RouteDef): CompiledRoute {
   }
 
   const names = new Set<string>();
-  const pathSegments = route.path === "" || route.path === "/" ? [] : route.path.slice(1).split("/");
+  const pathSegments =
+    route.path === "" || route.path === "/" ? [] : route.path.slice(1).split("/");
   const segments = pathSegments.map((segment): PathSegment => {
     if (!segment.startsWith(":")) return { kind: "static", value: segment };
     const name = segment.slice(1);
@@ -145,10 +146,9 @@ export function matchPath(route: CompiledRoute, pathname: string): PathMatch {
   return { params };
 }
 
-function findRoute(req: IncomingMessage):
-  | { readonly match: RouteMatch }
-  | { readonly status: 400 | 404 | 405; readonly allow?: string }
-{
+function findRoute(
+  req: IncomingMessage,
+): { readonly match: RouteMatch } | { readonly status: 400 | 404 | 405; readonly allow?: string } {
   let url: URL;
   try {
     url = new URL(req.url ?? "/", "http://localhost");
@@ -156,18 +156,26 @@ function findRoute(req: IncomingMessage):
     return { status: 400 };
   }
 
-  const pathResults = COMPILED_ROUTES
-    .map((route) => ({ route, params: matchPath(route, url.pathname) }));
-  if (pathResults.some((result) => result.params !== undefined && "decodeError" in result.params)) return { status: 400 };
+  const pathResults = COMPILED_ROUTES.map((route) => ({
+    route,
+    params: matchPath(route, url.pathname),
+  }));
+  if (pathResults.some((result) => result.params !== undefined && "decodeError" in result.params))
+    return { status: 400 };
   const pathMatches = pathResults
-    .filter((result): result is { route: CompiledRoute; params: { params: Readonly<Record<string, string>> } } =>
-      result.params !== undefined && "params" in result.params,
+    .filter(
+      (
+        result,
+      ): result is { route: CompiledRoute; params: { params: Readonly<Record<string, string>> } } =>
+        result.params !== undefined && "params" in result.params,
     )
     .map((result) => ({ route: result.route, params: result.params.params }));
   if (pathMatches.length === 0) return { status: 404 };
 
   const method = req.method;
-  const methodMatch = pathMatches.find((result) => result.route.methods.some((allowedMethod) => allowedMethod === method));
+  const methodMatch = pathMatches.find((result) =>
+    result.route.methods.some((allowedMethod) => allowedMethod === method),
+  );
   if (!methodMatch) {
     const allow = [...new Set(pathMatches.flatMap((result) => result.route.methods))].join(", ");
     return { status: 405, allow };
@@ -182,27 +190,51 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function isConfigPatch(value: unknown): value is Partial<PiReviewerConfig> {
   if (!isRecord(value)) return false;
   for (const [key, item] of Object.entries(value)) {
-    if (!["theme", "viewMode", "verbose", "minSeverity", "model", "thinking", "autoCollapseViewed", "branch"].includes(key)) {
+    if (
+      ![
+        "theme",
+        "viewMode",
+        "verbose",
+        "minSeverity",
+        "model",
+        "thinking",
+        "autoCollapseViewed",
+        "branch",
+      ].includes(key)
+    ) {
       return false;
     }
     if (key === "theme" && item !== "dark" && item !== "light") return false;
     if (key === "viewMode" && item !== "split" && item !== "unified") return false;
     if (["verbose", "autoCollapseViewed"].includes(key) && typeof item !== "boolean") return false;
-    if (["minSeverity", "thinking", "model", "branch"].includes(key) && typeof item !== "string") return false;
+    if (["minSeverity", "thinking", "model", "branch"].includes(key) && typeof item !== "string")
+      return false;
   }
   return true;
 }
 
 function isUIAction(value: unknown): value is UIAction {
-  if (!isRecord(value) || !["send", "save", "save-and-send", "closed"].includes(value.type as string)) return false;
+  if (
+    !isRecord(value) ||
+    !["send", "save", "save-and-send", "closed"].includes(value.type as string)
+  )
+    return false;
   if (!Array.isArray(value.decisions)) return false;
   if (value.globalComment !== undefined && typeof value.globalComment !== "string") return false;
-  if (value.selectedGroups !== undefined && (!Array.isArray(value.selectedGroups) ||
-    !value.selectedGroups.every((group) => typeof group === "string"))) return false;
-  return value.decisions.every((decision) =>
-    isRecord(decision) && typeof decision.index === "number" && Number.isInteger(decision.index) && decision.index >= 0 &&
-    ["accept", "reject", "discuss"].includes(decision.decision as string) &&
-    (decision.discussText === undefined || typeof decision.discussText === "string"),
+  if (
+    value.selectedGroups !== undefined &&
+    (!Array.isArray(value.selectedGroups) ||
+      !value.selectedGroups.every((group) => typeof group === "string"))
+  )
+    return false;
+  return value.decisions.every(
+    (decision) =>
+      isRecord(decision) &&
+      typeof decision.index === "number" &&
+      Number.isInteger(decision.index) &&
+      decision.index >= 0 &&
+      ["accept", "reject", "discuss"].includes(decision.decision as string) &&
+      (decision.discussText === undefined || typeof decision.discussText === "string"),
   );
 }
 

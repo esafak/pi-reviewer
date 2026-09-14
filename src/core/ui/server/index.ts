@@ -8,9 +8,24 @@ import { readTheme, readViewMode, readAutoCollapseViewed } from "../../config.js
 import { createRequestHandler } from "./routes.js";
 import type { UIModelConfig, UIAction, UIServerHandle } from "./types.js";
 
-export type { ModelInfo, UIModelConfig, ActionType, CommentDecision, UIAction, UIServerHandle } from "./types.js";
+export type {
+  ModelInfo,
+  UIModelConfig,
+  ActionType,
+  CommentDecision,
+  UIAction,
+  UIServerHandle,
+} from "./types.js";
 export type { ContextGroup } from "../../context.js";
-export { readTheme, readViewMode, readVerbose, readMinSeverity, readModel, readThinking, readDefaultBranch } from "../../config.js";
+export {
+  readTheme,
+  readViewMode,
+  readVerbose,
+  readMinSeverity,
+  readModel,
+  readThinking,
+  readDefaultBranch,
+} from "../../config.js";
 
 const HEARTBEAT_MS = 45_000;
 
@@ -22,13 +37,24 @@ export async function startUIServer(
   modelConfig?: UIModelConfig,
   contextGroups?: ContextGroup[],
 ): Promise<UIServerHandle> {
-  const html = buildHTML(result, diff, source, ssh, readTheme(), readViewMode(), {
-    ...modelConfig,
-    autoCollapseViewed: readAutoCollapseViewed(),
-  }, contextGroups);
+  const html = buildHTML(
+    result,
+    diff,
+    source,
+    ssh,
+    readTheme(),
+    readViewMode(),
+    {
+      ...modelConfig,
+      autoCollapseViewed: readAutoCollapseViewed(),
+    },
+    contextGroups,
+  );
 
   let resolveAction!: (a: UIAction) => void;
-  const actionPromise = new Promise<UIAction>((r) => { resolveAction = r; });
+  const actionPromise = new Promise<UIAction>((r) => {
+    resolveAction = r;
+  });
   let heartbeatTimer: ReturnType<typeof setTimeout> | undefined;
   let resolved = false;
 
@@ -42,10 +68,7 @@ export async function startUIServer(
   function resetHeartbeat() {
     if (resolved) return;
     clearTimeout(heartbeatTimer);
-    heartbeatTimer = setTimeout(
-      () => resolveOnce({ type: "closed", decisions: [] }),
-      HEARTBEAT_MS,
-    );
+    heartbeatTimer = setTimeout(() => resolveOnce({ type: "closed", decisions: [] }), HEARTBEAT_MS);
   }
 
   const handler = createRequestHandler(html, resolveOnce, resetHeartbeat);

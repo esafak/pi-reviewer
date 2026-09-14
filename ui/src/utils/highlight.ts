@@ -34,21 +34,38 @@ hljs.registerLanguage("kotlin", kotlin);
 hljs.registerLanguage("markdown", markdown);
 
 const EXT_MAP: Record<string, string> = {
-  ts: "typescript", tsx: "typescript",
-  js: "javascript", jsx: "javascript", mjs: "javascript", cjs: "javascript",
+  ts: "typescript",
+  tsx: "typescript",
+  js: "javascript",
+  jsx: "javascript",
+  mjs: "javascript",
+  cjs: "javascript",
   py: "python",
   go: "go",
   rs: "rust",
   java: "java",
-  cpp: "cpp", cc: "cpp", cxx: "cpp", c: "cpp", h: "cpp", hpp: "cpp",
-  css: "css", scss: "css", less: "css",
+  cpp: "cpp",
+  cc: "cpp",
+  cxx: "cpp",
+  c: "cpp",
+  h: "cpp",
+  hpp: "cpp",
+  css: "css",
+  scss: "css",
+  less: "css",
   json: "json",
-  yaml: "yaml", yml: "yaml",
-  sh: "bash", bash: "bash",
-  html: "xml", htm: "xml", xml: "xml", svg: "xml",
+  yaml: "yaml",
+  yml: "yaml",
+  sh: "bash",
+  bash: "bash",
+  html: "xml",
+  htm: "xml",
+  xml: "xml",
+  svg: "xml",
   rb: "ruby",
   swift: "swift",
-  kt: "kotlin", kts: "kotlin",
+  kt: "kotlin",
+  kts: "kotlin",
   md: "markdown",
 };
 
@@ -58,10 +75,7 @@ export function getLanguage(filename: string): string | null {
 }
 
 function escapeHtml(str: string): string {
-  return str
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
+  return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 export function highlightLine(content: string, lang: string): string {

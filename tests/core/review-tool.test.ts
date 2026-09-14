@@ -120,37 +120,68 @@ describe("createReviewTool", () => {
     expect(() => validateToolArguments(tool, toolCall(args))).toThrow(/Validation failed/);
   });
 
-  it.each(["", "   ", "\n\t", "🟡", "🟡 🔴", "😀", "🧪"]) ("schema rejects a non-meaningful finding body (%j)", (body) => {
-    const { tool } = createReviewTool();
-    const args = { ...validArgs(), comments: [{ ...validArgs().comments[0], body }] };
-    expect(() => validateToolArguments(tool, toolCall(args))).toThrow(/Validation failed/);
-  });
+  it.each(["", "   ", "\n\t", "🟡", "🟡 🔴", "😀", "🧪"])(
+    "schema rejects a non-meaningful finding body (%j)",
+    (body) => {
+      const { tool } = createReviewTool();
+      const args = { ...validArgs(), comments: [{ ...validArgs().comments[0], body }] };
+      expect(() => validateToolArguments(tool, toolCall(args))).toThrow(/Validation failed/);
+    },
+  );
 
-  it.each(["日本語の問題", "Проблема требует исправления"]) ("schema accepts non-Latin meaningful prose (%j)", (body) => {
-    const { tool } = createReviewTool();
-    const args = { ...validArgs(), comments: [{ ...validArgs().comments[0], body }] };
-    expect(() => validateToolArguments(tool, toolCall(args))).not.toThrow();
-  });
+  it.each(["日本語の問題", "Проблема требует исправления"])(
+    "schema accepts non-Latin meaningful prose (%j)",
+    (body) => {
+      const { tool } = createReviewTool();
+      const args = { ...validArgs(), comments: [{ ...validArgs().comments[0], body }] };
+      expect(() => validateToolArguments(tool, toolCall(args))).not.toThrow();
+    },
+  );
 
-  it.each(["🟡", "🟡 🔴", "😀", "🧪"]) ("runtime rejects an emoji-only finding body (%j)", async (body) => {
-    const { tool } = createReviewTool();
-    const args = { ...validArgs(), comments: [{ ...validArgs().comments[0], body }] };
-    await expect(tool.execute("tc-1", args)).rejects.toThrow(/meaningful prose/);
-  });
+  it.each(["🟡", "🟡 🔴", "😀", "🧪"])(
+    "runtime rejects an emoji-only finding body (%j)",
+    async (body) => {
+      const { tool } = createReviewTool();
+      const args = { ...validArgs(), comments: [{ ...validArgs().comments[0], body }] };
+      await expect(tool.execute("tc-1", args)).rejects.toThrow(/meaningful prose/);
+    },
+  );
 
   it("schema validates finding updates", () => {
     const { tool } = createReviewTool();
-    const args = { ...validArgs(), finding_updates: [{ comment_id: 7, status: "PARTIALLY_RESOLVED", explanation: "Changed validation; logging remains." }] };
+    const args = {
+      ...validArgs(),
+      finding_updates: [
+        {
+          comment_id: 7,
+          status: "PARTIALLY_RESOLVED",
+          explanation: "Changed validation; logging remains.",
+        },
+      ],
+    };
     expect(() => validateToolArguments(tool, toolCall(args))).not.toThrow();
     args.finding_updates[0].status = "UNKNOWN";
     expect(() => validateToolArguments(tool, toolCall(args))).toThrow(/Validation failed/);
-    const tooLong = { ...validArgs(), finding_updates: [{ comment_id: 7, status: "RESOLVED", explanation: "x".repeat(2001) }] };
+    const tooLong = {
+      ...validArgs(),
+      finding_updates: [{ comment_id: 7, status: "RESOLVED", explanation: "x".repeat(2001) }],
+    };
     expect(() => validateToolArguments(tool, toolCall(tooLong))).toThrow(/Validation failed/);
   });
 
   it("schema validates re-raise fields and bounds", () => {
     const { tool } = createReviewTool();
-    const args = { ...validArgs(), comments: [{ ...validArgs().comments[0], resolved_finding_id: "inline:42", re_raise_reason: "MATERIALLY_CHANGED", re_raise_evidence: "behavior changed" }] };
+    const args = {
+      ...validArgs(),
+      comments: [
+        {
+          ...validArgs().comments[0],
+          resolved_finding_id: "inline:42",
+          re_raise_reason: "MATERIALLY_CHANGED",
+          re_raise_evidence: "behavior changed",
+        },
+      ],
+    };
     expect(() => validateToolArguments(tool, toolCall(args))).not.toThrow();
     args.comments[0].re_raise_reason = "INVALID";
     expect(() => validateToolArguments(tool, toolCall(args))).toThrow(/Validation failed/);

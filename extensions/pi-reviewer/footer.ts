@@ -3,7 +3,11 @@ import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 
 const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
-export function setReviewFooter(ctx: ExtensionContext, source: string, opts?: { model?: string; thinking?: string }): () => void {
+export function setReviewFooter(
+  ctx: ExtensionContext,
+  source: string,
+  opts?: { model?: string; thinking?: string },
+): () => void {
   let spinnerIndex = 0;
   let spinnerTimer: ReturnType<typeof setInterval> | undefined;
 
@@ -33,7 +37,9 @@ export function setReviewFooter(ctx: ExtensionContext, source: string, opts?: { 
         if (opts?.model) modelParts.push(opts.model.split("/").pop() ?? opts.model);
         if (opts?.thinking) modelParts.push(opts.thinking);
         const modelTag = modelParts.length ? theme.fg("dim", modelParts.join(" · ")) : "";
-        const right = [modelTag, statuses ? theme.fg("dim", statuses) : ""].filter(Boolean).join("  ");
+        const right = [modelTag, statuses ? theme.fg("dim", statuses) : ""]
+          .filter(Boolean)
+          .join("  ");
         const left = spinner + label;
         const pad = right
           ? " ".repeat(Math.max(1, width - visibleWidth(left) - visibleWidth(right)))

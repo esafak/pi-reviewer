@@ -62,7 +62,19 @@ import { loadDocContext } from "../../src/core/doc-context.js";
 import { sendOutput } from "../../src/core/output.js";
 import { createReviewTool } from "../../src/core/review-tool.js";
 import { createReplyTool } from "../../src/core/reply-tool.js";
-import { ALLOWED_REACTIONS, buildReplyPrompt, defuseReplyMetadata, generateReplyResponse, parseReplyAction, resolveProviderApiKey, review, parseDocDirs, parseThinkingLevel, REPLY_INPUT_LIMITS, truncateReplyInput } from "../../src/ci/review.js";
+import {
+  ALLOWED_REACTIONS,
+  buildReplyPrompt,
+  defuseReplyMetadata,
+  generateReplyResponse,
+  parseReplyAction,
+  resolveProviderApiKey,
+  review,
+  parseDocDirs,
+  parseThinkingLevel,
+  REPLY_INPUT_LIMITS,
+  truncateReplyInput,
+} from "../../src/ci/review.js";
 
 describe("reply prompt limits", () => {
   it("truncates untrusted reply inputs with an explicit marker", () => {
@@ -70,33 +82,74 @@ describe("reply prompt limits", () => {
     expect(truncateReplyInput("1234", 4)).toBe("1234");
   });
   it("caps each separately delimited prompt input", () => {
-    const prompt = buildReplyPrompt({ parent: "p".repeat(5_000), userReply: "u".repeat(5_000), thread: "t".repeat(9_000) });
-    expect(prompt).toContain(`${"p".repeat(REPLY_INPUT_LIMITS.parent)}\n[truncated]\n</parent-finding>`);
-    expect(prompt).toContain(`${"u".repeat(REPLY_INPUT_LIMITS.userReply)}\n[truncated]\n</user-reply>`);
-    expect(prompt).toContain(`${"t".repeat(REPLY_INPUT_LIMITS.thread)}\n[truncated]\n</nearby-thread>`);
+    const prompt = buildReplyPrompt({
+      parent: "p".repeat(5_000),
+      userReply: "u".repeat(5_000),
+      thread: "t".repeat(9_000),
+    });
+    expect(prompt).toContain(
+      `${"p".repeat(REPLY_INPUT_LIMITS.parent)}\n[truncated]\n</parent-finding>`,
+    );
+    expect(prompt).toContain(
+      `${"u".repeat(REPLY_INPUT_LIMITS.userReply)}\n[truncated]\n</user-reply>`,
+    );
+    expect(prompt).toContain(
+      `${"t".repeat(REPLY_INPUT_LIMITS.thread)}\n[truncated]\n</nearby-thread>`,
+    );
   });
   it.each(ALLOWED_REACTIONS)("accepts the allowed reaction %s", (content) => {
-    expect(parseReplyAction(JSON.stringify({ action: "react", content }))).toEqual({ action: "react", content });
+    expect(parseReplyAction(JSON.stringify({ action: "react", content }))).toEqual({
+      action: "react",
+      content,
+    });
   });
-  it.each(["", "not json", "{}", '{"action":"react","content":"thumbs-up"}', '{"action":"reply","body":""}', '{"action":"reply","body":"ok"}\nextra'])("rejects malformed or unsupported actions: %s", (raw) => {
+  it.each([
+    "",
+    "not json",
+    "{}",
+    '{"action":"react","content":"thumbs-up"}',
+    '{"action":"reply","body":""}',
+    '{"action":"reply","body":"ok"}\nextra',
+  ])("rejects malformed or unsupported actions: %s", (raw) => {
     expect(parseReplyAction(raw)).toBeUndefined();
   });
   it("accepts an explicit resolve action with a non-empty body", () => {
-    expect(parseReplyAction('{"action":"resolve","body":"Withdrawing this concern"}')).toEqual({ action: "resolve", body: "Withdrawing this concern" });
+    expect(parseReplyAction('{"action":"resolve","body":"Withdrawing this concern"}')).toEqual({
+      action: "resolve",
+      body: "Withdrawing this concern",
+    });
     expect(parseReplyAction('{"action":"resolve","body":""}')).toBeUndefined();
   });
   it("defuses reserved metadata while preserving normal markdown and code", () => {
-    const action = parseReplyAction(JSON.stringify({ action: "reply", body: "Use **this** and `<!-- pi-reviewer:finding:v1 -->`" }));
-    expect(action).toEqual({ action: "reply", body: "Use **this** and `<!-- pi-reviewer : reserved metadata -->`" });
-    expect(defuseReplyMetadata("<!-- pi-reviewer:status:v1 {} -->")).not.toContain("<!-- pi-reviewer:");
+    const action = parseReplyAction(
+      JSON.stringify({
+        action: "reply",
+        body: "Use **this** and `<!-- pi-reviewer:finding:v1 -->`",
+      }),
+    );
+    expect(action).toEqual({
+      action: "reply",
+      body: "Use **this** and `<!-- pi-reviewer : reserved metadata -->`",
+    });
+    expect(defuseReplyMetadata("<!-- pi-reviewer:status:v1 {} -->")).not.toContain(
+      "<!-- pi-reviewer:",
+    );
   });
   it("requires replies for substantive input in the prompt contract", () => {
-    const prompt = buildReplyPrompt({ parent: "finding", userReply: "Please explain this technical issue", thread: "" });
-    expect(prompt).toContain("Substantive questions, requests, disagreements, uncertainty, or technical information require action=reply");
+    const prompt = buildReplyPrompt({
+      parent: "finding",
+      userReply: "Please explain this technical issue",
+      thread: "",
+    });
+    expect(prompt).toContain(
+      "Substantive questions, requests, disagreements, uncertainty, or technical information require action=reply",
+    );
     expect(prompt).toContain("submit_reply");
     expect(prompt).toContain("fallback object");
     expect(prompt).toContain("untrusted context");
-    expect(prompt).toContain("Never include a commit SHA unless the human explicitly asks for it; never add one as boilerplate");
+    expect(prompt).toContain(
+      "Never include a commit SHA unless the human explicitly asks for it; never add one as boilerplate",
+    );
   });
 });
 
@@ -252,9 +305,21 @@ describe("review", () => {
 
   it("reviews an explicit multi-commit range as one batch", async () => {
     sendOutputMock.mockClear();
-    await review({ cwd: "/repo", fromSha: "base-sha", commitId: "head-sha", output: "comment", pr: 42, githubToken: "token", repo: "owner/repo" });
-    expect(resolveDiffMock).toHaveBeenCalledWith(expect.objectContaining({ fromSha: "base-sha", toSha: "head-sha" }));
-    expect(sendOutputMock).toHaveBeenCalledWith(expect.objectContaining({ baseCommitId: "base-sha" }));
+    await review({
+      cwd: "/repo",
+      fromSha: "base-sha",
+      commitId: "head-sha",
+      output: "comment",
+      pr: 42,
+      githubToken: "token",
+      repo: "owner/repo",
+    });
+    expect(resolveDiffMock).toHaveBeenCalledWith(
+      expect.objectContaining({ fromSha: "base-sha", toSha: "head-sha" }),
+    );
+    expect(sendOutputMock).toHaveBeenCalledWith(
+      expect.objectContaining({ baseCommitId: "base-sha" }),
+    );
     expect(sendOutputMock).toHaveBeenCalledTimes(1);
   });
 
@@ -400,16 +465,26 @@ describe("review", () => {
     AgentMock.mockImplementation(function () {
       return {
         subscribe: vi.fn((cb: (event: unknown) => void) => {
-          cb({ type: "agent_end", messages: [{ role: "assistant", content: [], stopReason: "error", errorMessage: "401 Invalid API key" }] });
+          cb({
+            type: "agent_end",
+            messages: [
+              {
+                role: "assistant",
+                content: [],
+                stopReason: "error",
+                errorMessage: "401 Invalid API key",
+              },
+            ],
+          });
           return vi.fn();
         }),
         prompt: vi.fn().mockResolvedValue(undefined),
       } as any;
     });
 
-    await expect(generateReplyResponse({ parent: "finding", userReply: "question", thread: "thread" })).rejects.toThrow(
-      /Agent failed: 401 Invalid API key/,
-    );
+    await expect(
+      generateReplyResponse({ parent: "finding", userReply: "question", thread: "thread" }),
+    ).rejects.toThrow(/Agent failed: 401 Invalid API key/);
   });
 
   it("aborts and cleans up a reply agent that exceeds its timeout", async () => {
@@ -423,44 +498,70 @@ describe("review", () => {
       } as any;
     });
 
-    await expect(generateReplyResponse({ parent: "finding", userReply: "question", thread: "thread", replyTimeoutMs: 1 })).rejects.toThrow(/Reply agent timed out after 1ms/);
+    await expect(
+      generateReplyResponse({
+        parent: "finding",
+        userReply: "question",
+        thread: "thread",
+        replyTimeoutMs: 1,
+      }),
+    ).rejects.toThrow(/Reply agent timed out after 1ms/);
     expect(abort).toHaveBeenCalledTimes(1);
     expect(unsubscribe).toHaveBeenCalledTimes(1);
   });
 
   it("uses the submit_reply tool result before assistant text", async () => {
-    const toolAction = { action: "reply" as const, body: "First\\n\\n<!-- pi-reviewer:finding:v1 -->" };
+    const toolAction = {
+      action: "reply" as const,
+      body: "First\\n\\n<!-- pi-reviewer:finding:v1 -->",
+    };
     createReplyToolMock.mockReturnValue({
-      tool: { name: "submit_reply", label: "submit_reply", description: "test", parameters: {}, execute: vi.fn() },
+      tool: {
+        name: "submit_reply",
+        label: "submit_reply",
+        description: "test",
+        parameters: {},
+        execute: vi.fn(),
+      },
       getResult: () => toolAction,
     });
     AgentMock.mockImplementation(function () {
       return makeFakeAgent('{"action":"react","content":"heart"}') as any;
     });
 
-    await expect(generateReplyResponse({ parent: "finding", userReply: "question", thread: "thread" })).resolves.toEqual({
+    await expect(
+      generateReplyResponse({ parent: "finding", userReply: "question", thread: "thread" }),
+    ).resolves.toEqual({
       action: "reply",
       body: "First\n\n<!-- pi-reviewer : reserved metadata -->",
     });
-    expect(AgentMock).toHaveBeenCalledWith(expect.objectContaining({
-      initialState: expect.objectContaining({
-        tools: [expect.objectContaining({ name: "submit_reply" })],
+    expect(AgentMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        initialState: expect.objectContaining({
+          tools: [expect.objectContaining({ name: "submit_reply" })],
+        }),
       }),
-    }));
+    );
   });
 
   it("rejects a malformed captured submit_reply result", async () => {
     createReplyToolMock.mockReturnValue({
-      tool: { name: "submit_reply", label: "submit_reply", description: "test", parameters: {}, execute: vi.fn() },
-      getResult: () => ({ action: "invalid" } as any),
+      tool: {
+        name: "submit_reply",
+        label: "submit_reply",
+        description: "test",
+        parameters: {},
+        execute: vi.fn(),
+      },
+      getResult: () => ({ action: "invalid" }) as any,
     });
     AgentMock.mockImplementation(function () {
       return makeFakeAgent('{"action":"react","content":"heart"}') as any;
     });
 
-    await expect(generateReplyResponse({ parent: "finding", userReply: "question", thread: "thread" })).rejects.toThrow(
-      /malformed reply action/,
-    );
+    await expect(
+      generateReplyResponse({ parent: "finding", userReply: "question", thread: "thread" }),
+    ).rejects.toThrow(/malformed reply action/);
   });
 
   it("falls back to the legacy JSON reply protocol when no tool result exists", async () => {
@@ -468,7 +569,9 @@ describe("review", () => {
       return makeFakeAgent('{"action":"react","content":"heart"}') as any;
     });
 
-    await expect(generateReplyResponse({ parent: "finding", userReply: "thanks", thread: "thread" })).resolves.toEqual({
+    await expect(
+      generateReplyResponse({ parent: "finding", userReply: "thanks", thread: "thread" }),
+    ).resolves.toEqual({
       action: "react",
       content: "heart",
     });
@@ -479,9 +582,9 @@ describe("review", () => {
       return makeFakeAgent("plain text") as any;
     });
 
-    await expect(generateReplyResponse({ parent: "finding", userReply: "question", thread: "thread" })).rejects.toThrow(
-      /malformed reply action/,
-    );
+    await expect(
+      generateReplyResponse({ parent: "finding", userReply: "question", thread: "thread" }),
+    ).rejects.toThrow(/malformed reply action/);
   });
 
   it("passes final agent response to sendOutput", async () => {
@@ -543,38 +646,76 @@ describe("review", () => {
     const toolReview = {
       summary: "Updated body finding",
       comments: [],
-      finding_updates: [{ comment_id: activeFinding.commentId, status: "RESOLVED" as const, explanation: "fixed" }],
+      finding_updates: [
+        { comment_id: activeFinding.commentId, status: "RESOLVED" as const, explanation: "fixed" },
+      ],
     };
     createReviewToolMock.mockReturnValue({
-      tool: { name: "submit_review", label: "submit_review", description: "test", parameters: {}, execute: vi.fn() },
+      tool: {
+        name: "submit_review",
+        label: "submit_review",
+        description: "test",
+        parameters: {},
+        execute: vi.fn(),
+      },
       getResult: () => toolReview,
     });
-    AgentMock.mockImplementation(function () { return makeFakeAgent("") as any; });
+    AgentMock.mockImplementation(function () {
+      return makeFakeAgent("") as any;
+    });
 
-    await review({ cwd: "/repo", output: "comment", pr: 42, githubToken: "token", repo: "owner/repo", commitId: "head", activeFindings: [activeFinding] });
+    await review({
+      cwd: "/repo",
+      output: "comment",
+      pr: 42,
+      githubToken: "token",
+      repo: "owner/repo",
+      commitId: "head",
+      activeFindings: [activeFinding],
+    });
 
-    expect(sendOutputMock).toHaveBeenCalledWith(expect.objectContaining({
-      existingFindings: [{ commentId: 12345, threadId: undefined, reviewId: 42, bodyFinding: true, reviewBody: "visible review body" }],
-      allowedFindingIds: new Set([12345]),
-    }));
+    expect(sendOutputMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        existingFindings: [
+          {
+            commentId: 12345,
+            threadId: undefined,
+            reviewId: 42,
+            bodyFinding: true,
+            reviewBody: "visible review body",
+          },
+        ],
+        allowedFindingIds: new Set([12345]),
+      }),
+    );
   });
 
   it("passes resolved-finding history through to sendOutput for suppression", async () => {
-    const resolvedFindings = [{
-      historicalFindingId: "inline:42",
-      commentId: 42,
-      kind: "inline" as const,
-      file: "src/a.ts",
-      line: 7,
-      side: "RIGHT" as const,
-      body: "old finding",
-      originalBody: "old finding",
-    }];
+    const resolvedFindings = [
+      {
+        historicalFindingId: "inline:42",
+        commentId: 42,
+        kind: "inline" as const,
+        file: "src/a.ts",
+        line: 7,
+        side: "RIGHT" as const,
+        body: "old finding",
+        originalBody: "old finding",
+      },
+    ];
     createReviewToolMock.mockReturnValue({
-      tool: { name: "submit_review", label: "submit_review", description: "test", parameters: {}, execute: vi.fn() },
+      tool: {
+        name: "submit_review",
+        label: "submit_review",
+        description: "test",
+        parameters: {},
+        execute: vi.fn(),
+      },
       getResult: () => ({ summary: "Tool-based review", comments: [] }),
     });
-    AgentMock.mockImplementation(function () { return makeFakeAgent("") as any; });
+    AgentMock.mockImplementation(function () {
+      return makeFakeAgent("") as any;
+    });
 
     await review({ cwd: "/repo", resolvedFindings });
 

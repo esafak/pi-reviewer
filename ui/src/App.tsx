@@ -51,11 +51,17 @@ export default function App() {
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
-    fetch("/config", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ theme }) }).catch(() => {});
+    fetch("/config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ theme }),
+    }).catch(() => {});
   }, [theme]);
 
   useEffect(() => {
-    const iv = setInterval(() => { fetch("/ping").catch(() => {}); }, 30_000);
+    const iv = setInterval(() => {
+      fetch("/ping").catch(() => {});
+    }, 30_000);
     return () => clearInterval(iv);
   }, []);
 
@@ -107,7 +113,7 @@ export default function App() {
       acc[s] = (acc[s] || 0) + 1;
       return acc;
     },
-    {} as Record<string, number>
+    {} as Record<string, number>,
   );
 
   const contextGroups = data.contextGroups ?? [];
@@ -121,7 +127,9 @@ export default function App() {
         const targetFile = result.comments[i]?.file;
         if (targetFile) setOpenFiles((prev) => ({ ...prev, [targetFile]: true }));
         setTimeout(() => {
-          document.getElementById(`cmt-${i}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+          document
+            .getElementById(`cmt-${i}`)
+            ?.scrollIntoView({ behavior: "smooth", block: "center" });
         }, 50);
         return;
       }
@@ -159,9 +167,12 @@ export default function App() {
     .filter(({ comment }: { comment: ReviewComment }) => !diffFileSet.has(comment.file));
 
   const commentsByFile: Record<string, number> = Object.fromEntries(
-    Object.entries(byFile).map(([file, cmts]) => [file, cmts.length])
+    Object.entries(byFile).map(([file, cmts]) => [file, cmts.length]),
   );
-  const tree = buildTree(parsed.map((f) => f.file), commentsByFile);
+  const tree = buildTree(
+    parsed.map((f) => f.file),
+    commentsByFile,
+  );
 
   return (
     <SettingsProvider
@@ -212,14 +223,40 @@ export default function App() {
         <div id="files">
           {totalComments === 0 && (
             <div className="empty-state">
-              <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="32"
+                height="32"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+                <polyline points="22 4 12 14.01 9 11.01" />
+              </svg>
               <p>No issues found</p>
               <span>The review came back clean.</span>
             </div>
           )}
           {parsed.length === 0 && totalComments > 0 && (
             <div className="empty-state">
-              <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/></svg>
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="32"
+                height="32"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <rect x="3" y="3" width="18" height="18" rx="2" />
+                <line x1="9" y1="3" x2="9" y2="21" />
+              </svg>
               <p>No diff available</p>
               <span>Comments are shown below as orphans.</span>
             </div>
@@ -234,15 +271,13 @@ export default function App() {
               selected={file.file === selectedFile}
               forceOpen={openFiles[file.file] ?? false}
               viewed={viewedFiles[file.file] ?? false}
-              onToggleViewed={() => setViewedFiles((prev) => ({ ...prev, [file.file]: !prev[file.file] }))}
+              onToggleViewed={() =>
+                setViewedFiles((prev) => ({ ...prev, [file.file]: !prev[file.file] }))
+              }
               collapseSignal={allCollapsed}
             />
           ))}
-          <OrphanComments
-            comments={orphanComments}
-            decisions={decisions}
-            onDecide={onDecide}
-          />
+          <OrphanComments comments={orphanComments} decisions={decisions} onDecide={onDecide} />
         </div>
         {activePanel && (
           <SidePanelLayout>

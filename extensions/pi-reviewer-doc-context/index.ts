@@ -19,7 +19,12 @@ interface ContextProviderEvent {
   diffFiles: string[];
   register: (
     name: string,
-    provider: (opts: { cwd: string; diffFiles: string[]; fs: FsOps; gitRoot?: string }) => Promise<ContextFile[]>,
+    provider: (opts: {
+      cwd: string;
+      diffFiles: string[];
+      fs: FsOps;
+      gitRoot?: string;
+    }) => Promise<ContextFile[]>,
   ) => void;
 }
 
@@ -29,7 +34,9 @@ function readDocDirs(): string[] {
     if (Array.isArray(config.docDirs) && config.docDirs.every((d) => typeof d === "string")) {
       return config.docDirs as string[];
     }
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
   return DEFAULT_DOC_DIRS;
 }
 

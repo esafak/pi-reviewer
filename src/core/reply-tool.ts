@@ -1,10 +1,19 @@
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { Type, type Static } from "@earendil-works/pi-ai";
 
-export const ALLOWED_REACTIONS = ["+1", "-1", "laugh", "confused", "heart", "hooray", "rocket", "eyes"] as const;
+export const ALLOWED_REACTIONS = [
+  "+1",
+  "-1",
+  "laugh",
+  "confused",
+  "heart",
+  "hooray",
+  "rocket",
+  "eyes",
+] as const;
 
 export type ReplyAction =
-  | { action: "react"; content: typeof ALLOWED_REACTIONS[number] }
+  | { action: "react"; content: (typeof ALLOWED_REACTIONS)[number] }
   | { action: "reply"; body: string }
   | { action: "resolve"; body: string };
 
@@ -17,7 +26,8 @@ export type ReplyAction =
 const replySchema = Type.Object(
   {
     action: Type.Union([Type.Literal("react"), Type.Literal("reply"), Type.Literal("resolve")], {
-      description: 'Thread action: "react" for low-information acknowledgements, "reply" for a substantive response, "resolve" only when withdrawing or closing the finding.',
+      description:
+        'Thread action: "react" for low-information acknowledgements, "reply" for a substantive response, "resolve" only when withdrawing or closing the finding.',
     }),
     content: Type.Optional(
       Type.Union(
@@ -31,7 +41,9 @@ const replySchema = Type.Object(
           Type.Literal("rocket"),
           Type.Literal("eyes"),
         ],
-        { description: 'Reaction to add. Required for action "react"; omit for "reply"/"resolve".' },
+        {
+          description: 'Reaction to add. Required for action "react"; omit for "reply"/"resolve".',
+        },
       ),
     ),
     body: Type.Optional(

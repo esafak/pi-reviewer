@@ -1,12 +1,27 @@
 import path from "node:path";
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { parseAgentResponse, extractLastAssistantText, type ReviewResult } from "../../../src/core/output.js";
+import {
+  parseAgentResponse,
+  extractLastAssistantText,
+  type ReviewResult,
+} from "../../../src/core/output.js";
 import { loadContextSSH } from "../../../src/core/context.js";
 import { extractDiffFiles } from "../../../src/core/diff-resolver.js";
 import { filterDiff } from "../../../src/core/diff-filter.js";
-import { buildJSONSystemPrompt, buildMarkdownSystemPrompt, buildUserPrompt, type MinSeverity } from "../../../src/core/prompt-builder.js";
-import { readSshFlag, resolveSshState, localFs, sshFs as makeSshFs, sshExec } from "../../../src/core/ssh.js";
+import {
+  buildJSONSystemPrompt,
+  buildMarkdownSystemPrompt,
+  buildUserPrompt,
+  type MinSeverity,
+} from "../../../src/core/prompt-builder.js";
+import {
+  readSshFlag,
+  resolveSshState,
+  localFs,
+  sshFs as makeSshFs,
+  sshExec,
+} from "../../../src/core/ssh.js";
 import { sumMessagesUsage } from "../events.js";
 import { readDefaultBranch } from "../../../src/core/ui/server/index.js";
 import { setReviewFooter } from "../footer.js";
@@ -103,24 +118,44 @@ export interface HandleSSHReviewOptions extends CommonHandlerOptions {
 }
 
 export async function handleSSHReview(opts: HandleSSHReviewOptions): Promise<void> {
-  const { parsed, ctx, pi, loaderState, minSeverity, currentModelId, thinking, defaultModel, availableModels, defaultThinking, notify } = opts;
+  const {
+    parsed,
+    ctx,
+    pi,
+    loaderState,
+    minSeverity,
+    currentModelId,
+    thinking,
+    defaultModel,
+    availableModels,
+    defaultThinking,
+    notify,
+  } = opts;
 
   notify("Fetching SSH diff and context…");
   const sshFlag = readSshFlag();
   const sshState = sshFlag ? await resolveSshState(sshFlag).catch(() => null) : null;
   const sshRemoteCwd = sshState
-    ? (parsed.dir ? path.posix.join(sshState.remoteCwd, parsed.dir) : sshState.remoteCwd)
+    ? parsed.dir
+      ? path.posix.join(sshState.remoteCwd, parsed.dir)
+      : sshState.remoteCwd
     : ctx.cwd;
   const providerFs = sshState ? makeSshFs(sshState.remote) : localFs();
 
   const gitCmd = `git -C ${JSON.stringify(sshRemoteCwd)}`;
   const [sshContext, rawSshDiff, sshHeadBranch, sshOriginBase] = await Promise.all([
     sshState
-      ? loadContextSSH(sshState.remote, sshRemoteCwd, parsed.dir ? sshState.remoteCwd : undefined)
-          .catch(() => ({ conventions: [], reviewRules: [] }))
+      ? loadContextSSH(
+          sshState.remote,
+          sshRemoteCwd,
+          parsed.dir ? sshState.remoteCwd : undefined,
+        ).catch(() => ({ conventions: [], reviewRules: [] }))
       : Promise.resolve({ conventions: [], reviewRules: [] }),
     sshState
-      ? sshExec(sshState.remote, buildSSHDiffCommand(parsed, { remoteCwd: sshRemoteCwd, branch: readDefaultBranch() })).catch(() => "")
+      ? sshExec(
+          sshState.remote,
+          buildSSHDiffCommand(parsed, { remoteCwd: sshRemoteCwd, branch: readDefaultBranch() }),
+        ).catch(() => "")
       : Promise.resolve(""),
     sshState
       ? sshExec(sshState.remote, `${gitCmd} rev-parse --abbrev-ref HEAD`).catch(() => "HEAD")
@@ -136,14 +171,29 @@ export async function handleSSHReview(opts: HandleSSHReviewOptions): Promise<voi
     detectedBase: sshOriginBase.trim() || undefined,
   });
 
-  const { diff: sshDiff, warning: sshDiffWarning, skippedFiles: sshSkippedFiles } = filterDiff(rawSshDiff);
+  const {
+    diff: sshDiff,
+    warning: sshDiffWarning,
+    skippedFiles: sshSkippedFiles,
+  } = filterDiff(rawSshDiff);
   if (sshDiffWarning) notify(sshDiffWarning, "warning");
 
   const sshDiffFiles = extractDiffFiles(rawSshDiff);
   const sshGitRoot = parsed.dir ? (sshState ? sshState.remoteCwd : ctx.cwd) : undefined;
-  const { groups: sshAllContextGroups, contextFiles: sshContextFiles, contextPaths: allSshContextPaths } =
-    await buildContextGroups(pi.events, sshRemoteCwd, sshContext, sshDiffFiles, providerFs, sshGitRoot);
-  if (allSshContextPaths.length > 0) notify(`Context:\n${allSshContextPaths.map((p) => `  ${p}`).join("\n")}`);
+  const {
+    groups: sshAllContextGroups,
+    contextFiles: sshContextFiles,
+    contextPaths: allSshContextPaths,
+  } = await buildContextGroups(
+    pi.events,
+    sshRemoteCwd,
+    sshContext,
+    sshDiffFiles,
+    providerFs,
+    sshGitRoot,
+  );
+  if (allSshContextPaths.length > 0)
+    notify(`Context:\n${allSshContextPaths.map((p) => `  ${p}`).join("\n")}`);
 
   const userPrompt = buildUserPrompt(sshDiff, sshSkippedFiles);
 
@@ -156,15 +206,34 @@ export async function handleSSHReview(opts: HandleSSHReviewOptions): Promise<voi
 
   const systemPrompt = buildJSONSystemPrompt(sshContext, minSeverity, sshContextFiles);
   loaderState.stop = setReviewFooter(ctx, source, { model: currentModelId, thinking });
-  const result = await runSSHReviewAndWait({ systemPrompt, userPrompt, diff: sshDiff, pi, minSeverity, stopLoader: loaderState.stop, notify });
+  const result = await runSSHReviewAndWait({
+    systemPrompt,
+    userPrompt,
+    diff: sshDiff,
+    pi,
+    minSeverity,
+    stopLoader: loaderState.stop,
+    notify,
+  });
   let sshSaveTriggered = false;
   const injectionMsg = await handleUIReview({
-    result, diff: sshDiff, source, ssh: true, cwd: ctx.cwd, notify,
-    currentModel: currentModelId, currentThinking: thinking, defaultModel, availableModels,
-    defaultThinking, contextGroups: sshAllContextGroups,
+    result,
+    diff: sshDiff,
+    source,
+    ssh: true,
+    cwd: ctx.cwd,
+    notify,
+    currentModel: currentModelId,
+    currentThinking: thinking,
+    defaultModel,
+    availableModels,
+    defaultThinking,
+    contextGroups: sshAllContextGroups,
     saveRemote: (md) => {
       sshSaveTriggered = true;
-      pi.sendUserMessage(`Run \`git rev-parse --show-toplevel\` to get the project root path, then write the following content to that path + "/pi-review.md" (e.g. if the root is /some/path, write to /some/path/pi-review.md):\n\n${md}`);
+      pi.sendUserMessage(
+        `Run \`git rev-parse --show-toplevel\` to get the project root path, then write the following content to that path + "/pi-review.md" (e.g. if the root is /some/path, write to /some/path/pi-review.md):\n\n${md}`,
+      );
     },
   });
   if (injectionMsg) {

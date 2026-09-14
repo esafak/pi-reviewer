@@ -42,10 +42,17 @@ beforeEach(() => {
 
 describe("handleUIReview — injection message context selection", () => {
   it("renders accepted findings as self-contained Fixit payloads", async () => {
-    vi.mocked(startUIServer).mockResolvedValue(makeHandle({ decisions: [{ index: 0, decision: "accept" }] }) as any);
+    vi.mocked(startUIServer).mockResolvedValue(
+      makeHandle({ decisions: [{ index: 0, decision: "accept" }] }) as any,
+    );
 
     const msg = await handleUIReview({
-      result: { summary: "Needs fixes", comments: [{ file: "src/a.ts", line: 3, side: "RIGHT", severity: "WARN", body: "Handle the error" }] },
+      result: {
+        summary: "Needs fixes",
+        comments: [
+          { file: "src/a.ts", line: 3, side: "RIGHT", severity: "WARN", body: "Handle the error" },
+        ],
+      },
       diff: baseDiff,
       source: "HEAD vs main",
       cwd: "/p",

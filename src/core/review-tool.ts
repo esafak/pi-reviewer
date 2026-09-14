@@ -16,7 +16,8 @@ import { hasAiFixProse, MEANINGFUL_PROSE_PATTERN } from "./ai-fix-footer.js";
 const reviewSchema = Type.Object(
   {
     summary: Type.String({
-      description: "Overall review written in Markdown. Use bullet points and bold for clarity. In JSON, encode each Markdown newline once as \\n; never double-escape formatting newlines as \\\\n.",
+      description:
+        "Overall review written in Markdown. Use bullet points and bold for clarity. In JSON, encode each Markdown newline once as \\n; never double-escape formatting newlines as \\\\n.",
     }),
     comments: Type.Array(
       Type.Object(
@@ -26,7 +27,7 @@ const reviewSchema = Type.Object(
             minimum: 1,
             multipleOf: 1,
             description:
-              'Positive integer line number of a changed or context line within a diff hunk. Only lines that appear in the diff can receive comments — do not comment on arbitrary lines outside the diff.',
+              "Positive integer line number of a changed or context line within a diff hunk. Only lines that appear in the diff can receive comments — do not comment on arbitrary lines outside the diff.",
           }),
           side: Type.Union([Type.Literal("LEFT"), Type.Literal("RIGHT")], {
             description: '"RIGHT" for added/context lines, "LEFT" for removed lines.',
@@ -35,20 +36,45 @@ const reviewSchema = Type.Object(
             [Type.Literal("CRITICAL"), Type.Literal("WARN"), Type.Literal("INFO")],
             { description: "Issue severity tier." },
           ),
-          body: Type.String({ minLength: 1, pattern: MEANINGFUL_PROSE_PATTERN, description: "Non-empty inline comment text containing meaningful prose, may use Markdown." }),
+          body: Type.String({
+            minLength: 1,
+            pattern: MEANINGFUL_PROSE_PATTERN,
+            description:
+              "Non-empty inline comment text containing meaningful prose, may use Markdown.",
+          }),
           resolved_finding_id: Type.Optional(Type.String({ maxLength: 200 })),
-          re_raise_reason: Type.Optional(Type.Union([Type.Literal("REINTRODUCED"), Type.Literal("MATERIALLY_CHANGED"), Type.Literal("CONTRADICTORY_EVIDENCE")])),
+          re_raise_reason: Type.Optional(
+            Type.Union([
+              Type.Literal("REINTRODUCED"),
+              Type.Literal("MATERIALLY_CHANGED"),
+              Type.Literal("CONTRADICTORY_EVIDENCE"),
+            ]),
+          ),
           re_raise_evidence: Type.Optional(Type.String({ minLength: 1, maxLength: 2000 })),
         },
         { additionalProperties: false },
       ),
       { description: "Inline comments attached to specific diff lines. May be empty." },
     ),
-    finding_updates: Type.Optional(Type.Array(Type.Object({
-      comment_id: Type.Integer({ minimum: 1, description: "ID of an existing finding supplied in the prompt." }),
-      status: Type.Union([Type.Literal("RESOLVED"), Type.Literal("PARTIALLY_RESOLVED"), Type.Literal("STILL_OPEN")]),
-      explanation: Type.String({ maxLength: 2000 }),
-    }, { additionalProperties: false }))),
+    finding_updates: Type.Optional(
+      Type.Array(
+        Type.Object(
+          {
+            comment_id: Type.Integer({
+              minimum: 1,
+              description: "ID of an existing finding supplied in the prompt.",
+            }),
+            status: Type.Union([
+              Type.Literal("RESOLVED"),
+              Type.Literal("PARTIALLY_RESOLVED"),
+              Type.Literal("STILL_OPEN"),
+            ]),
+            explanation: Type.String({ maxLength: 2000 }),
+          },
+          { additionalProperties: false },
+        ),
+      ),
+    ),
   },
   { additionalProperties: false },
 );
@@ -83,7 +109,7 @@ export function createReviewTool(): ReviewTool {
       "Submit the final code review. Call this as your final action after reviewing the diff. Pass the complete review as structured data — do not also emit it as text.",
     parameters: reviewSchema,
     async execute(_toolCallId: string, params: ReviewParams) {
-      if (params.comments.some(comment => !hasAiFixProse(comment.body))) {
+      if (params.comments.some((comment) => !hasAiFixProse(comment.body))) {
         throw new Error("Finding body must contain meaningful prose");
       }
       captured = params;

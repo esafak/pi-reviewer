@@ -9,7 +9,8 @@ export interface InitOptions {
 
 const WORKFLOW_RELATIVE_PATH = path.join(".github", "workflows", "pi-review.yml");
 
-function workflowContent(reviewDrafts = false): string { return `name: Pi Reviewer
+function workflowContent(reviewDrafts = false): string {
+  return `name: Pi Reviewer
 
 on:
   pull_request:
@@ -73,7 +74,8 @@ jobs:
           # Opt in to injecting matching project docs into the review.
           # Comma-separated dirs scanned for .md files with a 'description' frontmatter.
           # doc-dirs: '.pi/notes,docs/review'
-`; }
+`;
+}
 
 export async function init(options: InitOptions = {}): Promise<void> {
   const cwd = options.cwd ?? process.cwd();
@@ -91,6 +93,6 @@ export async function init(options: InitOptions = {}): Promise<void> {
   console.log("");
   console.log("Next step: add your project conventions to AGENTS.md at the root of your project.");
   console.log(
-    "This file will be used by the reviewer to understand your project's rules and patterns."
+    "This file will be used by the reviewer to understand your project's rules and patterns.",
   );
 }

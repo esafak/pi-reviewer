@@ -29,7 +29,11 @@ const extraPaths = ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"].filter(Bo
 const augmentedPath = [...extraPaths, process.env.PATH ?? ""].join(":");
 
 function run(command: string, cwd: string): string {
-  return execSync(command, { cwd, encoding: "utf-8", env: { ...process.env, PATH: augmentedPath } });
+  return execSync(command, {
+    cwd,
+    encoding: "utf-8",
+    env: { ...process.env, PATH: augmentedPath },
+  });
 }
 
 function ensureNonEmptyDiff(diff: string): void {
@@ -57,14 +61,22 @@ function withUntrackedFiles(cwd: string, fn: () => string): string {
     .filter(Boolean);
   if (untracked.length > 0) {
     const quoted = untracked.map((f) => JSON.stringify(f)).join(" ");
-    try { run(`git add -N -- ${quoted}`, cwd); } catch { /* ignore */ }
+    try {
+      run(`git add -N -- ${quoted}`, cwd);
+    } catch {
+      /* ignore */
+    }
   }
   try {
     return fn();
   } finally {
     if (untracked.length > 0) {
       const quoted = untracked.map((f) => JSON.stringify(f)).join(" ");
-      try { run(`git rm -r --cached --ignore-unmatch -- ${quoted}`, cwd); } catch { /* ignore */ }
+      try {
+        run(`git rm -r --cached --ignore-unmatch -- ${quoted}`, cwd);
+      } catch {
+        /* ignore */
+      }
     }
   }
 }
@@ -87,7 +99,7 @@ export function detectOriginBase(cwd: string): string {
 }
 
 export function extractDiffFiles(diff: string): string[] {
-  return [...diff.matchAll(/^diff --git a\/.+ b\/(.+)$/gm)].map(m => m[1]);
+  return [...diff.matchAll(/^diff --git a\/.+ b\/(.+)$/gm)].map((m) => m[1]);
 }
 
 export async function resolveDiff(options: DiffOptions): Promise<DiffResult> {
@@ -104,15 +116,25 @@ export async function resolveDiff(options: DiffOptions): Promise<DiffResult> {
   let source: string;
 
   if (options.fromSha && options.toSha) {
-    raw = execFileSync("git", ["diff", `${options.fromSha}..${options.toSha}`], { cwd, encoding: "utf-8", env: { ...process.env, PATH: augmentedPath } });
+    raw = execFileSync("git", ["diff", `${options.fromSha}..${options.toSha}`], {
+      cwd,
+      encoding: "utf-8",
+      env: { ...process.env, PATH: augmentedPath },
+    });
     source = `git diff ${options.fromSha}..${options.toSha}`;
   } else if (typeof options.pr === "number") {
     try {
       raw = run(`gh pr diff ${options.pr}`, cwd);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      if (msg.includes("gh: command not found") || msg.includes("not found") || msg.includes("not recognized")) {
-        throw new Error("--pr requires the GitHub CLI (gh) to be installed: https://cli.github.com");
+      if (
+        msg.includes("gh: command not found") ||
+        msg.includes("not found") ||
+        msg.includes("not recognized")
+      ) {
+        throw new Error(
+          "--pr requires the GitHub CLI (gh) to be installed: https://cli.github.com",
+        );
       }
       throw e;
     }

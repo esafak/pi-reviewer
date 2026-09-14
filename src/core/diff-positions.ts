@@ -60,12 +60,16 @@ export function parseDiffPositions(diff: string): DiffPositionMap {
       const c = line[0];
       if (c === "\\") continue; // "\ No newline at end of file"
       if (c === " ") {
-        left.add(curLeft); curLeft += 1;
-        right.add(curRight); curRight += 1;
+        left.add(curLeft);
+        curLeft += 1;
+        right.add(curRight);
+        curRight += 1;
       } else if (c === "-") {
-        left.add(curLeft); curLeft += 1;
+        left.add(curLeft);
+        curLeft += 1;
       } else if (c === "+") {
-        right.add(curRight); curRight += 1;
+        right.add(curRight);
+        curRight += 1;
       }
     }
 

@@ -47,7 +47,9 @@ export function SubmitPanel({ hasAccepted, contextGroups, onSubmit, onClose }: S
             />
             <div>
               <div className="submit-radio-label">Send</div>
-              <div className="submit-radio-desc">Inject accepted findings and start a new agent turn</div>
+              <div className="submit-radio-desc">
+                Inject accepted findings and start a new agent turn
+              </div>
             </div>
           </label>
 
@@ -79,7 +81,9 @@ export function SubmitPanel({ hasAccepted, contextGroups, onSubmit, onClose }: S
             />
             <div>
               <div className="submit-radio-label">Save &amp; Send</div>
-              <div className="submit-radio-desc">Write to pi-review.md and start a new agent turn</div>
+              <div className="submit-radio-desc">
+                Write to pi-review.md and start a new agent turn
+              </div>
             </div>
           </label>
         </div>
@@ -97,7 +101,9 @@ export function SubmitPanel({ hasAccepted, contextGroups, onSubmit, onClose }: S
         />
 
         <div className="submit-footer">
-          <button className="action-btn" onClick={onClose} type="button">Cancel</button>
+          <button className="action-btn" onClick={onClose} type="button">
+            Cancel
+          </button>
           <button className="finish-btn" onClick={handleSubmit} type="button">
             Finish review
           </button>

@@ -1,4 +1,5 @@
-export const AI_FIX_FOOTER = "For each issue above, determine whether it is valid. If so, fix it iteratively with one reviewer agent until convergence.";
+export const AI_FIX_FOOTER =
+  "For each issue above, determine whether it is valid. If so, fix it iteratively with one reviewer agent until convergence.";
 
 export interface AiFixContext {
   file: string;
@@ -15,14 +16,16 @@ export interface AiFixFinding {
   body: string;
 }
 
-const AI_FIX_DETAILS = /<details>\s*<summary>Prompt to fix(?: all issues)? with AI<\/summary>[\s\S]*?<\/details>\s*$/;
+const AI_FIX_DETAILS =
+  /<details>\s*<summary>Prompt to fix(?: all issues)? with AI<\/summary>[\s\S]*?<\/details>\s*$/;
 const AI_FIX_CONTEXT = /^\*\*Context:\*\*[^\n]*\n\s*\n?/;
 /**
  * JSON-Schema-compatible requirement for prose beyond whitespace and emoji.
  * JSON Schema regexes do not enable Unicode property escapes, so this uses
  * UTF-16 ranges for the emoji blocks and common BMP emoji characters.
  */
-export const MEANINGFUL_PROSE_PATTERN = "^(?![\\s😀🧪\\u200D\\u20E3\\uFE0F\\uD83C-\\uD83E\\uDC00-\\uDFFF\\u00A9\\u00AE\\u203C\\u2049\\u2122\\u2139\\u2190-\\u21FF\\u2300-\\u23FF\\u25A0-\\u27BF\\u2B00-\\u2BFF\\u3030\\u303D\\u3297\\u3299]+$)[\\s\\S]+$";
+export const MEANINGFUL_PROSE_PATTERN =
+  "^(?![\\s😀🧪\\u200D\\u20E3\\uFE0F\\uD83C-\\uD83E\\uDC00-\\uDFFF\\u00A9\\u00AE\\u203C\\u2049\\u2122\\u2139\\u2190-\\u21FF\\u2300-\\u23FF\\u25A0-\\u27BF\\u2B00-\\u2BFF\\u3030\\u303D\\u3297\\u3299]+$)[\\s\\S]+$";
 const MEANINGFUL_PROSE = new RegExp(MEANINGFUL_PROSE_PATTERN);
 
 const SEVERITY_EMOJI: Record<string, string> = { CRITICAL: "🔴", WARN: "🟡", INFO: "🔵" };
@@ -30,11 +33,17 @@ const SEVERITY_EMOJI: Record<string, string> = { CRITICAL: "🔴", WARN: "🟡",
 /** Repairs line-break escapes emitted by models that double-encode JSON text. */
 export function normalizeMarkdownText(text: string): string {
   if (/[\r\n]/.test(text)) return text;
-  return text.replace(/\\r\\n/g, "\n").replace(/\\n/g, "\n").replace(/\\r/g, "\n");
+  return text
+    .replace(/\\r\\n/g, "\n")
+    .replace(/\\n/g, "\n")
+    .replace(/\\r/g, "\n");
 }
 
 function withoutSeverityEmoji(body: string): string {
-  return body.trim().replace(/^[🔴🟡🔵]\s*/u, "").trim();
+  return body
+    .trim()
+    .replace(/^[🔴🟡🔵]\s*/u, "")
+    .trim();
 }
 
 /** Checks the same canonical body rule used by normalizeAiFixBody. */
@@ -50,17 +59,25 @@ export function normalizeAiFixBody(body: string): string {
 }
 
 /** Returns the human-facing finding summary; it contains no Fixit markup. */
-export function renderFindingSummary(context: AiFixContext, body: string, options: { includeLocation?: boolean } = {}): string {
+export function renderFindingSummary(
+  context: AiFixContext,
+  body: string,
+  options: { includeLocation?: boolean } = {},
+): string {
   const emoji = SEVERITY_EMOJI[context.severity ?? ""] ?? "";
   const location = `${context.file}:${context.line}${context.side ? ` · ${context.side}` : ""}`;
-  const revision = context.repository && context.commitId
-    ? context.side === "LEFT"
-      ? context.baseCommitId !== context.commitId ? context.baseCommitId : undefined
-      : context.commitId
-    : undefined;
-  const href = context.repository && revision && context.line > 0
-    ? `https://github.com/${context.repository}/blob/${revision}/${context.file.split("/").map(encodeURIComponent).join("/")}#L${context.line}`
-    : undefined;
+  const revision =
+    context.repository && context.commitId
+      ? context.side === "LEFT"
+        ? context.baseCommitId !== context.commitId
+          ? context.baseCommitId
+          : undefined
+        : context.commitId
+      : undefined;
+  const href =
+    context.repository && revision && context.line > 0
+      ? `https://github.com/${context.repository}/blob/${revision}/${context.file.split("/").map(encodeURIComponent).join("/")}#L${context.line}`
+      : undefined;
   const linkedLocation = href ? `[\`${location}\`](${href})` : `\`${location}\``;
   const normalizedBody = normalizeAiFixBody(body);
   if (options.includeLocation === false) return `${emoji ? `${emoji} ` : ""}${normalizedBody}`;
@@ -68,13 +85,15 @@ export function renderFindingSummary(context: AiFixContext, body: string, option
 }
 
 function stripPromptEnvelope(text: string): string {
-  const hasEnvelope = /^<details>\s*<summary>Prompt to fix(?: all issues)? with AI<\/summary>/.test(text);
+  const hasEnvelope = /^<details>\s*<summary>Prompt to fix(?: all issues)? with AI<\/summary>/.test(
+    text,
+  );
   let content = hasEnvelope
     ? text
-      .replace(/^<details>\s*<summary>Prompt to fix(?: all issues)? with AI<\/summary>\s*/, "")
-      .replace(/<\/details>\s*$/, "")
-      .replace(AI_FIX_CONTEXT, "")
-      .trim()
+        .replace(/^<details>\s*<summary>Prompt to fix(?: all issues)? with AI<\/summary>\s*/, "")
+        .replace(/<\/details>\s*$/, "")
+        .replace(AI_FIX_CONTEXT, "")
+        .trim()
     : text.trim();
 
   if (hasEnvelope) {
@@ -93,11 +112,17 @@ export function removeAiFixFooter(body: string): string {
     // New finding comments repeat the visible body before the dropdown. Keep
     // that body and discard the duplicate prompt; legacy comments have only
     // hidden metadata before the dropdown, so recover their body from it.
-    const visiblePrefix = prefix.replace(/^(?:(?:<!--\s*pi-reviewer\s*:[\s\S]*?-->\n?)*)/, "").trim();
+    const visiblePrefix = prefix
+      .replace(/^(?:(?:<!--\s*pi-reviewer\s*:[\s\S]*?-->\n?)*)/, "")
+      .trim();
     if (visiblePrefix) return prefix.trimEnd();
     return `${prefix}${stripPromptEnvelope(details[0])}`.trimEnd();
   }
-  return body.split(AI_FIX_FOOTER).join("").replace(/\n{3,}/g, "\n\n").trimEnd();
+  return body
+    .split(AI_FIX_FOOTER)
+    .join("")
+    .replace(/\n{3,}/g, "\n\n")
+    .trimEnd();
 }
 
 /**
@@ -106,7 +131,9 @@ export function removeAiFixFooter(body: string): string {
  * space keeps the visible text unchanged.
  */
 export function neutralizeDetailsTags(text: string): string {
-  return text.replace(/<(\/?)\s*(details|summary)(?:\s[^>]*)?[/]?>/gi, (tag) => tag.replace(/^</, "<\u200b"));
+  return text.replace(/<(\/?)\s*(details|summary)(?:\s[^>]*)?[/]?>/gi, (tag) =>
+    tag.replace(/^</, "<\u200b"),
+  );
 }
 
 function cleanPromptBody(body: string): string {
@@ -114,7 +141,7 @@ function cleanPromptBody(body: string): string {
 }
 
 function renderPromptDetails(prompt: string, summary = "Prompt to fix with AI"): string {
-  const maxBackticks = Math.max(0, ...(prompt.match(/`+/g) ?? []).map(run => run.length));
+  const maxBackticks = Math.max(0, ...(prompt.match(/`+/g) ?? []).map((run) => run.length));
   const fence = "`".repeat(Math.max(3, maxBackticks + 1));
   return [
     `<details>`,
@@ -146,7 +173,7 @@ export function renderAiFixPrompt(context: AiFixContext, body: string): string {
 /** Renders one copyable prompt containing all actionable findings. */
 export function renderAiFixPromptList(issues: AiFixFinding[]): string {
   if (issues.length === 0) return "";
-  const entries = issues.map(issue => promptEntry(issue.context, issue.body)).join("\n\n");
+  const entries = issues.map((issue) => promptEntry(issue.context, issue.body)).join("\n\n");
   return renderPromptDetails(`${entries}\n\n${AI_FIX_FOOTER}`, "Prompt to fix all issues with AI");
 }
 

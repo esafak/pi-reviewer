@@ -31,7 +31,7 @@ export function parseDescription(content: string): string | null {
 
 export function isRelevant(description: string, filePath: string, keywords: string[]): boolean {
   const haystack = `${description} ${filePath}`.toLowerCase();
-  return keywords.some(kw => haystack.includes(kw));
+  return keywords.some((kw) => haystack.includes(kw));
 }
 
 async function scanDocFiles(
@@ -113,6 +113,6 @@ export async function loadDocContext(options: LoadDocContextOptions): Promise<Co
 
   const docs = await scanDocFiles(cwd, fs, docDirs, gitRoot);
   return docs
-    .filter(doc => isRelevant(doc.description, doc.path, keywords))
-    .map(doc => ({ path: doc.path, content: doc.content }));
+    .filter((doc) => isRelevant(doc.description, doc.path, keywords))
+    .map((doc) => ({ path: doc.path, content: doc.content }));
 }
