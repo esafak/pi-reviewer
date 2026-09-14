@@ -37,4 +37,13 @@ describe("GitHub Action Vite+ setup", () => {
     expect(template).toContain('"../../../dist-ui/index.html"');
     expect(artifact).toContain("/*%%DATA%%*/null/*%%END%%*/");
   });
+
+  // The Actions log is a pipe: a synchronous exit can drop buffered writes, so
+  // the entry point must return and let Node drain stdio.
+  it("does not truncate buffered output with an immediate exit", async () => {
+    const entry = await readFile(path.join(process.cwd(), "src/ci/action-entry.ts"), "utf8");
+
+    expect(entry).not.toMatch(/\bprocess\.exit\(/);
+    expect(entry).toContain("process.exitCode");
+  });
 });

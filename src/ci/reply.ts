@@ -172,17 +172,17 @@ export async function handleReplyComment(options: ReplyCommentOptions): Promise<
     const existingReply = snapshot.comments.find(comment => comment.user?.login === identity.login && sameReplyMarker(comment, pending));
     if (existingReply) {
       const existingStatus = decodeStatusMarker(existingReply.body);
-      if (!existingStatus || existingStatus.targetSha !== pending.headSha || !["STILL_OPEN", "RESOLVED"].includes(existingStatus.status)) return false;
+      if (!existingStatus || existingStatus.targetSha !== pending.headSha || !["STILL_OPEN", "RESOLVED"].includes(existingStatus.status)) { console.warn(`[pi-reviewer] reply ${pending.commentId} skipped: existing reply marker is not recoverable for head ${pending.headSha}`); return false; }
       if (existingStatus.status === "STILL_OPEN") {
         const beforeResolve = await github.getPullRequest(repo, snapshot.pullRequest.number);
-        if (beforeResolve.head.sha !== pending.headSha) return false;
+        if (beforeResolve.head.sha !== pending.headSha) { console.warn(`[pi-reviewer] reply ${pending.commentId} skipped: PR head moved before resolving an existing reply`); return false; }
         await github.resolveThread(thread.id);
         const beforeUpdate = await github.getPullRequest(repo, snapshot.pullRequest.number);
-        if (beforeUpdate.head.sha !== pending.headSha) return false;
+        if (beforeUpdate.head.sha !== pending.headSha) { console.warn(`[pi-reviewer] reply ${pending.commentId} skipped: PR head moved before updating an existing reply`); return false; }
         await github.updateReviewComment(repo, snapshot.pullRequest.number, existingReply.id, existingReply.body.replace(/"status":"STILL_OPEN"/, '"status":"RESOLVED"'));
       } else {
         const beforeResolve = await github.getPullRequest(repo, snapshot.pullRequest.number);
-        if (beforeResolve.head.sha !== pending.headSha) return false;
+        if (beforeResolve.head.sha !== pending.headSha) { console.warn(`[pi-reviewer] reply ${pending.commentId} skipped: PR head moved before resolving an existing reply`); return false; }
         await github.resolveThread(thread.id);
       }
       return true;
@@ -197,21 +197,21 @@ export async function handleReplyComment(options: ReplyCommentOptions): Promise<
     const freshReply = snapshot.comments.find(comment => comment.user?.login === identity.login && sameReplyMarker(comment, pending));
     if (action.action === "react") {
       const beforeReaction = await github.getPullRequest(repo, snapshot.pullRequest.number);
-      if (beforeReaction.head.sha !== pending.headSha) return false;
+      if (beforeReaction.head.sha !== pending.headSha) { console.warn(`[pi-reviewer] reply ${pending.commentId} skipped: PR head moved before reacting`); return false; }
       await github.createReviewCommentReaction(repo, snapshot.pullRequest.number, pending.commentId, action.content);
     } else if (freshReply) {
       const freshStatus = decodeStatusMarker(freshReply.body);
-      if (action.action !== "resolve" || !freshStatus || freshStatus.targetSha !== pending.headSha || !["STILL_OPEN", "RESOLVED"].includes(freshStatus.status)) return false;
+      if (action.action !== "resolve" || !freshStatus || freshStatus.targetSha !== pending.headSha || !["STILL_OPEN", "RESOLVED"].includes(freshStatus.status)) { console.warn(`[pi-reviewer] reply ${pending.commentId} skipped: fresh reply marker is not recoverable for head ${pending.headSha}`); return false; }
       if (freshStatus.status === "STILL_OPEN") {
         const beforeResolve = await github.getPullRequest(repo, snapshot.pullRequest.number);
-        if (beforeResolve.head.sha !== pending.headSha) return false;
+        if (beforeResolve.head.sha !== pending.headSha) { console.warn(`[pi-reviewer] reply ${pending.commentId} skipped: PR head moved before resolving a fresh reply`); return false; }
         await github.resolveThread(context.thread.id);
         const beforeUpdate = await github.getPullRequest(repo, snapshot.pullRequest.number);
-        if (beforeUpdate.head.sha !== pending.headSha) return false;
+        if (beforeUpdate.head.sha !== pending.headSha) { console.warn(`[pi-reviewer] reply ${pending.commentId} skipped: PR head moved before updating a fresh reply`); return false; }
         await github.updateReviewComment(repo, snapshot.pullRequest.number, freshReply.id, freshReply.body.replace(/"status":"STILL_OPEN"/, '"status":"RESOLVED"'));
       } else {
         const beforeResolve = await github.getPullRequest(repo, snapshot.pullRequest.number);
-        if (beforeResolve.head.sha !== pending.headSha) return false;
+        if (beforeResolve.head.sha !== pending.headSha) { console.warn(`[pi-reviewer] reply ${pending.commentId} skipped: PR head moved before resolving a fresh reply`); return false; }
         await github.resolveThread(context.thread.id);
       }
     } else {
@@ -221,10 +221,10 @@ export async function handleReplyComment(options: ReplyCommentOptions): Promise<
       const posted = await github.reply(repo, snapshot.pullRequest.number, pending.parentCommentId, `${replyMarker(pending.commentId, pending.parentCommentId, context.thread.id)}${lifecycle}\n${action.body}`);
       if (action.action === "resolve") {
         const beforeResolve = await github.getPullRequest(repo, snapshot.pullRequest.number);
-        if (beforeResolve.head.sha !== pending.headSha) return false;
+        if (beforeResolve.head.sha !== pending.headSha) { console.warn(`[pi-reviewer] reply ${pending.commentId} skipped: PR head moved before resolving the posted reply`); return false; }
         await github.resolveThread(context.thread.id);
         const beforeUpdate = await github.getPullRequest(repo, snapshot.pullRequest.number);
-        if (beforeUpdate.head.sha !== pending.headSha) return false;
+        if (beforeUpdate.head.sha !== pending.headSha) { console.warn(`[pi-reviewer] reply ${pending.commentId} skipped: PR head moved before updating the posted reply`); return false; }
         await github.updateReviewComment(repo, snapshot.pullRequest.number, posted.id, posted.body.replace(/"status":"STILL_OPEN"/, '"status":"RESOLVED"'));
       }
     }
@@ -269,6 +269,9 @@ export async function recoverPendingReplies(options: ReplyRecoveryOptions): Prom
 /** Handle one review-comment reply without entering the normal review path. */
 export async function handleReply(options: ReplyHandlerOptions): Promise<boolean> {
   const { event, repo, pullRequest, identity, github } = options;
+  // Log before any bail so the fast path identifies the event it handled even
+  // when it ends without side effects.
+  console.log(`[pi-reviewer] reply event received: kind=${event.kind} commentId=${String(event.commentId)} parentCommentId=${String(event.parentCommentId)} author="${event.actor?.login ?? "unknown"}" type="${event.actor?.type ?? "unknown"}" headSha=${event.headSha ?? "none"}`);
   if (event.kind !== "reply") { console.warn(`[pi-reviewer] reply event ignored: unexpected event kind "${event.kind}"`); return false; }
   if (event.actor?.type === "Bot") { console.log("[pi-reviewer] reply event ignored: author is a bot"); return false; }
   if (!event.actor?.login) { console.warn("[pi-reviewer] reply event ignored: event has no actor login"); return false; }
@@ -279,7 +282,7 @@ export async function handleReply(options: ReplyHandlerOptions): Promise<boolean
   }
   if (!event.headSha) { console.warn("[pi-reviewer] reply event ignored: event has no head SHA"); return false; }
   const authorizedLogins = await resolveAuthorizedLogins(github, repo, [event.actor.login]);
-  if (!authorizedLogins.has(event.actor.login)) return false;
+  if (!authorizedLogins.has(event.actor.login)) { console.warn(`[pi-reviewer] reply event ignored: author "${event.actor.login}" is not authorized to reply`); return false; }
   try {
     const snapshot = await fetchReplySnapshot(github, repo, event.pr!, pullRequest);
     const pending: PendingReply = { commentId: event.commentId as number, parentCommentId: event.parentCommentId as number, threadId: snapshot.threads.find(thread => thread.comments.nodes.some(comment => comment.id === event.parentCommentId))?.id ?? "", actor: event.actor ?? {}, headSha: event.headSha };

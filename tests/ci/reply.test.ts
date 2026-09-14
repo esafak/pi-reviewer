@@ -348,4 +348,49 @@ describe("review-comment reply action path", () => {
     await handleReply({ event, repo: "owner/repo", pullRequest: pr, identity: { login: "reviewer[bot]" }, github, generate: vi.fn(async () => ({ action: "reply", body: "answer" })) });
     expect(github.reply).toHaveBeenCalledTimes(1);
   });
+
+  // The fast path must identify the event it handled, and every bail must name
+  // its branch.
+  it("logs the reply fast path and the authorization denial instead of exiting silently", async () => {
+    const github = client([root, triggering], pr, { human: "read" });
+    const info = vi.spyOn(console, "log").mockImplementation(() => {});
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      expect(await handleReply({ event, repo: "owner/repo", pullRequest: pr, identity: { login: "reviewer[bot]" }, github, generate: vi.fn() })).toBe(false);
+      expect(info).toHaveBeenCalledWith(expect.stringContaining("reply event received"));
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('"human" lacks write permission'));
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('"human" is not authorized to reply'));
+    } finally {
+      info.mockRestore();
+      warn.mockRestore();
+    }
+  });
+
+  it("logs a head move that aborts reply handling instead of exiting silently", async () => {
+    const github = client([root, triggering], { ...pr, head: { ...pr.head, sha: "new-head" } });
+    const info = vi.spyOn(console, "log").mockImplementation(() => {});
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      expect(await handleReply({ event, repo: "owner/repo", pullRequest: pr, identity: { login: "reviewer[bot]" }, github, generate: vi.fn() })).toBe(false);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("PR head moved on refresh"));
+    } finally {
+      info.mockRestore();
+      warn.mockRestore();
+    }
+  });
+
+  it("logs an unrecoverable existing reply marker instead of returning silently", async () => {
+    const github = client();
+    const body = `${replyMarker(9, 8, "thread-1")}\n<!-- pi-reviewer:status:v1 {"findingId":8,"targetSha":"old-head","status":"STILL_OPEN"} -->\nstale`;
+    github.listComments.mockResolvedValue([root, triggering, { id: 10, body, in_reply_to_id: 8, user: { login: "reviewer[bot]" } }]);
+    const info = vi.spyOn(console, "log").mockImplementation(() => {});
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      expect(await handleReply({ event, repo: "owner/repo", pullRequest: pr, identity: { login: "reviewer[bot]" }, github, generate: vi.fn() })).toBe(false);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("existing reply marker is not recoverable"));
+    } finally {
+      info.mockRestore();
+      warn.mockRestore();
+    }
+  });
 });
