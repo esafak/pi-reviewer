@@ -1,0 +1,24 @@
+AGENTS.md
+  h_ea91e2db23540f 3,5-6
+src/ci/action-entry.ts
+  h_ea91e2db23540f 7-18,25-45,51-56,61-65,73-94,96-100,102-110,112-140,142-304,306-307,310-321
+src/ci/reply.ts
+  h_ea91e2db23540f 175,178,181,185,200,204,207,210,214,224,227,272-274,285
+tests/ci/action.test.ts
+  h_ea91e2db23540f 40-48
+tests/ci/batch.test.ts
+  h_ea91e2db23540f 183-187
+tests/ci/reply.test.ts
+  h_ea91e2db23540f 351-395
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "36c82dd55c0169a1ce32000296ac0c4360424c2e",
+  "prompts": {},
+  "humans": {
+    "h_ea91e2db23540f": {
+      "author": "Emre Şafak <3928300+esafak@users.noreply.github.com>"
+    }
+  }
+}
