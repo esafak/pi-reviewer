@@ -1,0 +1,21 @@
+src/ci/action-entry.ts
+  s_82e3049fa8a90c::t_43d3e6cda49e9a 47-60,238,252
+tests/ci/batch.test.ts
+  s_82e3049fa8a90c::t_0c39e70274a848 153-182
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "d3bd17ab1f6b613034e5969ce9454a6013f0a181",
+  "prompts": {},
+  "sessions": {
+    "s_82e3049fa8a90c": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f3e14b43bffeABI1SuoHf09Evz",
+        "model": "glm-5.3-flash"
+      },
+      "human_author": "Emre Şafak <3928300+esafak@users.noreply.github.com>"
+    }
+  }
+}
