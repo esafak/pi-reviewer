@@ -11,6 +11,10 @@ local linters = new Mapping<String, Step> {
     exclude = List("dist/**", "dist-ui/**")
     check = "mise run fmt -- --check {{files}}"
   }
+  ["renovate-config"] {
+    glob = List("**/renovate.json5")
+    check = "mise run lint:renovate"
+  }
 }
 
 local prepush = new Mapping<String, Step> {
