@@ -9,7 +9,6 @@
     "helpers:pinGitHubActionDigests"
   ],
   "automergeType": "branch",
-  "platformAutomerge": true,
   "ignoreTests": false,
   "prHourlyLimit": 2,
   "prCreation": "not-pending",
