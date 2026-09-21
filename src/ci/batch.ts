@@ -300,7 +300,16 @@ export function selectBatchRange(
   head: string,
   latest?: BatchMarker,
   isAncestor?: (from: string, to: string) => boolean,
+  mergeHead = false,
 ) {
+  // A merge head imports its second parent's history, so incremental snapshots
+  // from an earlier PR head would treat already-merged base code as new.
+  if (mergeHead)
+    return {
+      fromSha: mergeBase,
+      toSha: head,
+      fresh: latest?.fromSha !== mergeBase || latest?.toSha !== head,
+    };
   if (!latest || (isAncestor && !isAncestor(latest.toSha, head)))
     return { fromSha: mergeBase, toSha: head, fresh: true };
   return { fromSha: latest.toSha, toSha: head, fresh: latest.toSha !== head };
