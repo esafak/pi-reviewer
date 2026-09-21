@@ -2,6 +2,7 @@
 hk = "2.0.0"
 pnpm = "12.4.1"
 vp = "0.3.2"
+"npm:renovate" = "latest"
 
 [env]
 HK_MISE = "1"
@@ -9,6 +10,10 @@ HK_MISE = "1"
 [tasks.lint]
 description = "Lint the project with Vite+"
 run = ["vp lint", "pnpm exec tsx scripts/lint-graphql.ts"]
+
+[tasks."lint:renovate"]
+description = "Validate Renovate configuration"
+run = "renovate-config-validator --strict"
 
 [tasks.test]
 description = "Run the test suite with Vite+"

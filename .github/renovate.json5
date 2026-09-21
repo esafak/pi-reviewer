@@ -5,11 +5,20 @@
   // https://docs.renovatebot.com/getting-started/installing-onboarding/#reconfigure-via-pr
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
-    "config:recommended"
+    "config:recommended",
+    "helpers:pinGitHubActionDigests"
   ],
+  "automergeType": "branch",
+  "platformAutomerge": true,
+  "ignoreTests": false,
   "prHourlyLimit": 2,
+  "prCreation": "not-pending",
+  "semanticCommits": "enabled",
   "commitMessageExtra": "from {{#if currentVersion}}{{{currentVersion}}}{{else}}{{{currentDigestShort}}}{{/if}} to {{#if newVersion}}{{{newVersion}}}{{else}}{{{newDigestShort}}}{{/if}}",
-  "minimumReleaseAge": "7 days",
+  "minimumReleaseAge": "14 days",
+  "lockFileMaintenance": {
+    "enabled": true
+  },
   "vulnerabilityAlerts": {
     "enabled": true
   },
@@ -21,9 +30,15 @@
   "enabledManagers": ["npm", "mise", "github-actions"],
   "packageRules": [
     {
+      "description": "group pnpm version updates",
       "matchManagers": ["npm", "mise", "github-actions"],
-      "matchPackageNames": ["pnpm"],
-      "groupName": "pnpm"
+      "matchPackageNames": ["pnpm", "aqua:pnpm/pnpm"],
+      "groupName": "pnpm versions"
+    },
+    {
+      "description": "auto-merge all but major releases",
+      "matchUpdateTypes": ["minor", "patch", "digest", "pinDigest"],
+      "automerge": true
     },
     {
       "matchManagers": ["npm"],
