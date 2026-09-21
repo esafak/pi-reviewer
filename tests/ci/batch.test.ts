@@ -150,6 +150,36 @@ describe("batch markers", () => {
       }),
     ).toMatchObject({ beforeSha: "first", afterSha: "third" });
   });
+  it("resets a merge-head synchronization to the current merge base", () => {
+    const marker = {
+      version: 1 as const,
+      fromSha: "old-base",
+      toSha: "previous-head",
+      kind: "synchronize" as const,
+      actor: "app[bot]",
+      reviewId: 9,
+    };
+    expect(selectBatchRange("current-base", "merge-head", marker, () => true, true)).toEqual({
+      fromSha: "current-base",
+      toSha: "merge-head",
+      fresh: true,
+    });
+  });
+  it("keeps an already reviewed merge-head synchronization idempotent", () => {
+    const marker = {
+      version: 1 as const,
+      fromSha: "current-base",
+      toSha: "merge-head",
+      kind: "synchronize" as const,
+      actor: "app[bot]",
+      reviewId: 9,
+    };
+    expect(selectBatchRange("current-base", "merge-head", marker, () => false, true)).toEqual({
+      fromSha: "current-base",
+      toSha: "merge-head",
+      fresh: false,
+    });
+  });
   it("keeps the newest marker when finalization left reviewId at zero", () => {
     const reviews = [
       {

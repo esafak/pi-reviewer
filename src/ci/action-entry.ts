@@ -44,6 +44,20 @@ function hasCommit(sha: string, cwd = process.cwd()): boolean {
     return false;
   }
 }
+function isMergeCommit(sha: string, cwd = process.cwd()): boolean {
+  try {
+    const parents = execFileSync("git", ["rev-list", "--parents", "-n", "1", sha], {
+      cwd,
+      encoding: "utf8",
+      stdio: ["pipe", "pipe", "pipe"],
+    })
+      .trim()
+      .split(/\s+/);
+    return parents.length >= 3;
+  } catch {
+    return false;
+  }
+}
 function gitAuthArgs(): string[] {
   const token = process.env.GITHUB_TOKEN;
   if (!token) return [];
@@ -221,6 +235,7 @@ async function main(): Promise<void> {
   // explicitly before any merge-base, ancestry, or worktree operation.
   ensureCommit(head, `refs/pull/${event.pr}/head`);
   ensureCommit(pr.base.sha, undefined);
+  const mergeHead = event.kind === "synchronize" && isMergeCommit(head);
   if (event.targetHead && !ancestor(head, pr.head.sha)) {
     throw new Error("workflow target-head must be an ancestor of the current PR head");
   }
@@ -234,7 +249,7 @@ async function main(): Promise<void> {
   } catch {
     console.warn("[pi-reviewer] could not compute merge-base; using PR base SHA");
   }
-  const range = selectBatchRange(mergeBase, head, latest, ancestor);
+  const range = selectBatchRange(mergeBase, head, latest, ancestor, mergeHead);
   if (!isEventRangeConsistent(event, latest?.toSha ?? mergeBase, head))
     console.warn(
       `[pi-reviewer] event SHAs differ from authenticated PR state; using authenticated marker range`,
