@@ -158,6 +158,12 @@ optional provider keys; DuckDuckGo provides best-effort unauthenticated regular
 search only and is not an AI-search provider. See [CI.md](./CI.md) for the
 configuration and query-egress limitations.
 
+Eligible CI comment reviews also have a default-on `package_lookup` tool for
+PyPI, Maven Central, crates.io, npm, and Go modules. It contacts public
+registries only when called, returns bounded registry-native metadata, and
+treats package data as untrusted. See [CI.md](./CI.md) for network and budget
+details.
+
 **[pi-reviewer-doc-context](./extensions/pi-reviewer-doc-context/README.md)** is the built-in provider. It scans your project's doc dirs for `.md` files with a `description` frontmatter field and loads the ones relevant to the current diff. See its README for the doc format, configuration, and the full provider API.
 
 ---
