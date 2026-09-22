@@ -1,0 +1,19 @@
+src/ci/search/providers/brave.ts
+  s_09711a1e374dc8::t_6c10ecffcd38cc 1,50
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "7296de4d4d43f3e83fafab5aeae6392962b5fb08",
+  "prompts": {},
+  "sessions": {
+    "s_09711a1e374dc8": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f360ae941ffegC3Ib8gXkWDhTf",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "Emre Şafak <3928300+esafak@users.noreply.github.com>"
+    }
+  }
+}
