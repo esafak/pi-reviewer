@@ -149,6 +149,15 @@ Create `AGENTS.md` or `CLAUDE.md` at your project root to give the reviewer cont
 
 Any pi extension can inject additional context into the review prompt by listening on the `"pi-reviewer:collect-context-providers"` event — providers receive the changed files and a filesystem abstraction (works locally and over SSH) and return `{ path, content }` pairs appended to the system prompt.
 
+### CI web search
+
+CI reviews can optionally use separate `web_search` and `web_ai_search` tools
+to verify current public facts. Search is disabled by default, CI-only, and
+does not provide shell or repository execution. Exa and Brave require their
+optional provider keys; DuckDuckGo provides best-effort unauthenticated regular
+search only and is not an AI-search provider. See [CI.md](./CI.md) for the
+configuration and query-egress limitations.
+
 **[pi-reviewer-doc-context](./extensions/pi-reviewer-doc-context/README.md)** is the built-in provider. It scans your project's doc dirs for `.md` files with a `description` frontmatter field and loads the ones relevant to the current diff. See its README for the doc format, configuration, and the full provider API.
 
 ---

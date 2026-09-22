@@ -1062,6 +1062,79 @@ printf("first\\nsecond")
     expect(body).not.toContain("Review by pi-reviewer");
   });
 
+  it("renders only ledger-backed, safe external sources once", async () => {
+    const fetchMock = okFetch();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await sendOutput({
+      target: "comment",
+      content: JSON.stringify({ summary: "Current [web:1] [web:999] [web:2]", comments: [] }),
+      githubToken: "token123",
+      prNumber: 42,
+      repo: "owner/repo",
+      evidence: [
+        {
+          id: "web:1",
+          kind: "search-result",
+          provider: "brave",
+          title: '<Docs> & "reference"',
+          url: "https://example.com/docs?a=1&b=2",
+          queryHash: "hash",
+          rank: 1,
+          retrievedAt: "now",
+        },
+        {
+          id: "web:2",
+          kind: "search-result",
+          provider: "brave",
+          title: "Unsafe",
+          url: "javascript:alert(1)",
+          queryHash: "hash",
+          rank: 2,
+          retrievedAt: "now",
+        },
+      ],
+    });
+
+    const body = JSON.parse((fetchMock.mock.calls[0][1] as { body: string }).body).body as string;
+    expect(body.match(/<summary>External sources<\/summary>/g)).toHaveLength(1);
+    expect(body).toContain("https://example.com/docs?a=1&amp;b=2");
+    expect(body).toContain("&lt;Docs&gt; &amp; &quot;reference&quot;");
+    expect(body).not.toContain("javascript:");
+  });
+
+  it("deduplicates cited sources and caps the generated source list", async () => {
+    const fetchMock = okFetch();
+    vi.stubGlobal("fetch", fetchMock);
+    const evidence = Array.from({ length: 12 }, (_, index) => ({
+      id: `web:${index + 1}`,
+      kind: "search-result" as const,
+      provider: "exa" as const,
+      title: `Source ${index + 1}`,
+      url: `https://example.com/${index + 1}`,
+      queryHash: "hash",
+      rank: index + 1,
+      retrievedAt: "now",
+    }));
+    await sendOutput({
+      target: "comment",
+      content: JSON.stringify({
+        summary: `${"[web:1] ".repeat(3)}${evidence
+          .slice(1)
+          .map((entry) => `[${entry.id}]`)
+          .join(" ")}`,
+        comments: [],
+      }),
+      githubToken: "token123",
+      prNumber: 42,
+      repo: "owner/repo",
+      evidence,
+    });
+    const body = JSON.parse((fetchMock.mock.calls[0][1] as { body: string }).body).body as string;
+    expect(body.match(/<a href=/g)).toHaveLength(10);
+    expect(body.match(/<a href="https:\/\/example\.com\/1"/g)).toHaveLength(1);
+  });
+
   it("makes issue-comment fallback findings reconstructable", async () => {
     const fetchMock = okFetch();
     vi.stubGlobal("fetch", fetchMock);
@@ -1248,7 +1321,7 @@ printf("first\\nsecond")
     await sendOutput({
       target: "comment",
       content: JSON.stringify({
-        summary: "Needs fixes",
+        summary: "Needs fixes [web:1]",
         comments: [
           {
             file: "src/auth.ts",
@@ -1263,11 +1336,24 @@ printf("first\\nsecond")
       prNumber: 42,
       repo: "owner/repo",
       commitId: "abc123",
+      evidence: [
+        {
+          id: "web:1",
+          kind: "search-result",
+          provider: "exa",
+          title: "Docs",
+          url: "https://example.com/docs",
+          queryHash: "hash",
+          rank: 1,
+          retrievedAt: "now",
+        },
+      ],
     });
 
     const payload = JSON.parse((fetchMock.mock.calls[0][1] as { body: string }).body);
-    expect(payload.body).toBe(
-      `Needs fixes\n\n<details>\n<summary>Prompt to fix all issues with AI</summary>\n\n\`\`\`\nCRITICAL: src/auth.ts:42\n\nMissing null check\n\n${AI_FIX_FOOTER}\n\`\`\`\n\n</details>`,
+    expect(payload.body.match(/<summary>External sources<\/summary>/g)).toHaveLength(1);
+    expect(payload.body).toContain(
+      `Needs fixes [web:1]\n\n<details>\n<summary>Prompt to fix all issues with AI</summary>\n\n\`\`\`\nCRITICAL: src/auth.ts:42\n\nMissing null check\n\n${AI_FIX_FOOTER}\n\`\`\`\n\n</details>`,
     );
     expect(payload.comments).toEqual([
       {
@@ -1277,6 +1363,59 @@ printf("first\\nsecond")
         body: `<!-- pi-reviewer:finding:v1 -->\n🔴 Missing null check\n\n<details>\n<summary>Prompt to fix with AI</summary>\n\n\`\`\`\nCRITICAL: src/auth.ts:42\n\nMissing null check\n\n${AI_FIX_FOOTER}\n\`\`\`\n\n</details>`,
       },
     ]);
+  });
+
+  it("preserves ledger-backed sources when finalizing a batch marker", async () => {
+    const marker =
+      '<!-- pi-reviewer:batch:v1 {"version":1,"fromSha":"base","toSha":"head","reviewId":0} -->';
+    const currentHead = {
+      ok: true,
+      text: vi.fn().mockResolvedValue(JSON.stringify({ head: { sha: "head" } })),
+    };
+    const response = {
+      ok: true,
+      text: vi.fn().mockResolvedValue(""),
+      json: vi.fn().mockResolvedValue({ id: 17 }),
+      clone() {
+        return this;
+      },
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(currentHead)
+      .mockResolvedValueOnce(response)
+      .mockResolvedValueOnce({
+        ok: true,
+        text: vi.fn().mockResolvedValue(""),
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await sendOutput({
+      target: "comment",
+      content: JSON.stringify({ summary: "Current [web:1]", comments: [] }),
+      githubToken: "token123",
+      prNumber: 42,
+      repo: "owner/repo",
+      commitId: "head",
+      batchMarker: marker,
+      evidence: [
+        {
+          id: "web:1",
+          kind: "search-result",
+          provider: "exa",
+          title: "Docs",
+          url: "https://example.com/docs",
+          queryHash: "hash",
+          rank: 1,
+          retrievedAt: "now",
+        },
+      ],
+    });
+
+    const finalized = JSON.parse((fetchMock.mock.calls[2][1] as { body: string }).body)
+      .body as string;
+    expect(finalized.match(/<summary>External sources<\/summary>/g)).toHaveLength(1);
+    expect(finalized.match(/<a href="https:\/\/example\.com\/docs"/g)).toHaveLength(1);
   });
 
   it("removes the reviewer's stale thumbs-up after posting a finding", async () => {
@@ -1664,7 +1803,7 @@ printf("first\\nsecond")
     await sendOutput({
       target: "comment",
       content: JSON.stringify({
-        summary: "Needs fixes",
+        summary: "Needs fixes [web:1]",
         comments: [
           {
             file: "src/auth.ts",
@@ -1679,6 +1818,18 @@ printf("first\\nsecond")
       prNumber: 42,
       repo: "owner/repo",
       commitId: "abc123",
+      evidence: [
+        {
+          id: "web:1",
+          kind: "search-result",
+          provider: "exa",
+          title: "Docs",
+          url: "https://example.com/docs",
+          queryHash: "hash",
+          rank: 1,
+          retrievedAt: "now",
+        },
+      ],
     });
 
     // First call: inline review (rejected 422). Second call: body-only retry,
@@ -1696,6 +1847,10 @@ printf("first\\nsecond")
     expect(retryBody.body).toContain(AI_FIX_FOOTER);
     expect(retryBody.body).toContain("Prompt to fix all issues with AI");
     expect(retryBody.body).toContain("Comments Not Attached to the Diff");
+    expect(retryBody.body.match(/<summary>External sources<\/summary>/g)).toHaveLength(1);
+    const initialBody = JSON.parse((fetchMock.mock.calls[0][1] as { body: string }).body)
+      .body as string;
+    expect(initialBody.match(/<summary>External sources<\/summary>/g)).toHaveLength(1);
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("422"));
   });
 

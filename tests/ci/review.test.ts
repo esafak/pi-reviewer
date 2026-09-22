@@ -221,6 +221,14 @@ describe("review", () => {
     delete process.env.ANTHROPIC_API_KEY;
     delete process.env.ZAI_API_KEY;
     delete process.env.PI_REVIEWER_DOC_DIRS;
+    delete process.env.PI_REVIEWER_WEB_SEARCH;
+    delete process.env.PI_REVIEWER_SEARCH_PROVIDER;
+    delete process.env.PI_REVIEWER_SEARCH_REQUIRED;
+    delete process.env.PI_REVIEWER_AI_SEARCH;
+    delete process.env.PI_REVIEWER_AI_SEARCH_PROVIDER;
+    delete process.env.PI_REVIEWER_AI_SEARCH_REQUIRED;
+    delete process.env.EXA_API_KEY;
+    delete process.env.BRAVE_SEARCH_API_KEY;
     // model is mandatory — provide a default for tests that don't exercise it
     process.env.PI_REVIEWER_MODEL = "anthropic/claude-opus-4-6";
   });
@@ -255,6 +263,9 @@ describe("review", () => {
         }),
       }),
     );
+    expect(AgentMock.mock.calls[0][0].initialState.tools).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: "web_search" })]),
+    );
     expect(sendOutputMock).toHaveBeenCalledWith(
       expect.objectContaining({
         target: "terminal",
@@ -287,6 +298,50 @@ describe("review", () => {
         repo: "owner/repo",
       }),
     );
+  });
+
+  it("fails before agent/output when required search is unavailable", async () => {
+    process.env.GITHUB_ACTIONS = "true";
+    process.env.PI_REVIEWER_WEB_SEARCH = "true";
+    process.env.PI_REVIEWER_SEARCH_PROVIDER = "brave";
+    process.env.PI_REVIEWER_SEARCH_REQUIRED = "true";
+
+    await expect(
+      review({ cwd: "/repo", pr: 42, githubToken: "token", repo: "owner/repo" }),
+    ).rejects.toThrow("Required regular web search is unavailable");
+    expect(AgentMock).not.toHaveBeenCalled();
+    expect(sendOutputMock).not.toHaveBeenCalled();
+  });
+
+  it("fails before output when a required search tool operation fails", async () => {
+    process.env.GITHUB_ACTIONS = "true";
+    process.env.PI_REVIEWER_WEB_SEARCH = "true";
+    process.env.PI_REVIEWER_SEARCH_PROVIDER = "duckduckgo";
+    process.env.PI_REVIEWER_SEARCH_REQUIRED = "true";
+    let end: ((event: unknown) => void) | undefined;
+    AgentMock.mockImplementation(function (options: any) {
+      return {
+        subscribe: vi.fn((callback: (event: unknown) => void) => {
+          end = callback;
+          return vi.fn();
+        }),
+        prompt: vi.fn(async () => {
+          const tool = options.initialState.tools.find(
+            (candidate: { name?: string }) => candidate.name === "web_search",
+          );
+          await tool.execute("call", { query: "\u0000" }).catch(() => undefined);
+          end?.({
+            type: "agent_end",
+            messages: [{ role: "assistant", content: [{ type: "text", text: "LGTM" }] }],
+          });
+        }),
+      } as any;
+    });
+
+    await expect(
+      review({ cwd: "/repo", pr: 42, githubToken: "token", repo: "owner/repo" }),
+    ).rejects.toThrow("Required web search failed");
+    expect(sendOutputMock).not.toHaveBeenCalled();
   });
 
   it("passes the resolved diff to sendOutput for position validation", async () => {
