@@ -1,0 +1,53 @@
+README.md
+  s_112623860725c0::t_9f77ffb1aadabb 152-160
+package.json
+  s_09711a1e374dc8::t_6e26acfbc681b7 41-42
+pnpm-lock.yaml
+  s_09711a1e374dc8::t_6ada33f3f1a4d2 228,246,249,252,255-258,2661-2665,3686,3689,3691,3695-3696,3703,3706,3712,3729,3735,3737,3744,3772,3795,4312,4335,4346,4368,4592,4595,4599,4603-4604,4606,4612-4613,4615-4616,4656,4659,4670,4674,4724-4725
+src/ci/review.ts
+  s_09711a1e374dc8::t_40b6b0c68d8d87 29-31,204-235,275,277,371-372,410
+src/ci/search/client.ts
+  s_09711a1e374dc8::t_c9351fddade7be 1-166
+src/ci/search/config.ts
+  s_09711a1e374dc8::t_e60f31b0873d1b 1-113
+src/ci/search/providers/brave.ts
+  s_09711a1e374dc8::t_5d889d1d363251 1-143
+src/ci/search/providers/duckduckgo.ts
+  s_09711a1e374dc8::t_3cc4c7a547caca 1-46
+src/ci/search/providers/exa.ts
+  s_09711a1e374dc8::t_b6b468416318e1 1-83
+src/ci/search/tool.ts
+  s_09711a1e374dc8::t_e7fba7f430c3ca 1-98
+src/core/output.ts
+  s_112623860725c0::t_8eb6174febbd70 25,111-112,853,888-893,898-932,942,955-956,958,960-977,979-983
+tests/ci/review.test.ts
+  s_09711a1e374dc8::t_329b950bda69f3 224-231,266-268,303-346
+tests/ci/search.test.ts
+  s_09711a1e374dc8::t_c1c8bb9c6e2b92 1-395
+tests/core/output.test.ts
+  s_09711a1e374dc8::t_b15cc0282d076c 1065-1137,1324,1339-1350,1354-1356,1368-1420,1806,1821-1832,1850-1853
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "7246a985c5350e61b7a111daeb3457940f436943",
+  "prompts": {},
+  "sessions": {
+    "s_09711a1e374dc8": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f360ae941ffegC3Ib8gXkWDhTf",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "Emre Şafak <3928300+esafak@users.noreply.github.com>"
+    },
+    "s_112623860725c0": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f35ea972fffe5wI6AzgtO9mA8B",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "Emre Şafak <3928300+esafak@users.noreply.github.com>"
+    }
+  }
+}
