@@ -1,3 +1,4 @@
+import { stripHtmlTags } from "../html.js";
 import type { AiSearchResult, SearchProvider, SearchResult } from "../types.js";
 
 const ORIGIN = "https://api.search.brave.com";
@@ -46,9 +47,7 @@ function result(value: unknown, rank: number): SearchResult | undefined {
     title: item.title.slice(0, 500),
     url: item.url,
     snippet:
-      typeof item.description === "string"
-        ? item.description.replace(/<[^>]+>/g, "").slice(0, 1_000)
-        : "",
+      typeof item.description === "string" ? stripHtmlTags(item.description).slice(0, 1_000) : "",
     provider: "brave",
     rank,
   };

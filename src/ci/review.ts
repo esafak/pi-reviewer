@@ -235,7 +235,7 @@ export async function review(options: ReviewOptions): Promise<void> {
 
   if (options.dryRun) {
     console.log(`Diff source: ${source}`);
-    console.log(`System prompt:\n\n${systemPrompt}`);
+    console.log(`System prompt:\n\n${effectiveSystemPrompt}`);
     console.log(`User prompt:\n\n${userPrompt}`);
     return;
   }

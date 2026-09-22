@@ -1,15 +1,7 @@
 import type { SearchProvider, SearchResult } from "../types.js";
+import { decodeHtmlEntities, stripHtmlTags } from "../html.js";
 
 const ENDPOINT = "https://html.duckduckgo.com/html/";
-
-function decode(value: string): string {
-  return value
-    .replace(/&#x([0-9a-f]+);/gi, (_, hex) => String.fromCodePoint(Number.parseInt(hex, 16)))
-    .replace(/&#([0-9]+);/g, (_, dec) => String.fromCodePoint(Number(dec)))
-    .replace(/&amp;/g, "&")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'");
-}
 
 export function createDuckDuckGoProvider(): SearchProvider {
   return {
@@ -30,12 +22,12 @@ export function createDuckDuckGoProvider(): SearchProvider {
         /<a[^>]+class="result__a"[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>[\s\S]*?<a[^>]+class="result__snippet"[^>]*>([\s\S]*?)<\/a>/gi;
       for (const match of html.matchAll(pattern)) {
         if (results.length >= maxResults) break;
-        const urlValue = decode(match[1]);
+        const urlValue = decodeHtmlEntities(match[1]);
         if (!/^https?:\/\//i.test(urlValue)) continue;
         results.push({
-          title: decode(match[2].replace(/<[^>]+>/g, "")).slice(0, 500),
+          title: decodeHtmlEntities(stripHtmlTags(match[2])).slice(0, 500),
           url: urlValue,
-          snippet: decode(match[3].replace(/<[^>]+>/g, "")).slice(0, 1_000),
+          snippet: decodeHtmlEntities(stripHtmlTags(match[3])).slice(0, 1_000),
           provider: "duckduckgo",
           rank: results.length + 1,
         });

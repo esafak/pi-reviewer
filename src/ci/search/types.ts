@@ -1,12 +1,5 @@
 export type SearchProviderId = "exa" | "brave" | "duckduckgo";
 
-export type SearchFailureCode =
-  | "unavailable"
-  | "invalid_response"
-  | "timeout"
-  | "rate_limited"
-  | "budget_exhausted";
-
 export interface SearchResult {
   title: string;
   url: string;
@@ -61,8 +54,3 @@ export interface SearchConfig {
 }
 
 export type ExaOrBrave = "exa" | "brave";
-
-export interface SearchLedger {
-  citations: SearchCitation[];
-  add(result: SearchResult, query: string): SearchCitation;
-}
