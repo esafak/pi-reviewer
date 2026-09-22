@@ -26,6 +26,9 @@ import { ALLOWED_REACTIONS, createReplyTool, type ReplyAction } from "../core/re
 import { normalizeMarkdownText } from "../core/ai-fix-footer.js";
 import { PROMPTS } from "../core/prompts.js";
 import type { ThinkingLevel } from "../core/config.js";
+import { createSearchClient } from "./search/client.js";
+import { resolveSearchConfig, unavailableSearchWarnings } from "./search/config.js";
+import { createSearchTools } from "./search/tool.js";
 
 export interface ReviewOptions {
   cwd?: string;
@@ -195,10 +198,40 @@ export async function review(options: ReviewOptions): Promise<void> {
     options.priorSummary,
     resolvedFindings,
   );
-  const userPrompt = buildUserPrompt(diff, skippedFiles);
-
   const target: OutputTarget =
     options.output ?? (process.env.GITHUB_ACTIONS === "true" ? "comment" : "terminal");
+
+  // Search is deliberately CI-comment-only. Local terminal/file runs must not
+  // receive network tools merely because CI configuration leaked into env.
+  const searchConfig = target === "comment" ? resolveSearchConfig() : {};
+  if (target === "comment") {
+    for (const warning of unavailableSearchWarnings()) console.warn(`[pi-reviewer] ${warning}`);
+    if (
+      process.env.PI_REVIEWER_SEARCH_REQUIRED === "true" &&
+      process.env.PI_REVIEWER_WEB_SEARCH === "true" &&
+      !searchConfig.regular
+    )
+      throw new Error("Required regular web search is unavailable");
+    if (
+      process.env.PI_REVIEWER_AI_SEARCH_REQUIRED === "true" &&
+      process.env.PI_REVIEWER_AI_SEARCH === "true" &&
+      !searchConfig.ai
+    )
+      throw new Error("Required AI web search is unavailable");
+  }
+  const searchClient =
+    searchConfig.regular || searchConfig.ai ? createSearchClient(searchConfig) : undefined;
+  const searchTools = searchClient
+    ? createSearchTools(searchClient, {
+        regular: Boolean(searchConfig.regular),
+        ai: Boolean(searchConfig.ai),
+      })
+    : [];
+  const effectiveSystemPrompt =
+    searchTools.length > 0
+      ? `${systemPrompt}\n\n<external_search_policy>\n${PROMPTS.externalSearch}\n</external_search_policy>`
+      : systemPrompt;
+  const userPrompt = buildUserPrompt(diff, skippedFiles);
 
   if (options.dryRun) {
     console.log(`Diff source: ${source}`);
@@ -239,9 +272,9 @@ export async function review(options: ReviewOptions): Promise<void> {
 
   const agent = new Agent({
     initialState: {
-      systemPrompt,
+      systemPrompt: effectiveSystemPrompt,
       model: resolvedModel,
-      tools: [...createReadOnlyTools(cwd), reviewTool],
+      tools: [...createReadOnlyTools(cwd), ...searchTools, reviewTool],
       thinkingLevel: options.thinking ?? "off",
     },
     streamFn: models.streamSimple.bind(models),
@@ -335,6 +368,8 @@ export async function review(options: ReviewOptions): Promise<void> {
 
     await agent.prompt(userPrompt);
     await ended;
+    if (searchClient?.hasRequiredFailure())
+      throw new Error("Required web search failed; refusing to post the review");
 
     await sendOutput({
       target,
@@ -372,6 +407,7 @@ export async function review(options: ReviewOptions): Promise<void> {
       allowedFindingIds: new Set(options.activeFindings?.map((f) => f.commentId)),
       resolvedFindings,
       reactOnNoFindings: options.reactOnNoFindings,
+      evidence: searchClient?.snapshot(),
     });
   } finally {
     unsubscribe?.();

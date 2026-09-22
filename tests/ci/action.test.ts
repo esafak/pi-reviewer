@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { describe, expect, it } from "vite-plus/test";
+import YAML from "yaml";
 
 describe("GitHub Action Vite+ setup", () => {
   it("uses a gated executable temp directory for setup-vp", async () => {
@@ -28,6 +29,22 @@ describe("GitHub Action Vite+ setup", () => {
     expect(action.indexOf("- name: Ensure review history")).toBeLessThan(
       action.indexOf("- name: Run review"),
     );
+  });
+
+  it("allows provider selection through caller environment when inputs are omitted", async () => {
+    const action = await readFile(path.join(process.cwd(), "action.yml"), "utf8");
+
+    expect(action).toContain(
+      "PI_REVIEWER_SEARCH_PROVIDER: ${{ inputs.search-provider || env.PI_REVIEWER_SEARCH_PROVIDER }}",
+    );
+    expect(action).toContain(
+      "PI_REVIEWER_AI_SEARCH_PROVIDER: ${{ inputs.ai-search-provider || env.PI_REVIEWER_AI_SEARCH_PROVIDER }}",
+    );
+  });
+
+  it("keeps the action manifest valid YAML", async () => {
+    const action = await readFile(path.join(process.cwd(), "action.yml"), "utf8");
+    expect(() => YAML.parse(action)).not.toThrow();
   });
 
   it("keeps the checked-in UI build artifact usable by the UI template", async () => {

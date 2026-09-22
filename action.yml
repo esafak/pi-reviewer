@@ -30,6 +30,66 @@ inputs:
     required: false
     default: ""
 
+  web-search:
+    description: "Enable optional regular CI web search (default: false)."
+    required: false
+    default: "false"
+
+  search-provider:
+    description: "Regular search provider: exa, brave, or duckduckgo."
+    required: false
+    default: ""
+
+  ai-search:
+    description: "Enable optional AI-assisted CI search (default: false)."
+    required: false
+    default: "false"
+
+  ai-search-provider:
+    description: "AI search provider: exa or brave."
+    required: false
+    default: ""
+
+  search-max-queries:
+    description: "Maximum regular searches per review run (1-10, default: 3)."
+    required: false
+    default: "3"
+
+  ai-search-max-queries:
+    description: "Maximum AI searches per review run (1-3, default: 1)."
+    required: false
+    default: "1"
+
+  search-max-results:
+    description: "Maximum regular results per query."
+    required: false
+    default: "5"
+
+  ai-search-max-sources:
+    description: "Maximum AI sources per answer."
+    required: false
+    default: "5"
+
+  search-timeout-ms:
+    description: "Per-request regular search timeout in milliseconds."
+    required: false
+    default: "8000"
+
+  ai-search-timeout-ms:
+    description: "Per-request AI search timeout in milliseconds."
+    required: false
+    default: "15000"
+
+  search-required:
+    description: "Fail when required regular search is unavailable or fails."
+    required: false
+    default: "false"
+
+  ai-search-required:
+    description: "Fail when required AI search is unavailable or fails."
+    required: false
+    default: "false"
+
   review-drafts:
     description: "Review draft pull requests (default: false)."
     required: false
@@ -258,6 +318,18 @@ runs:
         MIN_SEVERITY: ${{ inputs.min-severity }}
         REACT_ON_NO_FINDINGS: ${{ inputs.react-on-no-findings }}
         PI_REVIEWER_DOC_DIRS: ${{ inputs.doc-dirs }}
+        PI_REVIEWER_WEB_SEARCH: ${{ inputs.web-search }}
+        PI_REVIEWER_SEARCH_PROVIDER: ${{ inputs.search-provider || env.PI_REVIEWER_SEARCH_PROVIDER }}
+        PI_REVIEWER_AI_SEARCH: ${{ inputs.ai-search }}
+        PI_REVIEWER_AI_SEARCH_PROVIDER: ${{ inputs.ai-search-provider || env.PI_REVIEWER_AI_SEARCH_PROVIDER }}
+        PI_REVIEWER_SEARCH_MAX_QUERIES: ${{ inputs.search-max-queries }}
+        PI_REVIEWER_AI_SEARCH_MAX_QUERIES: ${{ inputs.ai-search-max-queries }}
+        PI_REVIEWER_SEARCH_MAX_RESULTS: ${{ inputs.search-max-results }}
+        PI_REVIEWER_AI_SEARCH_MAX_SOURCES: ${{ inputs.ai-search-max-sources }}
+        PI_REVIEWER_SEARCH_TIMEOUT_MS: ${{ inputs.search-timeout-ms }}
+        PI_REVIEWER_AI_SEARCH_TIMEOUT_MS: ${{ inputs.ai-search-timeout-ms }}
+        PI_REVIEWER_SEARCH_REQUIRED: ${{ inputs.search-required }}
+        PI_REVIEWER_AI_SEARCH_REQUIRED: ${{ inputs.ai-search-required }}
       run: >-
         "${{ github.action_path }}/node_modules/.bin/tsx"
         "${{ github.action_path }}/src/ci/action-entry.ts"

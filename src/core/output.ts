@@ -22,6 +22,7 @@ import {
   renderFindingSummary,
   removeAiFixFooter,
 } from "./ai-fix-footer.js";
+import type { SearchCitation } from "../ci/search/types.js";
 
 export type OutputTarget = "terminal" | "comment" | "file";
 export type Severity = "CRITICAL" | "WARN" | "INFO";
@@ -107,6 +108,8 @@ export interface OutputOptions {
   resolvedFindings?: ResolvedFinding[];
   /** React to the pull request instead of posting a comment when no findings remain. */
   reactOnNoFindings?: boolean;
+  /** Current-run, server-recorded external evidence; never model-authored. */
+  evidence?: readonly SearchCitation[];
 }
 export interface ResolvedFinding {
   historicalFindingId: string;
@@ -847,7 +850,7 @@ export function parseAgentResponse(text: string, minSeverity: Severity = "INFO")
 
 function formatForGitHub(
   result: ReviewResult,
-  provenance: ReRaiseProvenanceOptions & Pick<OutputOptions, "repo" | "baseCommitId">,
+  provenance: ReRaiseProvenanceOptions & Pick<OutputOptions, "repo" | "baseCommitId" | "evidence">,
 ): string {
   const lines = ["## Pi Reviewer", "", sanitizeVisibleReviewText(result.summary)];
 
@@ -882,8 +885,49 @@ function formatForGitHub(
     }
   }
 
+  const sources = renderExternalSources(
+    `${result.summary}\n${result.comments.map((comment) => comment.body).join("\n")}`,
+    provenance.evidence,
+  );
+  if (sources) lines.push("", sources);
+
   const body = lines.join("\n");
   return body;
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function renderExternalSources(
+  text: string,
+  evidence?: readonly SearchCitation[],
+): string | undefined {
+  if (!evidence || evidence.length === 0) return undefined;
+  const ids = [...text.matchAll(/\[(?:web|ai):\d+\]/g)].map((match) => match[0].slice(1, -1));
+  const selected = [...new Set(ids)]
+    .map((id) => evidence.find((entry) => entry.id === id))
+    .filter((entry): entry is SearchCitation => {
+      if (!entry?.url) return false;
+      try {
+        const url = new URL(entry.url);
+        return url.protocol === "http:" || url.protocol === "https:";
+      } catch {
+        return false;
+      }
+    })
+    .slice(0, 10);
+  if (selected.length === 0) return undefined;
+  const items = selected.map(
+    (entry) =>
+      `- <a href="${escapeHtml(entry.url!)}">${escapeHtml(entry.title ?? "External source")}</a> — ${escapeHtml(entry.provider)}`,
+  );
+  return `<details>\n<summary>External sources</summary>\n\n${items.join("\n")}\n\n</details>`;
 }
 
 /**
@@ -895,7 +939,7 @@ function buildReviewBody(
   summary: string,
   moved: ReviewComment[],
   allComments: ReviewComment[],
-  provenance: ReRaiseProvenanceOptions & Pick<OutputOptions, "repo" | "baseCommitId">,
+  provenance: ReRaiseProvenanceOptions & Pick<OutputOptions, "repo" | "baseCommitId" | "evidence">,
 ): string {
   const lines = [sanitizeVisibleReviewText(summary)];
   const actionable = allComments.filter(
@@ -908,29 +952,35 @@ function buildReviewBody(
     })),
   );
   if (prompt) lines.push("", prompt);
-  if (moved.length === 0) return lines.join("\n");
-  lines.push("", "### Comments Not Attached to the Diff", "");
-  lines.push(
-    "These comments could not be attached to a specific diff line, so the reported location is approximate — the line is not part of the diff:",
-  );
-  for (const comment of moved) {
-    const findingBody = sanitizeVisibleReviewText(normalizeAiFixBody(comment.body));
-    const visibleBody = `${reRaiseMetadata(comment, provenance)}${renderFindingSummary({ ...comment, repository: provenance.repo, commitId: provenance.commitId, baseCommitId: provenance.baseCommitId }, findingBody)}${comment.severity === "WARN" || comment.severity === "CRITICAL" ? `\n\n${renderAiFixPrompt(comment, findingBody)}` : ""}`;
-    const findingId = bodyFindingId(normalizeFinding(comment));
+  if (moved.length > 0) {
+    lines.push("", "### Comments Not Attached to the Diff", "");
     lines.push(
-      "",
-      encodeBodyFindingMarker({
-        findingId,
-        file: comment.file,
-        line: comment.line,
-        side: comment.side,
-        severity: comment.severity,
-        body: `${reRaiseMetadata(comment, provenance)}${findingBody}`,
-      }),
-      `> ${SEVERITY_EMOJI[comment.severity]} Location could not be verified in this diff`,
-      visibleBody,
+      "These comments could not be attached to a specific diff line, so the reported location is approximate — the line is not part of the diff:",
     );
+    for (const comment of moved) {
+      const findingBody = sanitizeVisibleReviewText(normalizeAiFixBody(comment.body));
+      const visibleBody = `${reRaiseMetadata(comment, provenance)}${renderFindingSummary({ ...comment, repository: provenance.repo, commitId: provenance.commitId, baseCommitId: provenance.baseCommitId }, findingBody)}${comment.severity === "WARN" || comment.severity === "CRITICAL" ? `\n\n${renderAiFixPrompt(comment, findingBody)}` : ""}`;
+      const findingId = bodyFindingId(normalizeFinding(comment));
+      lines.push(
+        "",
+        encodeBodyFindingMarker({
+          findingId,
+          file: comment.file,
+          line: comment.line,
+          side: comment.side,
+          severity: comment.severity,
+          body: `${reRaiseMetadata(comment, provenance)}${findingBody}`,
+        }),
+        `> ${SEVERITY_EMOJI[comment.severity]} Location could not be verified in this diff`,
+        visibleBody,
+      );
+    }
   }
+  const sources = renderExternalSources(
+    `${summary}\n${allComments.map((comment) => comment.body).join("\n")}`,
+    provenance.evidence,
+  );
+  if (sources) lines.push("", sources);
   const body = lines.join("\n");
   return body;
 }

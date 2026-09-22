@@ -74,6 +74,13 @@ jobs:
           # Opt in to injecting matching project docs into the review.
           # Comma-separated dirs scanned for .md files with a 'description' frontmatter.
           # doc-dirs: '.pi/notes,docs/review'
+          # Optional web search configuration.
+          # Exa/Brave use EXA_API_KEY/BRAVE_SEARCH_API_KEY; DuckDuckGo regular
+          # search uses a fixed unauthenticated endpoint and has no AI mode.
+          # web-search: 'true'
+          # search-provider: 'brave'
+          # ai-search: 'true'
+          # ai-search-provider: 'brave'
 ```
 
 The `init` command is the generic, non-App setup. It runs only when invoked
@@ -195,11 +202,36 @@ Draft pull requests are skipped by default, including manual dispatch and `/pi-r
 | `min-severity` | no | Minimum severity: `info`, `warn`, or `critical` (default: `info`) |
 | `react-on-no-findings` | no | Leave a thumbs-up reaction on the PR instead of posting a comment when no new findings remain and all existing findings are resolved (default: `true`) |
 | `doc-dirs` | no | Comma-separated dirs to scan for docs to inject into the review (default: empty — inject nothing) |
+| `web-search` | no | Enable regular CI web search (default: false) |
+| `search-provider` | no | `exa`, `brave`, or `duckduckgo`; explicit provider selection, no fallback. May also be set as `PI_REVIEWER_SEARCH_PROVIDER` in the caller workflow environment. |
+| `ai-search` | no | Enable separate provider-grounded AI search (default: false) |
+| `ai-search-provider` | no | `exa` or `brave`; requires the provider key. May also be set as `PI_REVIEWER_AI_SEARCH_PROVIDER` in the caller workflow environment. |
+| `search-max-queries` | no | Regular search query budget, bounded from 1 to 10 (default: 3) |
+| `ai-search-max-queries` | no | AI search query budget, bounded from 1 to 3 (default: 1) |
+| `search-max-results` | no | Regular results per query (default: 5) |
+| `ai-search-max-sources` | no | AI sources per answer (default: 5) |
+| `search-timeout-ms` | no | Per-request regular search timeout (default: 8000) |
+| `ai-search-timeout-ms` | no | Per-request AI search timeout (default: 15000) |
+| `search-required` | no | Fail instead of warn when required regular search is unavailable or fails |
+| `ai-search-required` | no | Fail instead of warn when required AI search is unavailable or fails |
 | `review-drafts` | no | Review draft PRs (default: `false`) |
 | `setup-node` | no | Set up Node 24 via `actions/setup-node` when a compatible Node is not already on `PATH` (default: `true`). Set to `false` to require the runner image to provide Node 24 or newer. |
 | `cache` | no | Cache the pnpm store across runs (default: `true`). Disable on runners where the cache service is unavailable or unwanted. |
 
 The action runs on Node 24 or newer (LTS when installed by the action). Before setup, it independently reuses compatible `node`, `pnpm`, and `vp` executables already on `PATH`; any subset can be preinstalled, and only missing or incompatible tools are installed. Node must be >=24, pnpm must match `package.json` and be at least 9 (the action ships a lockfileVersion 9.0 lockfile), and Vite+ may match or be newer than the stable minimum version in `pnpm-workspace.yaml` (a prerelease of that minimum does not qualify). When Vite+ must be installed, its temporary executable files and installation are placed under a private, executable directory in the runner user's home directory and removed after the action; users do not need to set `TMPDIR`. Dependencies are installed with pnpm delegated through `vp install`. The self-review workflow prewarms Vite+ with a pinned `setup-vp` step, whose cache is keyed from the repository checkout. The action itself separately caches its pnpm store with `actions/cache`, keyed on a hash of `pnpm-lock.yaml`, so warm runs skip the download. Both cache paths are optional performance optimizations: cache failures degrade to uncached setup/install rather than aborting the review. Runners without a compatible preinstalled toolchain need network access to `viteplus.dev` for the Vite+ CLI installer in addition to the package registry.
+
+Web search is CI-only and disabled by default. Exa and Brave require their
+provider keys; DuckDuckGo regular search is unauthenticated and best-effort,
+with no supported Duck.ai CI API. To use Exa or Brave, provide
+`EXA_API_KEY` or `BRAVE_SEARCH_API_KEY` through the workflow/job `env:` block;
+these are optional environment secrets and are not action inputs. Search
+results and AI answers are untrusted data, not instructions. Enabling search
+creates a deliberate query-egress channel: model-derived queries may disclose
+prompt context to the selected provider, so queries must not contain secrets,
+private source, or the full diff. Valid current-run citations appear in a
+collapsible **External sources** section in the GitHub review body. Links or
+URLs written directly by the model outside that generated section remain an
+existing residual risk and are not treated as validated evidence.
 
 ## Doc context
 
