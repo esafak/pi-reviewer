@@ -277,10 +277,10 @@ export function createRegistryProvider(ecosystem: RegistryEcosystem): RegistryPr
         );
       }
       const path = encodeGoModulePath(params.name);
-      const version = params.version ? `@v/${encodeGoModulePath(params.version)}` : "@latest";
-      return projectGo(
-        await requestJson(new URL(`https://proxy.golang.org/${path}/${version}.info`), signal),
-      );
+      const endpoint = params.version
+        ? `${path}/@v/${encodeGoModulePath(params.version)}.info`
+        : `${path}/@latest`;
+      return projectGo(await requestJson(new URL(`https://proxy.golang.org/${endpoint}`), signal));
     },
   };
 }

@@ -197,21 +197,32 @@ describe("registry providers", () => {
   });
 
   it("applies Go uppercase escaping before path encoding", async () => {
-    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
-      json({
-        Version: "v1.2.3",
-        Time: "2026-01-01T00:00:00Z",
-        Origin: { VCS: "git", URL: "https://example.test", Hash: "abc", Ref: "tag" },
-        ignored: true,
-      }),
-    );
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        json({
+          Version: "v1.2.3",
+          Time: "2026-01-01T00:00:00Z",
+          Origin: { VCS: "git", URL: "https://example.test", Hash: "abc", Ref: "tag" },
+          ignored: true,
+        }),
+      )
+      .mockResolvedValueOnce(json({ Version: "v1.2.3", Time: "2026-01-01T00:00:00Z" }));
     vi.stubGlobal("fetch", fetchMock);
-    const result = await createRegistryProvider("go").lookup(
+    const provider = createRegistryProvider("go");
+    const result = await provider.lookup(
       { ecosystem: "go", name: "example.com/Mod/HTTP" },
       AbortSignal.timeout(1000),
     );
+    await provider.lookup(
+      { ecosystem: "go", name: "example.com/Mod/HTTP", version: "v1.2.3" },
+      AbortSignal.timeout(1000),
+    );
     expect(String(fetchMock.mock.calls[0][0])).toBe(
-      "https://proxy.golang.org/example.com/!mod/!h!t!t!p/@latest.info",
+      "https://proxy.golang.org/example.com/!mod/!h!t!t!p/@latest",
+    );
+    expect(String(fetchMock.mock.calls[1][0])).toBe(
+      "https://proxy.golang.org/example.com/!mod/!h!t!t!p/@v/v1.2.3.info",
     );
     expect(result).toEqual({
       Version: "v1.2.3",
