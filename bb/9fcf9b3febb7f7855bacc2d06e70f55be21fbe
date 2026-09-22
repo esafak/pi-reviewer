@@ -1,0 +1,39 @@
+src/ci/registry/client.ts
+  s_fbf6fb8fd1f15c::t_1b647de856eeaa 1-64
+src/ci/registry/helpers.ts
+  s_fbf6fb8fd1f15c::t_b108ee9c3868fa 1-151
+src/ci/registry/providers.ts
+  s_fbf6fb8fd1f15c::t_ffb83a261e217d 1-295
+src/ci/registry/tool.ts
+  s_fbf6fb8fd1f15c::t_2d71aec4567507 1-143
+src/ci/registry/types.ts
+  s_0b5077603eddea::t_cd00ab80d2675b 1-21
+tests/ci/registry.test.ts
+  s_fbf6fb8fd1f15c::t_f26eb225e5c998 1-352
+tests/ci/review.test.ts
+  s_fbf6fb8fd1f15c::t_12d4d86923f532 269-271,296-304
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "bb9fcf9b3febb7f7855bacc2d06e70f55be21fbe",
+  "prompts": {},
+  "sessions": {
+    "s_0b5077603eddea": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f3544ccefffeYsu4YdH7x4P2Ow",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "Emre Şafak <3928300+esafak@users.noreply.github.com>"
+    },
+    "s_fbf6fb8fd1f15c": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f353f06d0ffe8NhxYUMCDCpMBN",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "Emre Şafak <3928300+esafak@users.noreply.github.com>"
+    }
+  }
+}
