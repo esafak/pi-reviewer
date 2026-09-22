@@ -29,6 +29,7 @@ import type { ThinkingLevel } from "../core/config.js";
 import { createSearchClient } from "./search/client.js";
 import { resolveSearchConfig, unavailableSearchWarnings } from "./search/config.js";
 import { createSearchTools } from "./search/tool.js";
+import { createRegistryTools } from "./registry/tool.js";
 
 export interface ReviewOptions {
   cwd?: string;
@@ -227,10 +228,17 @@ export async function review(options: ReviewOptions): Promise<void> {
         ai: Boolean(searchConfig.ai),
       })
     : [];
+  const registryTools = target === "comment" ? createRegistryTools() : [];
+  const policyBlocks = [
+    ...(searchTools.length > 0
+      ? [`<external_search_policy>\n${PROMPTS.externalSearch}\n</external_search_policy>`]
+      : []),
+    ...(registryTools.length > 0
+      ? [`<package_registry_policy>\n${PROMPTS.packageRegistry}\n</package_registry_policy>`]
+      : []),
+  ];
   const effectiveSystemPrompt =
-    searchTools.length > 0
-      ? `${systemPrompt}\n\n<external_search_policy>\n${PROMPTS.externalSearch}\n</external_search_policy>`
-      : systemPrompt;
+    policyBlocks.length > 0 ? `${systemPrompt}\n\n${policyBlocks.join("\n\n")}` : systemPrompt;
   const userPrompt = buildUserPrompt(diff, skippedFiles);
 
   if (options.dryRun) {
@@ -274,7 +282,7 @@ export async function review(options: ReviewOptions): Promise<void> {
     initialState: {
       systemPrompt: effectiveSystemPrompt,
       model: resolvedModel,
-      tools: [...createReadOnlyTools(cwd), ...searchTools, reviewTool],
+      tools: [...createReadOnlyTools(cwd), ...searchTools, ...registryTools, reviewTool],
       thinkingLevel: options.thinking ?? "off",
     },
     streamFn: models.streamSimple.bind(models),

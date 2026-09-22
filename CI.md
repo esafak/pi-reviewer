@@ -233,6 +233,20 @@ collapsible **External sources** section in the GitHub review body. Links or
 URLs written directly by the model outside that generated section remain an
 existing residual risk and are not treated as validated evidence.
 
+Package registry lookup is available by default in CI comment reviews and has
+no opt-out input. It makes bounded public HTTPS requests to PyPI, Maven Central,
+crates.io, npm, and the Go module proxy only when the model calls
+`package_lookup`; local terminal/file reviews and reply-only runs do not receive
+the tool. The tool uses each registry's package/version selectors (plus Maven's
+coordinate filters), validates and allowlists a bounded subset of the registry's
+native JSON fields, and treats all returned metadata as untrusted. It does not
+download package artifacts, run package code, or add citations to the posted
+review. Budgets are fixed at five lookups per review, an eight-second request
+timeout, a fifteen-second total lookup wall-clock budget, 7 KiB per metadata
+projection and 15 KiB aggregate metadata budget (reserving framing within the
+8 KiB per-result and 16 KiB aggregate model-facing tool-content caps). Registry
+failures are advisory and do not fail the review.
+
 ## Doc context
 
 The reviewer can pull relevant project documentation into the review prompt based on which files changed in the diff. It is **opt-in** in CI: nothing is injected unless you set `doc-dirs`.

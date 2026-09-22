@@ -266,6 +266,9 @@ describe("review", () => {
     expect(AgentMock.mock.calls[0][0].initialState.tools).not.toEqual(
       expect.arrayContaining([expect.objectContaining({ name: "web_search" })]),
     );
+    expect(AgentMock.mock.calls[0][0].initialState.tools).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: "package_lookup" })]),
+    );
     expect(sendOutputMock).toHaveBeenCalledWith(
       expect.objectContaining({
         target: "terminal",
@@ -289,6 +292,15 @@ describe("review", () => {
     process.env.GITHUB_ACTIONS = "true";
 
     await review({ cwd: "/repo", pr: 42, githubToken: "token", repo: "owner/repo" });
+
+    const state = AgentMock.mock.calls[0][0].initialState;
+    expect(state.tools).toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: "package_lookup" })]),
+    );
+    expect(state.systemPrompt).toContain("<package_registry_policy>");
+    expect(state.tools).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: "web_search" })]),
+    );
 
     expect(sendOutputMock).toHaveBeenCalledWith(
       expect.objectContaining({
