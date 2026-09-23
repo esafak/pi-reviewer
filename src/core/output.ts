@@ -756,11 +756,11 @@ export function parseAgentResponseWithStatus(
 export function normalizeFinding(
   comment: Pick<ReviewComment, "file" | "line" | "side" | "body">,
 ): string {
-  const storedBody = decodeBodyFindingMarkers(comment.body)[0]?.body;
+  // Suggestion code is opaque to finding metadata decoders.
+  const bodyWithoutSuggestions = stripGitHubSuggestions(comment.body);
+  const storedBody = decodeBodyFindingMarkers(bodyWithoutSuggestions)[0]?.body;
   const body = removeAiFixFooter(
-    stripGitHubSuggestions(
-      (storedBody ?? comment.body).replace(/<!--\s*pi-reviewer\s*:\s*[\s\S]*?-->/g, ""),
-    ),
+    (storedBody ?? bodyWithoutSuggestions).replace(/<!--\s*pi-reviewer\s*:\s*[\s\S]*?-->/g, ""),
   )
     .split(AI_FIX_FOOTER)
     .join("")
