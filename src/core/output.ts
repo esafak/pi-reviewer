@@ -36,6 +36,7 @@ export interface ReviewComment {
   side: "LEFT" | "RIGHT";
   severity: Severity;
   body: string;
+  suggestion?: string;
   resolved_finding_id?: string;
   re_raise_reason?: "REINTRODUCED" | "MATERIALLY_CHANGED" | "CONTRADICTORY_EVIDENCE";
   re_raise_evidence?: string;
@@ -244,11 +245,17 @@ function normalizeReviewResult(
 ): ReviewResult {
   const minRank = SEVERITY_RANK[options.minSeverity ?? "INFO"];
   const comments = result.comments
-    .map((comment) => ({
-      ...comment,
-      body: normalizeAiFixBody(sanitizeVisibleReviewText(comment.body)),
-      severity: normalizeSeverity(comment.severity),
-    }))
+    .map((comment) => {
+      const { suggestion, ...fields } = comment;
+      return {
+        ...fields,
+        body: normalizeAiFixBody(sanitizeVisibleReviewText(comment.body)),
+        ...(typeof suggestion === "string"
+          ? { suggestion: normalizeMarkdownText(suggestion) }
+          : {}),
+        severity: normalizeSeverity(comment.severity),
+      };
+    })
     .filter((comment) => SEVERITY_RANK[comment.severity] >= minRank)
     .filter((comment) => !options.existingFindingKeys?.has(normalizeFinding(comment)))
     .filter((comment) => {
@@ -749,14 +756,18 @@ export function parseAgentResponseWithStatus(
 export function normalizeFinding(
   comment: Pick<ReviewComment, "file" | "line" | "side" | "body">,
 ): string {
-  const storedBody = decodeBodyFindingMarkers(comment.body)[0]?.body;
+  // Suggestion code is opaque to finding metadata decoders.
+  const bodyWithoutSuggestions = stripGitHubSuggestions(comment.body);
+  const storedBody = decodeBodyFindingMarkers(bodyWithoutSuggestions)[0]?.body;
   const body = removeAiFixFooter(
-    (storedBody ?? comment.body).replace(/<!--\s*pi-reviewer\s*:\s*[\s\S]*?-->/g, ""),
+    (storedBody ?? bodyWithoutSuggestions).replace(/<!--\s*pi-reviewer\s*:\s*[\s\S]*?-->/g, ""),
   )
     .split(AI_FIX_FOOTER)
     .join("")
     .trim()
     .replace(/^[🔴🟡🔵]\s*/u, "")
+    .trim()
+    .replace(/^(`{3,})suggestion[ \t]*\n[\s\S]*?^\1(?!`)[ \t]*$/gm, "")
     .trim()
     .replace(/\n\s*\n+/g, "\n");
   return [comment.file, comment.line, comment.side, body].join("\0");
@@ -764,13 +775,19 @@ export function normalizeFinding(
 
 /** Normalizes visible finding prose for resilient historical identity matching. */
 function normalizedFindingBody(body: string): string {
-  return removeAiFixFooter(body.replace(/<!--\s*pi-reviewer\s*:\s*[\s\S]*?-->/g, ""))
+  return removeAiFixFooter(
+    stripGitHubSuggestions(body.replace(/<!--\s*pi-reviewer\s*:\s*[\s\S]*?-->/g, "")),
+  )
     .split(AI_FIX_FOOTER)
     .join("")
     .replace(/^[🔴🟡🔵]\s*/u, "")
     .toLowerCase()
     .replace(/[^\p{L}\p{N}]+/gu, " ")
     .trim();
+}
+
+function stripGitHubSuggestions(body: string): string {
+  return body.replace(/^(`{3,})suggestion[^\r\n]*\r?\n[\s\S]*?^\1(?!`)[ \t]*\r?$/gm, "");
 }
 
 /** Checks the file, side, and normalized prose identity of two findings. */
@@ -813,6 +830,16 @@ function appendFindingFooter(comment: ReviewComment, body: string): string {
       ? `\n\n${renderAiFixPrompt(comment, findingBody)}`
       : "";
   return `${metadata}${visibleBody}${fixit}`;
+}
+
+function appendGitHubSuggestion(comment: ReviewComment, body: string): string {
+  if (comment.side !== "RIGHT" || typeof comment.suggestion !== "string") return body;
+  const longestBacktickRun = Math.max(
+    0,
+    ...Array.from(comment.suggestion.matchAll(/`+/g), ([run]) => run.length),
+  );
+  const fence = "`".repeat(Math.max(3, longestBacktickRun + 1));
+  return `${body}\n\n${fence}suggestion\n${comment.suggestion}\n${fence}`;
 }
 
 /** Keep model-controlled text from becoming metadata when it is shown in a review body. */
@@ -1082,11 +1109,12 @@ export async function sendOutput(options: OutputOptions): Promise<OutputMetadata
       }
     }
 
+    // Keep suggestion fences in inline payloads; review bodies carry lifecycle metadata.
     const inlineComments = inline.map((comment) => ({
       path: comment.file,
       line: comment.line,
       side: comment.side,
-      body: `<!-- pi-reviewer:finding:v1 -->\n${appendFindingFooter(comment, `${reRaiseMetadata(comment, options)}${sanitizeVisibleReviewText(comment.body)}`)}`,
+      body: `<!-- pi-reviewer:finding:v1 -->\n${appendGitHubSuggestion(comment, appendFindingFooter(comment, `${reRaiseMetadata(comment, options)}${sanitizeVisibleReviewText(comment.body)}`))}`,
     }));
 
     const body = [options.batchMarker, buildReviewBody(result.summary, moved, comments, options)]

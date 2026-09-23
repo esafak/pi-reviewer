@@ -15,6 +15,8 @@ describe("prompt-builder", () => {
 
     expect(prompt).toContain("You are a code reviewer");
     expect(prompt).toContain("Return only a JSON object matching this schema exactly");
+    expect(prompt).toContain('"suggestion": "Optional replacement code when useful."');
+    expect(prompt).toContain("An empty string means delete the anchored line");
     expect(prompt).not.toContain("<conventions>");
     expect(prompt).not.toContain("<review_rules>");
   });
