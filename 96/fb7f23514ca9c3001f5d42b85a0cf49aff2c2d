@@ -1,0 +1,21 @@
+extensions/pi-reviewer/handlers/local.ts
+  s_e654d1bf166a67::t_fdba615abd849f 14,75,93-96,167-170
+src/core/deepwiki.ts
+  s_e654d1bf166a67::t_195f8300b7f93d 9-12,61-68,91-92
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "96fb7f23514ca9c3001f5d42b85a0cf49aff2c2d",
+  "prompts": {},
+  "sessions": {
+    "s_e654d1bf166a67": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f342cfb5bffefoWIAKlLYckGVs",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "Emre Şafak <3928300+esafak@users.noreply.github.com>"
+    }
+  }
+}
