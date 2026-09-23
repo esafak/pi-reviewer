@@ -13,7 +13,7 @@ vi.mock("../../src/core/deepwiki.js", async (importActual) => {
   const actual = await importActual<typeof import("../../src/core/deepwiki.js")>();
   return {
     ...actual,
-    fetchDeepWikiContext: vi.fn().mockResolvedValue("DeepWiki architecture documentation"),
+    createDeepWikiTool: vi.fn(() => ({ name: "deepwiki", label: "deepwiki" })),
   };
 });
 
@@ -67,7 +67,6 @@ import { createReadOnlyTools } from "@earendil-works/pi-coding-agent";
 import { loadContext } from "../../src/core/context.js";
 import { resolveDiff } from "../../src/core/diff-resolver.js";
 import { loadDocContext } from "../../src/core/doc-context.js";
-import { fetchDeepWikiContext } from "../../src/core/deepwiki.js";
 import { sendOutput } from "../../src/core/output.js";
 import { createReviewTool } from "../../src/core/review-tool.js";
 import { createReplyTool } from "../../src/core/reply-tool.js";
@@ -165,7 +164,6 @@ describe("reply prompt limits", () => {
 const resolveDiffMock = vi.mocked(resolveDiff);
 const loadContextMock = vi.mocked(loadContext);
 const loadDocContextMock = vi.mocked(loadDocContext);
-const fetchDeepWikiContextMock = vi.mocked(fetchDeepWikiContext);
 const sendOutputMock = vi.mocked(sendOutput);
 const AgentMock = vi.mocked(Agent);
 const createReadOnlyToolsMock = vi.mocked(createReadOnlyTools);
@@ -198,8 +196,6 @@ describe("review", () => {
       reviewRules: [],
     });
     sendOutputMock.mockResolvedValue(undefined);
-    fetchDeepWikiContextMock.mockResolvedValue("DeepWiki architecture documentation");
-    fetchDeepWikiContextMock.mockClear();
     createReadOnlyToolsMock.mockReturnValue([]);
     createReviewToolMock.mockReturnValue({
       tool: {
@@ -266,9 +262,11 @@ describe("review", () => {
     expect(sendOutputMock).not.toHaveBeenCalled();
   });
 
-  it("does not contact DeepWiki by default", async () => {
+  it("does not register the DeepWiki tool by default", async () => {
     await review({ cwd: "/repo", repo: "owner/repo" });
-    expect(fetchDeepWikiContextMock).not.toHaveBeenCalled();
+    expect(AgentMock.mock.calls[0][0].initialState.tools).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: "deepwiki" })]),
+    );
   });
 
   it("uses terminal output target in local mode", async () => {
@@ -298,30 +296,29 @@ describe("review", () => {
     );
   });
 
-  it("adds DeepWiki context only when enabled and passes the repo to MCP", async () => {
-    await review({ cwd: "/repo", repo: "owner/repo", deepwiki: true });
+  it("registers DeepWiki as an opt-in tool and instructs the agent to avoid the reviewed repo", async () => {
+    await review({ cwd: "/repo", repo: "owner/repo", deepwiki: true, output: "comment" });
 
-    expect(fetchDeepWikiContextMock).toHaveBeenCalledWith("owner/repo");
-    expect(AgentMock.mock.calls[0][0].initialState.systemPrompt).toContain(
-      "DeepWiki architecture documentation",
+    expect(AgentMock.mock.calls[0][0].initialState.tools).toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: "deepwiki" })]),
     );
     expect(AgentMock.mock.calls[0][0].initialState.systemPrompt).toContain(
-      "untrusted reference material",
+      'repository under review ("owner/repo")',
     );
   });
 
-  it("continues a CI review when DeepWiki is unavailable", async () => {
-    fetchDeepWikiContextMock.mockRejectedValueOnce(new Error("service unavailable"));
+  it("does not provide DeepWiki to terminal-output reviews even when enabled", async () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    await review({ cwd: "/repo", repo: "owner/repo", deepwiki: true, output: "terminal" });
 
-    await review({ cwd: "/repo", repo: "owner/repo", deepwiki: true });
-
-    expect(AgentMock).toHaveBeenCalled();
+    expect(AgentMock.mock.calls[0][0].initialState.tools).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: "deepwiki" })]),
+    );
     expect(AgentMock.mock.calls[0][0].initialState.systemPrompt).not.toContain(
-      "DeepWiki architecture documentation",
+      "When considering deepwiki",
     );
     expect(warnSpy).toHaveBeenCalledWith(
-      "[pi-reviewer] DeepWiki unavailable; continuing without it: service unavailable",
+      "[pi-reviewer] DeepWiki disabled; only available for comment-output reviews",
     );
   });
 

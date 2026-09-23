@@ -31,7 +31,7 @@ inputs:
     default: ""
 
   deepwiki:
-    description: "Fetch public repository documentation from DeepWiki for this CI review (default: false)."
+    description: "Enable the reviewer agent's DeepWiki lookup tool (default: false)."
     required: false
     default: "false"
 

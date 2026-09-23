@@ -9,6 +9,7 @@ import {
   buildUserPrompt,
 } from "../../../src/core/prompt-builder.js";
 import { readDefaultBranch } from "../../../src/core/ui/server/index.js";
+import { deepWikiReviewInstruction, resolvePublicGitHubRepo } from "../../../src/core/deepwiki.js";
 import { buildSSHDiffCommand, type ReviewCommandArgs } from "../args.js";
 import type { CommonHandlerOptions } from "./types.js";
 
@@ -47,6 +48,12 @@ export async function handleDryRun(opts: HandleDryRunOptions): Promise<void> {
     (g) => g.files,
   );
   notify(`Diff source: ${source}`);
-  notify(`System prompt:\n\n${buildJSONSystemPrompt(context, minSeverity, dryContextFiles)}`);
+  let systemPrompt = buildJSONSystemPrompt(context, minSeverity, dryContextFiles);
+  if (parsed.deepwiki) {
+    const repo = await resolvePublicGitHubRepo(parsed.dir ? path.resolve(cwd, parsed.dir) : cwd);
+    if (repo) systemPrompt = `${systemPrompt}\n\n${deepWikiReviewInstruction(repo)}`;
+    else notify("DeepWiki unavailable; could not identify the repository under review", "warning");
+  }
+  notify(`System prompt:\n\n${systemPrompt}`);
   notify(`User prompt:\n\n${buildUserPrompt(diff, skippedFiles)}`);
 }

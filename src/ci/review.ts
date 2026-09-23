@@ -6,7 +6,11 @@ import { createReadOnlyTools } from "@earendil-works/pi-coding-agent";
 import { loadContext, mergeContextFiles } from "../core/context.js";
 import { resolveDiff, extractDiffFiles } from "../core/diff-resolver.js";
 import { loadDocContext } from "../core/doc-context.js";
-import { fetchDeepWikiContext, wrapDeepWikiContext } from "../core/deepwiki.js";
+import {
+  createDeepWikiTool,
+  deepWikiReviewInstruction,
+  resolvePublicGitHubRepo,
+} from "../core/deepwiki.js";
 import {
   sendOutput,
   extractLastAssistantText,
@@ -165,6 +169,16 @@ export async function review(options: ReviewOptions): Promise<void> {
   const cwd = options.cwd ?? process.cwd();
   const githubToken = options.githubToken ?? process.env.GITHUB_TOKEN;
   const repo = options.repo ?? process.env.GITHUB_REPOSITORY;
+  const target: OutputTarget =
+    options.output ?? (process.env.GITHUB_ACTIONS === "true" ? "comment" : "terminal");
+  const deepWikiRepo =
+    options.deepwiki && target === "comment"
+      ? (repo ?? (await resolvePublicGitHubRepo(cwd)))
+      : undefined;
+  if (options.deepwiki && target !== "comment")
+    console.warn("[pi-reviewer] DeepWiki disabled; only available for comment-output reviews");
+  else if (options.deepwiki && !deepWikiRepo)
+    console.warn("[pi-reviewer] DeepWiki disabled; could not identify the repository under review");
 
   const { diff, source, warning, skippedFiles } = await resolveDiff({
     pr: options.pr,
@@ -197,41 +211,15 @@ export async function review(options: ReviewOptions): Promise<void> {
     );
   }
 
-  let deepWikiFiles: { path: string; content: string }[] = [];
-  if (options.deepwiki) {
-    if (!repo) {
-      console.warn(
-        "[pi-reviewer] DeepWiki unavailable; continuing without it: GitHub repository was not provided",
-      );
-    } else {
-      try {
-        const content = await fetchDeepWikiContext(repo);
-        deepWikiFiles = [
-          {
-            path: `DeepWiki (${repo})`,
-            content: wrapDeepWikiContext(content),
-          },
-        ];
-      } catch (error) {
-        console.warn(
-          `[pi-reviewer] DeepWiki unavailable; continuing without it: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
-    }
-  }
-
   const resolvedFindings = selectResolvedFindings(options.resolvedFindings ?? []);
   const systemPrompt = buildJSONSystemPrompt(
     context,
     options.minSeverity,
-    [...docContextFiles, ...deepWikiFiles],
+    docContextFiles,
     options.activeFindings,
     options.priorSummary,
     resolvedFindings,
   );
-  const target: OutputTarget =
-    options.output ?? (process.env.GITHUB_ACTIONS === "true" ? "comment" : "terminal");
-
   // Search is deliberately CI-comment-only. Local terminal/file runs must not
   // receive network tools merely because CI configuration leaked into env.
   const searchConfig = target === "comment" ? resolveSearchConfig() : {};
@@ -279,8 +267,11 @@ export async function review(options: ReviewOptions): Promise<void> {
       ? [`<github_research_policy>\n${PROMPTS.githubResearch}\n</github_research_policy>`]
       : []),
   ];
-  const effectiveSystemPrompt =
-    policyBlocks.length > 0 ? `${systemPrompt}\n\n${policyBlocks.join("\n\n")}` : systemPrompt;
+  const effectiveSystemPrompt = [
+    systemPrompt,
+    ...(deepWikiRepo ? [deepWikiReviewInstruction(deepWikiRepo)] : []),
+    ...policyBlocks,
+  ].join("\n\n");
   const userPrompt = buildUserPrompt(diff, skippedFiles);
 
   if (options.dryRun) {
@@ -329,6 +320,7 @@ export async function review(options: ReviewOptions): Promise<void> {
         ...searchTools,
         ...registryTools,
         ...githubResearchTools,
+        ...(deepWikiRepo ? [createDeepWikiTool()] : []),
         reviewTool,
       ],
       thinkingLevel: options.thinking ?? "off",

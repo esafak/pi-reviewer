@@ -103,6 +103,7 @@ describe("context provider integration", () => {
 
     const pi = {
       events,
+      registerTool: vi.fn(),
       registerCommand: vi.fn((_name: string, { handler }: { handler: typeof capturedHandler }) => {
         capturedHandler = handler;
       }),
@@ -194,6 +195,7 @@ describe("command routing", () => {
 
     const pi = {
       events: createStubEventBus(),
+      registerTool: vi.fn(),
       registerCommand: vi.fn((_name: string, { handler }: { handler: typeof capturedHandler }) => {
         capturedHandler = handler;
       }),
@@ -240,6 +242,7 @@ describe("error handling", () => {
 
     const pi = {
       events: createStubEventBus(),
+      registerTool: vi.fn(),
       registerCommand: vi.fn((_name: string, { handler }: { handler: typeof capturedHandler }) => {
         capturedHandler = handler;
       }),

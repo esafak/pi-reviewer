@@ -40,9 +40,9 @@ Before starting the agent, pi-reviewer fetches everything over SSH in parallel: 
 
 > **Note:** `--model` and `--thinking` have no effect in SSH mode — the model is fixed to whatever the parent session is using.
 
-### DeepWiki context (`--deepwiki`)
+### DeepWiki tool (`--deepwiki`)
 
-For local reviews, fetches repository documentation from the public DeepWiki MCP server and adds it as bounded, untrusted reference context. No API key or separate DeepWiki installation is required. The repository must have an `origin` remote pointing to a public GitHub repository. Without the flag, DeepWiki is not contacted; if retrieval fails, the review continues without DeepWiki. This is not supported in SSH mode.
+Enables the reviewer agent to call the public DeepWiki MCP server when it needs external repository documentation. The agent chooses whether to call it and supplies the repository and question; DeepWiki results are bounded, untrusted reference context. The system prompt tells the agent not to use DeepWiki for the repository being reviewed. No API key or separate DeepWiki installation is required. This is not supported in SSH mode.
 
 ### UI mode (`--ui`)
 
@@ -82,7 +82,7 @@ Then inside the pi TUI:
 | `--diff <ref>` | Review changes since a specific git ref | `--diff HEAD~1` |
 | `--ssh` | SSH mode: agent fetches diff and conventions on the remote | `--ssh` |
 | `--ui` | Open browser review UI after the agent finishes | `--ui` |
-| `--deepwiki` | Add public DeepWiki documentation context. **Local mode only.** | `--deepwiki` |
+| `--deepwiki` | Enable the agent-callable public DeepWiki tool. **Local mode only.** | `--deepwiki` |
 | `--min-severity <level>` | Only report issues at this level and above: `info`, `warn`, or `critical` | `--min-severity warn` |
 | `--model <id>` | Model for this review in `provider/id` format. **Local mode only.** | `--model openai/gpt-4o` |
 | `--thinking <level>` | Thinking budget: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`. **Local mode only.** | `--thinking low` |
