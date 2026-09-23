@@ -21,6 +21,16 @@ describe("parseArgs defaults", () => {
   it("verbose is undefined when not passed", () => {
     expect(parseArgs("").verbose).toBeUndefined();
   });
+
+  it("DeepWiki is disabled unless requested", () => {
+    expect(parseArgs("").deepwiki).toBeUndefined();
+  });
+});
+
+describe("parseArgs --deepwiki", () => {
+  it("parses the opt-in flag", () => {
+    expect(parseArgs("--deepwiki").deepwiki).toBe(true);
+  });
 });
 
 describe("parseArgs --verbose", () => {

@@ -11,6 +11,7 @@ import {
   type ReviewResult,
 } from "../../../src/core/output.js";
 import { loadContext } from "../../../src/core/context.js";
+import { loadDeepWikiContext, wrapDeepWikiContext } from "../../../src/core/deepwiki.js";
 import { resolveDiff, extractDiffFiles } from "../../../src/core/diff-resolver.js";
 import {
   buildJSONSystemPrompt,
@@ -28,6 +29,7 @@ import type { ReviewCommandArgs } from "../args.js";
 export interface RunLocalOptions {
   systemPrompt: string;
   userPrompt: string;
+  deepWikiContext?: string;
   cwd: string;
   minSeverity: MinSeverity;
   verbose?: boolean;
@@ -41,6 +43,7 @@ export async function runLocalReview(opts: RunLocalOptions): Promise<ReviewResul
   const {
     systemPrompt,
     userPrompt,
+    deepWikiContext,
     cwd,
     minSeverity,
     verbose,
@@ -64,13 +67,12 @@ export async function runLocalReview(opts: RunLocalOptions): Promise<ReviewResul
       ...(thinking ? ["--thinking", thinking] : []),
       "--append-system-prompt",
       tempPath,
-      userPrompt,
     ];
     const proc = spawn("pi", piArgs, {
       cwd,
       env: process.env,
       shell: false,
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: ["pipe", "pipe", "pipe"],
     });
 
     let stderr = "";
@@ -88,6 +90,10 @@ export async function runLocalReview(opts: RunLocalOptions): Promise<ReviewResul
     );
 
     return await new Promise<ReviewResult>((resolve, reject) => {
+      proc.stdin.on("error", (error: NodeJS.ErrnoException) => {
+        if (error.code !== "EPIPE") reject(error);
+      });
+
       proc.stdout.on("data", (chunk) => {
         stdoutBuffer += chunk.toString();
         const lines = stdoutBuffer.split("\n");
@@ -158,6 +164,10 @@ export async function runLocalReview(opts: RunLocalOptions): Promise<ReviewResul
         const result = parseAgentResponse(reviewText, minSeverity);
         resolve(usage ? { ...result, tokenUsage: usage } : result);
       });
+
+      proc.stdin.end(
+        deepWikiContext ? `${userPrompt}\n\n${wrapDeepWikiContext(deepWikiContext)}` : userPrompt,
+      );
     });
   } finally {
     await unlink(tempPath).catch(() => undefined);
@@ -219,11 +229,22 @@ export async function handleLocalReview(opts: HandleLocalReviewOptions): Promise
 
   const systemPrompt = buildJSONSystemPrompt(context, minSeverity, contextFiles);
   const userPrompt = buildUserPrompt(diff, skippedFiles);
+  let deepWikiContext: string | undefined;
+  if (parsed.deepwiki) {
+    notify("Fetching DeepWiki documentation…");
+    try {
+      deepWikiContext = await loadDeepWikiContext(providerCwd);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      notify(`DeepWiki unavailable; continuing without it (${message})`, "warning");
+    }
+  }
 
   loaderState.stop = setReviewFooter(ctx, source, { model: currentModelId, thinking });
   const result = await runLocalReview({
     systemPrompt,
     userPrompt,
+    deepWikiContext,
     cwd: ctx.cwd,
     minSeverity,
     verbose,

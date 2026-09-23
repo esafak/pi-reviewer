@@ -6,6 +6,7 @@ import { createReadOnlyTools } from "@earendil-works/pi-coding-agent";
 import { loadContext, mergeContextFiles } from "../core/context.js";
 import { resolveDiff, extractDiffFiles } from "../core/diff-resolver.js";
 import { loadDocContext } from "../core/doc-context.js";
+import { fetchDeepWikiContext, wrapDeepWikiContext } from "../core/deepwiki.js";
 import {
   sendOutput,
   extractLastAssistantText,
@@ -51,6 +52,7 @@ export interface ReviewOptions {
   thinking?: ThinkingLevel;
   minSeverity?: MinSeverity;
   docDirs?: string[]; // dirs to scan for doc-context; empty = inject nothing (opt-in)
+  deepwiki?: boolean;
   fromSha?: string;
   batchMarker?: string;
   activeFindings?: ActiveFindingContext[];
@@ -195,11 +197,34 @@ export async function review(options: ReviewOptions): Promise<void> {
     );
   }
 
+  let deepWikiFiles: { path: string; content: string }[] = [];
+  if (options.deepwiki) {
+    if (!repo) {
+      console.warn(
+        "[pi-reviewer] DeepWiki unavailable; continuing without it: GitHub repository was not provided",
+      );
+    } else {
+      try {
+        const content = await fetchDeepWikiContext(repo);
+        deepWikiFiles = [
+          {
+            path: `DeepWiki (${repo})`,
+            content: wrapDeepWikiContext(content),
+          },
+        ];
+      } catch (error) {
+        console.warn(
+          `[pi-reviewer] DeepWiki unavailable; continuing without it: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+  }
+
   const resolvedFindings = selectResolvedFindings(options.resolvedFindings ?? []);
   const systemPrompt = buildJSONSystemPrompt(
     context,
     options.minSeverity,
-    docContextFiles,
+    [...docContextFiles, ...deepWikiFiles],
     options.activeFindings,
     options.priorSummary,
     resolvedFindings,
