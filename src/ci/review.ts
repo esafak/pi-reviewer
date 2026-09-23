@@ -30,6 +30,11 @@ import { createSearchClient } from "./search/client.js";
 import { resolveSearchConfig, unavailableSearchWarnings } from "./search/config.js";
 import { createSearchTools } from "./search/tool.js";
 import { createRegistryTools } from "./registry/tool.js";
+import {
+  resolveGitHubResearchConfig,
+  unavailableGitHubResearchWarnings,
+} from "./github-research/config.js";
+import { createGitHubResearchTools } from "./github-research/tool.js";
 
 export interface ReviewOptions {
   cwd?: string;
@@ -229,12 +234,24 @@ export async function review(options: ReviewOptions): Promise<void> {
       })
     : [];
   const registryTools = target === "comment" ? createRegistryTools() : [];
+  const githubResearchConfig =
+    target === "comment" ? resolveGitHubResearchConfig(process.env, githubToken) : undefined;
+  if (target === "comment") {
+    for (const warning of unavailableGitHubResearchWarnings(process.env, githubToken))
+      console.warn(`[pi-reviewer] ${warning}`);
+  }
+  const githubResearchTools = githubResearchConfig
+    ? createGitHubResearchTools(githubResearchConfig)
+    : [];
   const policyBlocks = [
     ...(searchTools.length > 0
       ? [`<external_search_policy>\n${PROMPTS.externalSearch}\n</external_search_policy>`]
       : []),
     ...(registryTools.length > 0
       ? [`<package_registry_policy>\n${PROMPTS.packageRegistry}\n</package_registry_policy>`]
+      : []),
+    ...(githubResearchTools.length > 0
+      ? [`<github_research_policy>\n${PROMPTS.githubResearch}\n</github_research_policy>`]
       : []),
   ];
   const effectiveSystemPrompt =
@@ -282,7 +299,13 @@ export async function review(options: ReviewOptions): Promise<void> {
     initialState: {
       systemPrompt: effectiveSystemPrompt,
       model: resolvedModel,
-      tools: [...createReadOnlyTools(cwd), ...searchTools, ...registryTools, reviewTool],
+      tools: [
+        ...createReadOnlyTools(cwd),
+        ...searchTools,
+        ...registryTools,
+        ...githubResearchTools,
+        reviewTool,
+      ],
       thinkingLevel: options.thinking ?? "off",
     },
     streamFn: models.streamSimple.bind(models),

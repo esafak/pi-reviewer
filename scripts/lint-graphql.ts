@@ -1,8 +1,9 @@
 import { validate } from "@octokit/graphql-schema";
-import { githubGraphqlDocuments } from "../src/ci/github.js";
+import { githubGraphqlDocuments, githubResearchGraphqlDocuments } from "../src/ci/github.js";
 
 let failed = false;
-for (const [name, document] of Object.entries(githubGraphqlDocuments)) {
+const documents = { ...githubGraphqlDocuments, ...githubResearchGraphqlDocuments };
+for (const [name, document] of Object.entries(documents)) {
   const errors = validate(document);
   for (const error of errors) {
     failed = true;
@@ -11,4 +12,4 @@ for (const [name, document] of Object.entries(githubGraphqlDocuments)) {
 }
 
 if (failed) process.exitCode = 1;
-else console.log(`[graphql] validated ${Object.keys(githubGraphqlDocuments).length} documents`);
+else console.log(`[graphql] validated ${Object.keys(documents).length} documents`);

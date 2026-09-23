@@ -4,7 +4,7 @@ author: "esafak"
 
 inputs:
   github-token:
-    description: "GitHub token to post PR comments."
+    description: "GitHub token to post PR comments and, if enabled, access GitHub research resources within its permissions."
     required: true
 
   pi-api-key:
@@ -47,6 +47,16 @@ inputs:
 
   ai-search-provider:
     description: "AI search provider: exa or brave."
+    required: false
+    default: ""
+
+  github-research:
+    description: "Enable bounded read-only GitHub research tools for CI reviews (default: false)."
+    required: false
+    default: "false"
+
+  github-scope:
+    description: "GitHub research repository scope: public or token-accessible (default: public)."
     required: false
     default: ""
 
@@ -322,6 +332,8 @@ runs:
         PI_REVIEWER_SEARCH_PROVIDER: ${{ inputs.search-provider || env.PI_REVIEWER_SEARCH_PROVIDER }}
         PI_REVIEWER_AI_SEARCH: ${{ inputs.ai-search }}
         PI_REVIEWER_AI_SEARCH_PROVIDER: ${{ inputs.ai-search-provider || env.PI_REVIEWER_AI_SEARCH_PROVIDER }}
+        PI_REVIEWER_GITHUB_RESEARCH: ${{ inputs.github-research }}
+        PI_REVIEWER_GITHUB_SCOPE: ${{ inputs.github-scope || env.PI_REVIEWER_GITHUB_SCOPE }}
         PI_REVIEWER_SEARCH_MAX_QUERIES: ${{ inputs.search-max-queries }}
         PI_REVIEWER_AI_SEARCH_MAX_QUERIES: ${{ inputs.ai-search-max-queries }}
         PI_REVIEWER_SEARCH_MAX_RESULTS: ${{ inputs.search-max-results }}

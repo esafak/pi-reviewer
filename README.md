@@ -158,6 +158,12 @@ optional provider keys; DuckDuckGo provides best-effort unauthenticated regular
 search only and is not an AI-search provider. See [CI.md](./CI.md) for the
 configuration and query-egress limitations.
 
+CI reviews can also opt in to bounded, read-only GitHub research tools for
+searching repositories, code, PRs, issues, and Discussions and reading selected
+files or items. The scope defaults to public; access to cross-repository code
+search depends on the configured GitHub token. See [CI.md](./CI.md) for setup,
+permissions, and limits.
+
 Eligible CI comment reviews also have a default-on `package_lookup` tool for
 PyPI, Maven Central, crates.io, npm, and Go modules. It contacts public
 registries only when called, returns bounded registry-native metadata, and

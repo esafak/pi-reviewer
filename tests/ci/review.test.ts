@@ -227,6 +227,8 @@ describe("review", () => {
     delete process.env.PI_REVIEWER_AI_SEARCH;
     delete process.env.PI_REVIEWER_AI_SEARCH_PROVIDER;
     delete process.env.PI_REVIEWER_AI_SEARCH_REQUIRED;
+    delete process.env.PI_REVIEWER_GITHUB_RESEARCH;
+    delete process.env.PI_REVIEWER_GITHUB_SCOPE;
     delete process.env.EXA_API_KEY;
     delete process.env.BRAVE_SEARCH_API_KEY;
     // model is mandatory — provide a default for tests that don't exercise it
@@ -299,6 +301,9 @@ describe("review", () => {
     );
     expect(state.systemPrompt).toContain("<package_registry_policy>");
     expect(state.tools).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: "github_search" })]),
+    );
+    expect(state.tools).not.toEqual(
       expect.arrayContaining([expect.objectContaining({ name: "web_search" })]),
     );
 
@@ -310,6 +315,36 @@ describe("review", () => {
         repo: "owner/repo",
       }),
     );
+  });
+
+  it("registers GitHub research tools only for enabled CI comment reviews", async () => {
+    process.env.GITHUB_ACTIONS = "true";
+    process.env.PI_REVIEWER_GITHUB_RESEARCH = "true";
+    process.env.PI_REVIEWER_GITHUB_SCOPE = "public";
+
+    await review({ cwd: "/repo", pr: 42, githubToken: "token", repo: "owner/repo" });
+
+    const state = AgentMock.mock.calls[0][0].initialState;
+    expect(state.tools).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "github_search" }),
+        expect.objectContaining({ name: "github_read" }),
+      ]),
+    );
+    expect(state.systemPrompt).toContain("<github_research_policy>");
+    expect(state.systemPrompt).toContain("public scope excludes private repositories");
+  });
+
+  it("does not register GitHub research for local output even when configured", async () => {
+    process.env.PI_REVIEWER_GITHUB_RESEARCH = "true";
+
+    await review({ cwd: "/repo", githubToken: "token" });
+
+    const state = AgentMock.mock.calls[0][0].initialState;
+    expect(state.tools).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: "github_search" })]),
+    );
+    expect(state.systemPrompt).not.toContain("<github_research_policy>");
   });
 
   it("fails before agent/output when required search is unavailable", async () => {

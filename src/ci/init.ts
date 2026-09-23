@@ -78,6 +78,8 @@ jobs:
           # search-provider: 'brave' # optional
           # ai-search: 'true' # optional
           # ai-search-provider: 'brave' # optional
+          # github-research: 'true' # optional, read-only; uses github-token
+          # github-scope: 'public' # or 'token-accessible'; defaults to public
 `;
 }
 
