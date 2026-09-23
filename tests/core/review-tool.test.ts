@@ -81,6 +81,14 @@ describe("createReviewTool", () => {
     expect(() => validateToolArguments(tool, toolCall(validArgs()))).not.toThrow();
   });
 
+  it("accepts optional replacement code, including an empty deletion", () => {
+    const { tool } = createReviewTool();
+    const args = validArgs();
+    (args.comments[0] as Record<string, unknown>).suggestion = "return value;";
+    (args.comments[1] as Record<string, unknown>).suggestion = "";
+    expect(() => validateToolArguments(tool, toolCall(args))).not.toThrow();
+  });
+
   it("schema rejects an invalid side value", () => {
     const { tool } = createReviewTool();
     const args = validArgs();

@@ -42,6 +42,12 @@ const reviewSchema = Type.Object(
             description:
               "Non-empty inline comment text containing meaningful prose, may use Markdown.",
           }),
+          suggestion: Type.Optional(
+            Type.String({
+              description:
+                "Optional replacement code for this finding. Provide only when a concrete replacement is useful; an empty string intentionally deletes the anchored line. Applies to one RIGHT-side line, though replacement code may span multiple lines.",
+            }),
+          ),
           resolved_finding_id: Type.Optional(Type.String({ maxLength: 200 })),
           re_raise_reason: Type.Optional(
             Type.Union([
