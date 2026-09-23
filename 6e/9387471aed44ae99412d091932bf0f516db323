@@ -1,0 +1,19 @@
+src/core/output.ts
+  s_9251193141f0ce::t_2d2ade45a3b92a 759-761,763
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "6e9387471aed44ae99412d091932bf0f516db323",
+  "prompts": {},
+  "sessions": {
+    "s_9251193141f0ce": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f312a655affeO367IxM5X0AWsD",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "Emre Şafak <3928300+esafak@users.noreply.github.com>"
+    }
+  }
+}
