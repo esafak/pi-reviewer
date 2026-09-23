@@ -43,6 +43,31 @@ describe("parseDeepWikiResult", () => {
       "DeepWiki question tool returned an error",
     );
   });
+
+  it("includes the queried repository when an MCP tool errors", () => {
+    expect(() => parseDeepWikiResult({ isError: true, content: [] }, "owner/repo")).toThrow(
+      "DeepWiki question tool returned an error for owner/repo",
+    );
+  });
+
+  it("preserves a bounded, single-line MCP error detail with the repo name", () => {
+    expect(() =>
+      parseDeepWikiResult(
+        {
+          isError: true,
+          content: [
+            {
+              type: "text",
+              text: "Repository not found. Visit DeepWiki to index it.\n::notice::extra line",
+            },
+          ],
+        },
+        "owner/repo",
+      ),
+    ).toThrow(
+      "DeepWiki question tool returned an error for owner/repo: Repository not found. Visit DeepWiki to index it. ::notice::extra line",
+    );
+  });
 });
 
 describe("wrapDeepWikiContext", () => {
