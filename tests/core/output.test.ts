@@ -1977,6 +1977,7 @@ printf("first\\nsecond")
             side: "RIGHT",
             severity: "WARN",
             body: "Missing null check",
+            suggestion: "if (user) use(user);",
           },
         ],
       }),
@@ -2010,6 +2011,8 @@ printf("first\\nsecond")
     const retryBody = JSON.parse((fetchMock.mock.calls[1][1] as { body: string }).body);
     expect(retryBody.comments).toEqual([]);
     expect(retryBody.body).toContain("Missing null check");
+    expect(retryBody.body).not.toContain("suggestion");
+    expect(retryBody.body).not.toContain("if (user) use(user);");
     expect(retryBody.body).toContain(AI_FIX_FOOTER);
     expect(retryBody.body).toContain("Prompt to fix all issues with AI");
     expect(retryBody.body).toContain("Comments Not Attached to the Diff");
@@ -2049,6 +2052,7 @@ printf("first\\nsecond")
             side: "RIGHT",
             severity: "WARN",
             body: "Missing null check",
+            suggestion: "if (user) use(user);",
           },
         ],
       }),
@@ -2062,6 +2066,10 @@ printf("first\\nsecond")
     expect(fetchMock.mock.calls[2][0]).toBe(
       "https://api.github.com/repos/owner/repo/issues/42/comments",
     );
+    const issueCommentBody = JSON.parse((fetchMock.mock.calls[2][1] as { body: string }).body)
+      .body as string;
+    expect(issueCommentBody).not.toContain("suggestion");
+    expect(issueCommentBody).not.toContain("if (user) use(user);");
   });
 
   it("posts only positionable comments inline and moves the rest to the review body", async () => {

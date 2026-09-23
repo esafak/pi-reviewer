@@ -1109,6 +1109,7 @@ export async function sendOutput(options: OutputOptions): Promise<OutputMetadata
       }
     }
 
+    // Keep suggestion fences in inline payloads; review bodies carry lifecycle metadata.
     const inlineComments = inline.map((comment) => ({
       path: comment.file,
       line: comment.line,
