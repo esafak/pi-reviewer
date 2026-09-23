@@ -11,7 +11,7 @@ import {
   type ReviewResult,
 } from "../../../src/core/output.js";
 import { loadContext } from "../../../src/core/context.js";
-import { loadDeepWikiContext, wrapDeepWikiContext } from "../../../src/core/deepwiki.js";
+import { deepWikiReviewInstruction, resolvePublicGitHubRepo } from "../../../src/core/deepwiki.js";
 import { resolveDiff, extractDiffFiles } from "../../../src/core/diff-resolver.js";
 import {
   buildJSONSystemPrompt,
@@ -29,7 +29,7 @@ import type { ReviewCommandArgs } from "../args.js";
 export interface RunLocalOptions {
   systemPrompt: string;
   userPrompt: string;
-  deepWikiContext?: string;
+  deepWikiEnabled?: boolean;
   cwd: string;
   minSeverity: MinSeverity;
   verbose?: boolean;
@@ -43,7 +43,7 @@ export async function runLocalReview(opts: RunLocalOptions): Promise<ReviewResul
   const {
     systemPrompt,
     userPrompt,
-    deepWikiContext,
+    deepWikiEnabled,
     cwd,
     minSeverity,
     verbose,
@@ -70,7 +70,10 @@ export async function runLocalReview(opts: RunLocalOptions): Promise<ReviewResul
     ];
     const proc = spawn("pi", piArgs, {
       cwd,
-      env: process.env,
+      env: {
+        ...process.env,
+        PI_REVIEWER_DEEPWIKI_TOOL_ENABLED: deepWikiEnabled ? "true" : "false",
+      },
       shell: false,
       stdio: ["pipe", "pipe", "pipe"],
     });
@@ -165,9 +168,7 @@ export async function runLocalReview(opts: RunLocalOptions): Promise<ReviewResul
         resolve(usage ? { ...result, tokenUsage: usage } : result);
       });
 
-      proc.stdin.end(
-        deepWikiContext ? `${userPrompt}\n\n${wrapDeepWikiContext(deepWikiContext)}` : userPrompt,
-      );
+      proc.stdin.end(userPrompt);
     });
   } finally {
     await unlink(tempPath).catch(() => undefined);
@@ -227,24 +228,21 @@ export async function handleLocalReview(opts: HandleLocalReviewOptions): Promise
   );
   if (contextPaths.length > 0) notify(`Context:\n${contextPaths.map((p) => `  ${p}`).join("\n")}`);
 
-  const systemPrompt = buildJSONSystemPrompt(context, minSeverity, contextFiles);
+  let systemPrompt = buildJSONSystemPrompt(context, minSeverity, contextFiles);
   const userPrompt = buildUserPrompt(diff, skippedFiles);
-  let deepWikiContext: string | undefined;
-  if (parsed.deepwiki) {
-    notify("Fetching DeepWiki documentation…");
-    try {
-      deepWikiContext = await loadDeepWikiContext(providerCwd);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      notify(`DeepWiki unavailable; continuing without it (${message})`, "warning");
-    }
+  const deepWikiRepo = parsed.deepwiki ? await resolvePublicGitHubRepo(providerCwd) : undefined;
+  if (deepWikiRepo) {
+    const repo = deepWikiRepo;
+    systemPrompt = `${systemPrompt}\n\n${deepWikiReviewInstruction(repo)}`;
+  } else if (parsed.deepwiki) {
+    notify("DeepWiki unavailable; could not identify the repository under review", "warning");
   }
 
   loaderState.stop = setReviewFooter(ctx, source, { model: currentModelId, thinking });
   const result = await runLocalReview({
     systemPrompt,
     userPrompt,
-    deepWikiContext,
+    deepWikiEnabled: Boolean(deepWikiRepo),
     cwd: ctx.cwd,
     minSeverity,
     verbose,

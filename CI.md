@@ -74,7 +74,7 @@ jobs:
           # Opt in to injecting matching project docs into the review.
           # Comma-separated dirs scanned for .md files with a 'description' frontmatter.
           # doc-dirs: '.pi/notes,docs/review'
-          # Optional public DeepWiki documentation context (no API key required).
+          # Optional DeepWiki AI code search tool.
           # deepwiki: 'true'
           # Optional web search configuration.
           # Exa/Brave use EXA_API_KEY/BRAVE_SEARCH_API_KEY; DuckDuckGo regular

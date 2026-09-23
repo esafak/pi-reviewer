@@ -1,4 +1,5 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { createDeepWikiTool } from "../../src/core/deepwiki.js";
 import {
   readVerbose,
   readMinSeverity,
@@ -52,6 +53,8 @@ function resolveCommonOpts(
 }
 
 export default function (pi: ExtensionAPI): void {
+  if (process.env.PI_REVIEWER_DEEPWIKI_TOOL_ENABLED === "true")
+    pi.registerTool(createDeepWikiTool());
   pi.registerCommand("review", {
     description:
       "Review a PR diff with pi-reviewer (flags: --diff, --branch, --pr, --ssh, --ui, --dry-run, --deepwiki)",
