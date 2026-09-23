@@ -291,6 +291,7 @@ async function main(): Promise<void> {
       githubToken: token,
       repo,
       reactOnNoFindings: process.env.REACT_ON_NO_FINDINGS === "true",
+      deepwiki: process.env.PI_REVIEWER_DEEPWIKI === "true",
     });
     if (event.kind === "synchronize") {
       const latest = await github.getPullRequest(repo, event.pr!);

@@ -26,6 +26,10 @@ vi.mock("../../../src/core/context.js", async (importActual) => {
   return { ...actual, loadContext: vi.fn() };
 });
 
+vi.mock("../../../src/core/deepwiki.js", () => ({
+  loadDeepWikiContext: vi.fn(),
+}));
+
 vi.mock("../../../src/core/ui/server/index.js", () => ({
   readDefaultBranch: vi.fn().mockReturnValue(undefined),
 }));
@@ -47,6 +51,7 @@ import { spawn } from "node:child_process";
 import { writeFile } from "node:fs/promises";
 import { resolveDiff } from "../../../src/core/diff-resolver.js";
 import { loadContext } from "../../../src/core/context.js";
+import { loadDeepWikiContext } from "../../../src/core/deepwiki.js";
 import { setReviewFooter } from "../../../extensions/pi-reviewer/footer.js";
 import { handleUIReview } from "../../../extensions/pi-reviewer/handlers/ui.js";
 import { buildContextGroups } from "../../../extensions/pi-reviewer/handlers/context.js";
@@ -126,6 +131,7 @@ beforeEach(() => {
     source: "feature vs main",
   });
   vi.mocked(loadContext).mockResolvedValue({ conventions: [], reviewRules: [] });
+  vi.mocked(loadDeepWikiContext).mockResolvedValue("Architecture reference");
   vi.mocked(spawn).mockReturnValue(makeFakeProcess() as any);
   vi.mocked(buildContextGroups).mockResolvedValue({
     groups: [],
@@ -137,6 +143,32 @@ beforeEach(() => {
 });
 
 describe("handleLocalReview — non-UI path", () => {
+  it("does not contact DeepWiki unless explicitly enabled", async () => {
+    await handleLocalReview(makeOpts());
+    expect(loadDeepWikiContext).not.toHaveBeenCalled();
+  });
+
+  it("adds opt-in DeepWiki documentation to the reviewer prompt", async () => {
+    await handleLocalReview(makeOpts({ deepwiki: true }));
+    expect(loadDeepWikiContext).toHaveBeenCalledWith("/project");
+    const args = vi.mocked(spawn).mock.calls[0][1] as string[];
+    expect(args.at(-1)).toContain("<deepwiki_documentation>");
+    expect(args.at(-1)).toContain("Architecture reference");
+    expect(args.at(-1)).toContain("untrusted reference material");
+  });
+
+  it("continues review when DeepWiki retrieval fails", async () => {
+    vi.mocked(loadDeepWikiContext).mockRejectedValueOnce(new Error("service unavailable"));
+    const opts = makeOpts({ deepwiki: true });
+    await handleLocalReview(opts);
+    expect(opts.notify).toHaveBeenCalledWith(
+      "DeepWiki unavailable; continuing without it (service unavailable)",
+      "warning",
+    );
+    const args = vi.mocked(spawn).mock.calls[0][1] as string[];
+    expect(args.at(-1)).not.toContain("<deepwiki_documentation>");
+  });
+
   it("sends progress notifications in order", async () => {
     const opts = makeOpts();
     await handleLocalReview(opts);

@@ -9,6 +9,10 @@ vi.mock("../../src/core/doc-context.js", () => ({
   loadDocContext: vi.fn().mockResolvedValue([]),
 }));
 
+vi.mock("../../src/core/deepwiki.js", () => ({
+  fetchDeepWikiContext: vi.fn().mockResolvedValue("DeepWiki architecture documentation"),
+}));
+
 vi.mock("../../src/core/context.js", () => ({
   loadContext: vi.fn(),
   mergeContextFiles: vi.fn((ctx) => [...(ctx.conventions ?? []), ...(ctx.reviewRules ?? [])]),
@@ -59,6 +63,7 @@ import { createReadOnlyTools } from "@earendil-works/pi-coding-agent";
 import { loadContext } from "../../src/core/context.js";
 import { resolveDiff } from "../../src/core/diff-resolver.js";
 import { loadDocContext } from "../../src/core/doc-context.js";
+import { fetchDeepWikiContext } from "../../src/core/deepwiki.js";
 import { sendOutput } from "../../src/core/output.js";
 import { createReviewTool } from "../../src/core/review-tool.js";
 import { createReplyTool } from "../../src/core/reply-tool.js";
@@ -156,6 +161,7 @@ describe("reply prompt limits", () => {
 const resolveDiffMock = vi.mocked(resolveDiff);
 const loadContextMock = vi.mocked(loadContext);
 const loadDocContextMock = vi.mocked(loadDocContext);
+const fetchDeepWikiContextMock = vi.mocked(fetchDeepWikiContext);
 const sendOutputMock = vi.mocked(sendOutput);
 const AgentMock = vi.mocked(Agent);
 const createReadOnlyToolsMock = vi.mocked(createReadOnlyTools);
@@ -188,6 +194,8 @@ describe("review", () => {
       reviewRules: [],
     });
     sendOutputMock.mockResolvedValue(undefined);
+    fetchDeepWikiContextMock.mockResolvedValue("DeepWiki architecture documentation");
+    fetchDeepWikiContextMock.mockClear();
     createReadOnlyToolsMock.mockReturnValue([]);
     createReviewToolMock.mockReturnValue({
       tool: {
@@ -221,6 +229,7 @@ describe("review", () => {
     delete process.env.ANTHROPIC_API_KEY;
     delete process.env.ZAI_API_KEY;
     delete process.env.PI_REVIEWER_DOC_DIRS;
+    delete process.env.PI_REVIEWER_DEEPWIKI;
     delete process.env.PI_REVIEWER_WEB_SEARCH;
     delete process.env.PI_REVIEWER_SEARCH_PROVIDER;
     delete process.env.PI_REVIEWER_SEARCH_REQUIRED;
@@ -253,6 +262,11 @@ describe("review", () => {
     expect(sendOutputMock).not.toHaveBeenCalled();
   });
 
+  it("does not contact DeepWiki by default", async () => {
+    await review({ cwd: "/repo", repo: "owner/repo" });
+    expect(fetchDeepWikiContextMock).not.toHaveBeenCalled();
+  });
+
   it("uses terminal output target in local mode", async () => {
     await review({ cwd: "/repo" });
 
@@ -277,6 +291,31 @@ describe("review", () => {
         content: "LGTM",
         cwd: "/repo",
       }),
+    );
+  });
+
+  it("adds DeepWiki context only when enabled and passes the repo to MCP", async () => {
+    await review({ cwd: "/repo", repo: "owner/repo", deepwiki: true });
+
+    expect(fetchDeepWikiContextMock).toHaveBeenCalledWith("owner/repo");
+    expect(AgentMock.mock.calls[0][0].initialState.systemPrompt).toContain(
+      "DeepWiki architecture documentation",
+    );
+    expect(AgentMock.mock.calls[0][0].initialState.systemPrompt).toContain("untrusted external");
+  });
+
+  it("continues a CI review when DeepWiki is unavailable", async () => {
+    fetchDeepWikiContextMock.mockRejectedValueOnce(new Error("service unavailable"));
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await review({ cwd: "/repo", repo: "owner/repo", deepwiki: true });
+
+    expect(AgentMock).toHaveBeenCalled();
+    expect(AgentMock.mock.calls[0][0].initialState.systemPrompt).not.toContain(
+      "DeepWiki architecture documentation",
+    );
+    expect(warnSpy).toHaveBeenCalledWith(
+      "[pi-reviewer] DeepWiki unavailable; continuing without it: service unavailable",
     );
   });
 

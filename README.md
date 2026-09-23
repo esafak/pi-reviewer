@@ -23,6 +23,7 @@ The default. Fetches the diff and your project conventions locally, spawns a pi 
 /review --branch dev
 /review --pr 42
 /review --diff HEAD~1
+/review --deepwiki
 ```
 
 ### SSH mode (`--ssh`)
@@ -38,6 +39,10 @@ For reviewing code on a remote machine. Instead of spawning a subprocess, SSH mo
 Before starting the agent, pi-reviewer fetches everything over SSH in parallel: the diff, `AGENTS.md` / `CLAUDE.md`, `REVIEW.md`, and any context provider files. The diff is passed directly to the agent — no extra round-trip needed. The agent saves `pi-review.md` directly on the remote.
 
 > **Note:** `--model` and `--thinking` have no effect in SSH mode — the model is fixed to whatever the parent session is using.
+
+### DeepWiki context (`--deepwiki`)
+
+For local reviews, fetches repository documentation from the public DeepWiki MCP server and adds it as bounded, untrusted reference context. No API key or separate DeepWiki installation is required. The repository must have an `origin` remote pointing to a public GitHub repository. Without the flag, DeepWiki is not contacted; if retrieval fails, the review continues without DeepWiki. This is not supported in SSH mode.
 
 ### UI mode (`--ui`)
 
@@ -77,6 +82,7 @@ Then inside the pi TUI:
 | `--diff <ref>` | Review changes since a specific git ref | `--diff HEAD~1` |
 | `--ssh` | SSH mode: agent fetches diff and conventions on the remote | `--ssh` |
 | `--ui` | Open browser review UI after the agent finishes | `--ui` |
+| `--deepwiki` | Add public DeepWiki documentation context. **Local mode only.** | `--deepwiki` |
 | `--min-severity <level>` | Only report issues at this level and above: `info`, `warn`, or `critical` | `--min-severity warn` |
 | `--model <id>` | Model for this review in `provider/id` format. **Local mode only.** | `--model openai/gpt-4o` |
 | `--thinking <level>` | Thinking budget: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`. **Local mode only.** | `--thinking low` |

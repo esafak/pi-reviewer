@@ -50,6 +50,12 @@ describe("GitHub Action Vite+ setup", () => {
     );
   });
 
+  it("maps the opt-in DeepWiki input to the CI environment", async () => {
+    const action = await readFile(path.join(process.cwd(), "action.yml"), "utf8");
+    expect(action).toContain('default: "false"');
+    expect(action).toContain("PI_REVIEWER_DEEPWIKI: ${{ inputs.deepwiki }}");
+  });
+
   it("keeps the action manifest valid YAML", async () => {
     const action = await readFile(path.join(process.cwd(), "action.yml"), "utf8");
     expect(() => YAML.parse(action)).not.toThrow();

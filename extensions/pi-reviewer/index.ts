@@ -54,7 +54,7 @@ function resolveCommonOpts(
 export default function (pi: ExtensionAPI): void {
   pi.registerCommand("review", {
     description:
-      "Review a PR diff with pi-reviewer (flags: --diff, --branch, --pr, --ssh, --ui, --dry-run)",
+      "Review a PR diff with pi-reviewer (flags: --diff, --branch, --pr, --ssh, --ui, --dry-run, --deepwiki)",
     async handler(args, ctx) {
       const notify = ctx.ui.notify.bind(ctx.ui);
       const loaderState = { stop: () => {} };
@@ -62,6 +62,9 @@ export default function (pi: ExtensionAPI): void {
       try {
         const parsed = parseArgs(args);
         sshMode = parsed.ssh;
+        if (parsed.ssh && parsed.deepwiki) {
+          throw new Error("--deepwiki is currently supported only for local reviews.");
+        }
         const common = resolveCommonOpts(parsed, ctx, pi, notify, loaderState);
 
         if (parsed.dryRun) return void (await handleDryRun({ parsed, cwd: ctx.cwd, ...common }));
