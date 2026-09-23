@@ -9,9 +9,13 @@ vi.mock("../../src/core/doc-context.js", () => ({
   loadDocContext: vi.fn().mockResolvedValue([]),
 }));
 
-vi.mock("../../src/core/deepwiki.js", () => ({
-  fetchDeepWikiContext: vi.fn().mockResolvedValue("DeepWiki architecture documentation"),
-}));
+vi.mock("../../src/core/deepwiki.js", async (importActual) => {
+  const actual = await importActual<typeof import("../../src/core/deepwiki.js")>();
+  return {
+    ...actual,
+    fetchDeepWikiContext: vi.fn().mockResolvedValue("DeepWiki architecture documentation"),
+  };
+});
 
 vi.mock("../../src/core/context.js", () => ({
   loadContext: vi.fn(),
@@ -301,7 +305,9 @@ describe("review", () => {
     expect(AgentMock.mock.calls[0][0].initialState.systemPrompt).toContain(
       "DeepWiki architecture documentation",
     );
-    expect(AgentMock.mock.calls[0][0].initialState.systemPrompt).toContain("untrusted external");
+    expect(AgentMock.mock.calls[0][0].initialState.systemPrompt).toContain(
+      "untrusted reference material",
+    );
   });
 
   it("continues a CI review when DeepWiki is unavailable", async () => {

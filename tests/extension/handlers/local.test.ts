@@ -26,9 +26,10 @@ vi.mock("../../../src/core/context.js", async (importActual) => {
   return { ...actual, loadContext: vi.fn() };
 });
 
-vi.mock("../../../src/core/deepwiki.js", () => ({
-  loadDeepWikiContext: vi.fn(),
-}));
+vi.mock("../../../src/core/deepwiki.js", async (importActual) => {
+  const actual = await importActual<typeof import("../../../src/core/deepwiki.js")>();
+  return { ...actual, loadDeepWikiContext: vi.fn() };
+});
 
 vi.mock("../../../src/core/ui/server/index.js", () => ({
   readDefaultBranch: vi.fn().mockReturnValue(undefined),
@@ -60,7 +61,9 @@ import type { ReviewCommandArgs } from "../../../extensions/pi-reviewer/args.js"
 
 // Emits a turn_end event with a valid ReviewResult JSON so runLocalReview resolves.
 function makeFakeProcess(reviewJson = '{"summary":"LGTM","comments":[]}') {
+  const stdin = Object.assign(new EventEmitter(), { end: vi.fn() });
   const proc = Object.assign(new EventEmitter(), {
+    stdin,
     stdout: new EventEmitter(),
     stderr: new EventEmitter(),
   }) as any;
@@ -151,10 +154,11 @@ describe("handleLocalReview — non-UI path", () => {
   it("adds opt-in DeepWiki documentation to the reviewer prompt", async () => {
     await handleLocalReview(makeOpts({ deepwiki: true }));
     expect(loadDeepWikiContext).toHaveBeenCalledWith("/project");
-    const args = vi.mocked(spawn).mock.calls[0][1] as string[];
-    expect(args.at(-1)).toContain("<deepwiki_documentation>");
-    expect(args.at(-1)).toContain("Architecture reference");
-    expect(args.at(-1)).toContain("untrusted reference material");
+    const proc = vi.mocked(spawn).mock.results[0].value as any;
+    const prompt = proc.stdin.end.mock.calls[0][0] as string;
+    expect(prompt).toContain("<deepwiki_documentation>");
+    expect(prompt).toContain("Architecture reference");
+    expect(prompt).toContain("untrusted reference material");
   });
 
   it("continues review when DeepWiki retrieval fails", async () => {
@@ -165,8 +169,8 @@ describe("handleLocalReview — non-UI path", () => {
       "DeepWiki unavailable; continuing without it (service unavailable)",
       "warning",
     );
-    const args = vi.mocked(spawn).mock.calls[0][1] as string[];
-    expect(args.at(-1)).not.toContain("<deepwiki_documentation>");
+    const proc = vi.mocked(spawn).mock.results[0].value as any;
+    expect(proc.stdin.end.mock.calls[0][0]).not.toContain("<deepwiki_documentation>");
   });
 
   it("sends progress notifications in order", async () => {
@@ -190,6 +194,28 @@ describe("handleLocalReview — non-UI path", () => {
       expect.arrayContaining(["--append-system-prompt"]),
       expect.any(Object),
     );
+  });
+
+  it("sends the review prompt over stdin instead of a command-line argument", async () => {
+    await handleLocalReview(makeOpts());
+    const [command, rawArgs, options] = vi.mocked(spawn).mock.calls[0];
+    expect(command).toBe("pi");
+    expect(options?.stdio).toEqual(["pipe", "pipe", "pipe"]);
+    expect((rawArgs as string[]).at(-1)).toMatch(/pi-reviewer-system-prompt-/);
+    expect((rawArgs as string[]).join(" ")).not.toContain("Review this diff:");
+    expect((vi.mocked(spawn).mock.results[0].value as any).stdin.end).toHaveBeenCalledWith(
+      expect.stringContaining("Review this diff:"),
+    );
+  });
+
+  it("ignores EPIPE when the pi process closes its stdin early", async () => {
+    const proc = makeFakeProcess();
+    proc.stdin.end.mockImplementationOnce(() => {
+      proc.stdin.emit("error", Object.assign(new Error("broken pipe"), { code: "EPIPE" }));
+    });
+    vi.mocked(spawn).mockReturnValueOnce(proc);
+
+    await expect(handleLocalReview(makeOpts())).resolves.toBeUndefined();
   });
 
   it("writes pi-review.md to ctx.cwd", async () => {
