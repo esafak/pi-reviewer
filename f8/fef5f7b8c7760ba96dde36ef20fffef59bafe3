@@ -1,0 +1,19 @@
+src/core/prompts.ts
+  s_9251193141f0ce::t_208ac86ea57edc 24-25,41
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "f8fef5f7b8c7760ba96dde36ef20fffef59bafe3",
+  "prompts": {},
+  "sessions": {
+    "s_9251193141f0ce": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f312a655affeO367IxM5X0AWsD",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "Emre Şafak <3928300+esafak@users.noreply.github.com>"
+    }
+  }
+}
