@@ -103,6 +103,8 @@ jobs:
 
       - name: Review
         uses: ./
+        env:
+          EXA_API_KEY: ${{ secrets.EXA_API_KEY }}
         with:
           github-token: ${{ steps.bot-token.outputs.token }}
           pi-api-key: ${{ env.PI_API_KEY }}
@@ -111,4 +113,11 @@ jobs:
           review-drafts: false
           react-on-no-findings: true
           min-severity: ${{ inputs.min-severity || 'warn' }}
+          github-scope: ${{ vars.PI_REVIEWER_GITHUB_SCOPE }}
+          ai-search-provider: ${{ vars.PI_REVIEWER_AI_SEARCH_PROVIDER }}
+          search-provider: ${{ vars.PI_REVIEWER_SEARCH_PROVIDER }}
+          github-research: 'true'
+          ai-search: 'true'
+          web-search: 'true'
+          deepwiki: 'true'
           cache: true
