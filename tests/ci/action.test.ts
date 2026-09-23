@@ -42,6 +42,14 @@ describe("GitHub Action Vite+ setup", () => {
     );
   });
 
+  it("maps GitHub research action inputs to the CI environment", async () => {
+    const action = await readFile(path.join(process.cwd(), "action.yml"), "utf8");
+    expect(action).toContain("PI_REVIEWER_GITHUB_RESEARCH: ${{ inputs.github-research }}");
+    expect(action).toContain(
+      "PI_REVIEWER_GITHUB_SCOPE: ${{ inputs.github-scope || env.PI_REVIEWER_GITHUB_SCOPE }}",
+    );
+  });
+
   it("keeps the action manifest valid YAML", async () => {
     const action = await readFile(path.join(process.cwd(), "action.yml"), "utf8");
     expect(() => YAML.parse(action)).not.toThrow();

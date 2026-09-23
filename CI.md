@@ -81,6 +81,8 @@ jobs:
           # search-provider: 'brave'
           # ai-search: 'true'
           # ai-search-provider: 'brave'
+          # github-research: 'true' # optional, read-only GitHub search/read tools
+          # github-scope: 'public' # or 'token-accessible'; defaults to public
 ```
 
 The `init` command is the generic, non-App setup. It runs only when invoked
@@ -195,7 +197,7 @@ Draft pull requests are skipped by default, including manual dispatch and `/pi-r
 
 | Input | Required | Description |
 |---|---|---|
-| `github-token` | yes | GitHub token to post PR comments |
+| `github-token` | yes | GitHub token to post PR comments and optionally access GitHub research resources within its permissions |
 | `pi-api-key` | no | Optional explicit API key for the model's provider. When omitted, the action uses the provider-specific environment variable (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or `ZAI_API_KEY`). |
 | `model` | yes | Model to use in `provider/modelId` format (e.g. `openrouter/openai/gpt-5.4-mini`) |
 | `thinking` | no | Thinking budget: `off`, `minimal`, `low`, `medium`, `high`, or `xhigh` (default: `off`) |
@@ -206,6 +208,8 @@ Draft pull requests are skipped by default, including manual dispatch and `/pi-r
 | `search-provider` | no | `exa`, `brave`, or `duckduckgo`; explicit provider selection, no fallback. May also be set as `PI_REVIEWER_SEARCH_PROVIDER` in the caller workflow environment. |
 | `ai-search` | no | Enable separate provider-grounded AI search (default: false) |
 | `ai-search-provider` | no | `exa` or `brave`; requires the provider key. May also be set as `PI_REVIEWER_AI_SEARCH_PROVIDER` in the caller workflow environment. |
+| `github-research` | no | Enable read-only GitHub search/read tools (default: `false`). Uses the existing `github-token` input. |
+| `github-scope` | no | `public` (default) or `token-accessible`; the latter can expose every repository readable by the configured token. May also be set as `PI_REVIEWER_GITHUB_SCOPE` in the caller workflow environment when the input is omitted. |
 | `search-max-queries` | no | Regular search query budget, bounded from 1 to 10 (default: 3) |
 | `ai-search-max-queries` | no | AI search query budget, bounded from 1 to 3 (default: 1) |
 | `search-max-results` | no | Regular results per query (default: 5) |
@@ -246,6 +250,30 @@ timeout, a fifteen-second total lookup wall-clock budget, 7 KiB per metadata
 projection and 15 KiB aggregate metadata budget (reserving framing within the
 8 KiB per-result and 16 KiB aggregate model-facing tool-content caps). Registry
 failures are advisory and do not fail the review.
+
+GitHub research is opt-in and available only to CI comment reviews. When enabled,
+the reviewer receives bounded `github_search` and `github_read` tools for
+repositories, code, pull requests, issues, Discussions, and repository files.
+The tools use the existing `github-token`; the token's permissions determine
+which resources are available. `github-scope` defaults to `public` and rejects
+private or unverifiable repositories even when the token can read them.
+`token-accessible` explicitly permits any resources that the configured token
+can read. Search and read results are bounded, untrusted advisory context, not
+instructions or formal citations in the posted review. Search queries must not
+contain secrets, private source, or the full diff. Public code search requires
+GitHub authentication; cross-repository availability therefore depends on the
+configured token having access to the search results. GitHub API search limits
+apply, including the stricter code-search limit; rate-limit failures are
+advisory and do not fail a review.
+
+Repository and code search use the [GitHub REST search API](https://docs.github.com/en/rest/search/search);
+code search requires authentication, indexes only the default branch, and has a
+10-request-per-minute search limit. Issues, pull requests, and Discussions use
+fixed, schema-validated read-only GraphQL queries; the GraphQL documents are
+checked against GitHub's schema during lint. File and specific PR/issue reads use
+fixed REST endpoints. The current API contract references are the [REST
+specification](https://docs.github.com/en/rest) and [GraphQL
+schema](https://docs.github.com/en/graphql/reference).
 
 ## Doc context
 

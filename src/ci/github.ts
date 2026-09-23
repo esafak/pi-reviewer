@@ -132,6 +132,44 @@ export const githubGraphqlDocuments = {
   }`,
 } as const;
 
+export const githubResearchGraphqlDocuments = {
+  searchDiscussions: `query SearchDiscussions($query: String!, $first: Int!) {
+    search(query: $query, type: DISCUSSION, first: $first) {
+      nodes {
+        ... on Discussion {
+          title body number url createdAt updatedAt
+          repository { nameWithOwner visibility }
+        }
+      }
+    }
+  }`,
+  readDiscussion: `query ReadDiscussion($owner: String!, $name: String!, $number: Int!) {
+    repository(owner: $owner, name: $name) {
+      visibility
+      discussion(number: $number) {
+        title body number url createdAt updatedAt
+        repository { nameWithOwner visibility }
+      }
+    }
+  }`,
+  searchIssuesAndPullRequests: `query SearchIssuesAndPullRequests($query: String!, $first: Int!) {
+    search(query: $query, type: ISSUE, first: $first) {
+      nodes {
+        ... on Issue {
+          __typename number title body url createdAt updatedAt
+          issueState: state
+          repository { nameWithOwner visibility }
+        }
+        ... on PullRequest {
+          __typename number title body url createdAt updatedAt
+          pullRequestState: state
+          repository { nameWithOwner visibility }
+        }
+      }
+    }
+  }`,
+} as const;
+
 export class GitHubClient {
   constructor(
     private readonly token: string,
