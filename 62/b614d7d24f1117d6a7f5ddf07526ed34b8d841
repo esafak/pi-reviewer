@@ -1,0 +1,19 @@
+tests/core/deepwiki.test.ts
+  s_e654d1bf166a67::t_ae4e7fdd1c1398 46-70
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "62b614d7d24f1117d6a7f5ddf07526ed34b8d841",
+  "prompts": {},
+  "sessions": {
+    "s_e654d1bf166a67": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f342cfb5bffefoWIAKlLYckGVs",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "Emre Şafak <3928300+esafak@users.noreply.github.com>"
+    }
+  }
+}
