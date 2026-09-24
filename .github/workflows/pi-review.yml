@@ -119,5 +119,5 @@ jobs:
           github-research: 'true'
           ai-search: 'true'
           web-search: 'true'
-          mcp-config-file: '.github/mcp.json'
+          mcp-config-file: ${{ (github.event_name == 'issue_comment' || github.event_name == 'workflow_dispatch') && '.github/mcp.json' || '' }}
           cache: true

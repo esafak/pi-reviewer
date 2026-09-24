@@ -171,9 +171,12 @@ reviewer never calls are not connected.
 
 DeepWiki's public MCP server is supported as an ordinary entry in this file and
 does not require authentication. This repository's [`.github/mcp.json`](./.github/mcp.json)
-is a ready-to-use example, and the dogfooding workflow opts into it. Workflows
-that previously used a DeepWiki-specific action input or `/review --deepwiki`
-flag should configure the server through their MCP config instead.
+is a ready-to-use example. The dogfooding workflow uses it for issue-comment
+and manual-dispatch reviews; it leaves MCP off on pull-request events because
+those read config from the target branch, where the example may not exist until
+the PR is merged. Workflows that previously used a DeepWiki-specific action
+input or `/review --deepwiki` flag should configure the server through their
+MCP config instead.
 
 The `init` command is the generic, non-App setup. It runs only when invoked
 explicitly, creates the workflow only when `.github/workflows/pi-review.yml`
