@@ -54,6 +54,7 @@ export interface ReviewOptions {
   commitId?: string;
   model?: string; // format: "provider/modelId" e.g. "anthropic/claude-opus-4-6"
   thinking?: ThinkingLevel;
+  debug?: boolean;
   minSeverity?: MinSeverity;
   docDirs?: string[]; // dirs to scan for doc-context; empty = inject nothing (opt-in)
   deepwiki?: boolean;
@@ -64,6 +65,20 @@ export interface ReviewOptions {
   allowEmptyDiff?: boolean;
   priorSummary?: string;
   reactOnNoFindings?: boolean;
+}
+
+const MAX_DEBUG_TOOL_ARGS_LENGTH = 3000;
+
+function formatDebugToolArgs(args: unknown): string {
+  let serialized: string;
+  try {
+    serialized = JSON.stringify(args ?? {}) ?? "{}";
+  } catch {
+    return "[unserializable args]";
+  }
+  if (serialized.length <= MAX_DEBUG_TOOL_ARGS_LENGTH) return serialized;
+  const truncatedLength = serialized.length - MAX_DEBUG_TOOL_ARGS_LENGTH;
+  return `${serialized.slice(0, MAX_DEBUG_TOOL_ARGS_LENGTH)}… [truncated ${truncatedLength} chars]`;
 }
 
 const THINKING_LEVELS: readonly ThinkingLevel[] = [
@@ -342,7 +357,30 @@ export async function review(options: ReviewOptions): Promise<void> {
     const ended = new Promise<void>((resolve, reject) => {
       unsubscribe = agent.subscribe((event: unknown) => {
         if (!event || typeof event !== "object") return;
-        if ((event as { type?: string }).type !== "agent_end") return;
+        const eventType = (event as { type?: string }).type;
+        if (
+          options.debug &&
+          (eventType === "tool_execution_start" || eventType === "tool_execution_end")
+        ) {
+          const toolEvent = event as {
+            toolName?: unknown;
+            toolCallId?: unknown;
+            args?: unknown;
+            isError?: unknown;
+          };
+          const toolName = typeof toolEvent.toolName === "string" ? toolEvent.toolName : "unknown";
+          const callId =
+            typeof toolEvent.toolCallId === "string" ? ` id=${toolEvent.toolCallId}` : "";
+          if (eventType === "tool_execution_start") {
+            const args = formatDebugToolArgs(toolEvent.args);
+            console.log(`[pi-reviewer] tool call: ${toolName}${callId} args=${args}`);
+          } else {
+            console.log(
+              `[pi-reviewer] tool result: ${toolName}${callId} ${toolEvent.isError === true ? "error" : "success"}`,
+            );
+          }
+        }
+        if (eventType !== "agent_end") return;
 
         const ev = event as { messages?: unknown; stopReason?: string; errorMessage?: string };
         const msgs = Array.isArray(ev.messages) ? ev.messages : [];

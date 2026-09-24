@@ -170,9 +170,12 @@ const createReadOnlyToolsMock = vi.mocked(createReadOnlyTools);
 const createReviewToolMock = vi.mocked(createReviewTool);
 const createReplyToolMock = vi.mocked(createReplyTool);
 
+let fakeAgentEvents: unknown[] = [];
+
 function makeFakeAgent(text = "LGTM") {
   return {
     subscribe: vi.fn((cb: (event: unknown) => void) => {
+      for (const event of fakeAgentEvents) cb(event);
       cb({
         type: "agent_end",
         messages: [{ role: "assistant", content: [{ type: "text", text }] }],
@@ -186,6 +189,7 @@ function makeFakeAgent(text = "LGTM") {
 describe("review", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    fakeAgentEvents = [];
 
     resolveDiffMock.mockResolvedValue({
       diff: "diff --git a/a.ts b/a.ts",
@@ -330,6 +334,45 @@ describe("review", () => {
         initialState: expect.objectContaining({ thinkingLevel: "high" }),
       }),
     );
+  });
+
+  it("logs agent tool calls only when debug is enabled", async () => {
+    const circularArgs: Record<string, unknown> = {};
+    circularArgs.self = circularArgs;
+    fakeAgentEvents = [
+      {
+        type: "tool_execution_start",
+        toolName: "web_search",
+        toolCallId: "call-1",
+        args: { query: "AWS SDK ErrorMetadata export" },
+      },
+      { type: "tool_execution_end", toolName: "web_search", toolCallId: "call-1", isError: true },
+      { type: "tool_execution_start", toolName: "read_file", toolCallId: "call-2" },
+      { type: "tool_execution_start", toolName: "inspect", args: circularArgs },
+      { type: "tool_execution_start", toolName: "submit_review", args: { body: "x".repeat(5000) } },
+    ];
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await review({ cwd: "/repo", debug: true });
+
+    expect(logSpy).toHaveBeenCalledWith(
+      '[pi-reviewer] tool call: web_search id=call-1 args={"query":"AWS SDK ErrorMetadata export"}',
+    );
+    expect(logSpy).toHaveBeenCalledWith("[pi-reviewer] tool result: web_search id=call-1 error");
+    expect(logSpy).toHaveBeenCalledWith("[pi-reviewer] tool call: read_file id=call-2 args={}");
+    expect(logSpy).toHaveBeenCalledWith(
+      "[pi-reviewer] tool call: inspect args=[unserializable args]",
+    );
+    expect(logSpy).toHaveBeenCalledWith(
+      expect.stringMatching(
+        /^\[pi-reviewer\] tool call: submit_review args=.{3000}… \[truncated \d+ chars\]$/,
+      ),
+    );
+
+    logSpy.mockClear();
+    await review({ cwd: "/repo", debug: false });
+    expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining("tool call:"));
+    expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining("tool result:"));
   });
 
   it("uses comment output target in CI mode", async () => {

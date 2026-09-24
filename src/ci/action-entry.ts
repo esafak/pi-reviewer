@@ -287,6 +287,7 @@ async function main(): Promise<void> {
       output: "comment",
       minSeverity,
       thinking: parseThinkingLevel(process.env.PI_REVIEWER_THINKING),
+      debug: process.env.PI_REVIEWER_DEBUG === "true",
       piApiKey: process.env.PI_API_KEY,
       githubToken: token,
       repo,
