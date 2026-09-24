@@ -18,6 +18,7 @@ import {
 } from "./batch.js";
 import { fetchReplySnapshot, handleReply } from "./reply.js";
 import { recoverSynchronizeReplies } from "./recovery.js";
+import { loadMcpConfigFromBase, resolveDefaultBranchSha } from "./mcp-config.js";
 
 async function readEvent(): Promise<unknown> {
   const file = process.env.GITHUB_EVENT_PATH;
@@ -82,6 +83,14 @@ function ensureCommit(sha: string, ref: string | undefined, cwd = process.cwd())
     execFileSync("git", [...gitAuthArgs(), "fetch", "--no-tags", "origin", `+${sha}`], { cwd });
   }
   if (!hasCommit(sha, cwd)) throw new Error(`Git commit ${sha} is unavailable after fetching`);
+}
+
+function repositoryDefaultBranch(payload: unknown): string | undefined {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return undefined;
+  const repository = (payload as Record<string, unknown>).repository;
+  if (!repository || typeof repository !== "object" || Array.isArray(repository)) return undefined;
+  const branch = (repository as Record<string, unknown>).default_branch;
+  return typeof branch === "string" ? branch : undefined;
 }
 
 async function main(): Promise<void> {
@@ -258,6 +267,16 @@ async function main(): Promise<void> {
     console.log("[pi-reviewer] current head was already reviewed");
     return;
   }
+  const mcpConfigPath = process.env.PI_REVIEWER_MCP_CONFIG_FILE;
+  let mcpConfig;
+  let trustedDefaultBranchSha: string | undefined;
+  if (mcpConfigPath?.trim()) {
+    const defaultBranch = repositoryDefaultBranch(payload);
+    if (!defaultBranch)
+      throw new Error("Cannot load mcp-config-file: repository default branch is unavailable");
+    trustedDefaultBranchSha = resolveDefaultBranchSha(process.cwd(), defaultBranch, gitAuthArgs());
+    mcpConfig = loadMcpConfigFromBase(process.cwd(), trustedDefaultBranchSha, mcpConfigPath);
+  }
   const minSeverityRaw = process.env.MIN_SEVERITY?.toUpperCase();
   const minSeverity =
     minSeverityRaw === "CRITICAL" || minSeverityRaw === "WARN" || minSeverityRaw === "INFO"
@@ -272,7 +291,20 @@ async function main(): Promise<void> {
   });
   console.log(`[pi-reviewer] reviewing PR #${event.pr}: ${range.fromSha}..${range.toSha}`);
   const worktree = await mkdtemp(path.join(tmpdir(), "pi-reviewer-"));
+  let trustedMcpWorktree: string | undefined;
   try {
+    if (
+      mcpConfig &&
+      trustedDefaultBranchSha &&
+      Object.values(mcpConfig.mcpServers).some((server) => typeof server.command === "string")
+    ) {
+      trustedMcpWorktree = await mkdtemp(path.join(tmpdir(), "pi-reviewer-mcp-trusted-"));
+      execFileSync(
+        "git",
+        ["worktree", "add", "--detach", trustedMcpWorktree, trustedDefaultBranchSha],
+        { cwd: process.cwd() },
+      );
+    }
     execFileSync("git", ["worktree", "add", "--detach", worktree, head], { cwd: process.cwd() });
     await review({
       cwd: worktree,
@@ -292,7 +324,8 @@ async function main(): Promise<void> {
       githubToken: token,
       repo,
       reactOnNoFindings: process.env.REACT_ON_NO_FINDINGS === "true",
-      deepwiki: process.env.PI_REVIEWER_DEEPWIKI === "true",
+      mcpConfig,
+      mcpServerCwd: trustedMcpWorktree,
     });
     if (event.kind === "synchronize") {
       const latest = await github.getPullRequest(repo, event.pr!);
@@ -322,6 +355,16 @@ async function main(): Promise<void> {
       });
     } catch {
       await rm(worktree, { recursive: true, force: true });
+    }
+    if (trustedMcpWorktree) {
+      try {
+        execFileSync("git", ["worktree", "remove", "--force", trustedMcpWorktree], {
+          cwd: process.cwd(),
+          stdio: "ignore",
+        });
+      } catch {
+        await rm(trustedMcpWorktree, { recursive: true, force: true });
+      }
     }
   }
 }

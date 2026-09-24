@@ -50,16 +50,27 @@ describe("GitHub Action Vite+ setup", () => {
     );
   });
 
-  it("maps the opt-in DeepWiki input to the CI environment", async () => {
+  it("maps the optional MCP config path to the CI environment", async () => {
     const action = await readFile(path.join(process.cwd(), "action.yml"), "utf8");
-    expect(action).toContain('default: "false"');
-    expect(action).toContain("PI_REVIEWER_DEEPWIKI: ${{ inputs.deepwiki }}");
+    expect(action).toContain("mcp-config-file:");
+    expect(action).toContain("PI_REVIEWER_MCP_CONFIG_FILE: ${{ inputs.mcp-config-file }}");
+    expect(action).not.toContain("PI_REVIEWER_DEEPWIKI");
+    expect(action).not.toMatch(/^  deepwiki:/m);
   });
 
   it("maps the opt-in debug input to the CI environment", async () => {
     const action = await readFile(path.join(process.cwd(), "action.yml"), "utf8");
     expect(action).toContain("PI_REVIEWER_DEBUG: ${{ inputs.debug }}");
     expect(action).toContain('default: "false"');
+  });
+
+  it("loads MCP config from the repository default branch", async () => {
+    const entry = await readFile(path.join(process.cwd(), "src/ci/action-entry.ts"), "utf8");
+    expect(entry).toContain("PI_REVIEWER_MCP_CONFIG_FILE");
+    expect(entry).toContain("resolveDefaultBranchSha(");
+    expect(entry).toContain("loadMcpConfigFromBase(process.cwd(), trustedDefaultBranchSha");
+    expect(entry).toContain("trustedMcpWorktree");
+    expect(entry).toContain("mcpConfig,");
   });
 
   it("keeps the action manifest valid YAML", async () => {

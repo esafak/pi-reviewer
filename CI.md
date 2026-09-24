@@ -74,8 +74,8 @@ jobs:
           # Opt in to injecting matching project docs into the review.
           # Comma-separated dirs scanned for .md files with a 'description' frontmatter.
           # doc-dirs: '.pi/notes,docs/review'
-          # Optional DeepWiki AI code search tool.
-          # deepwiki: 'true'
+          # Optional user-configured MCP servers (config is read from the default branch).
+          # mcp-config-file: '.github/mcp.json'
           # Optional web search configuration.
           # Exa/Brave use EXA_API_KEY/BRAVE_SEARCH_API_KEY; DuckDuckGo regular
           # search uses a fixed unauthenticated endpoint and has no AI mode.
@@ -86,6 +86,74 @@ jobs:
           # github-research: 'true' # optional, read-only GitHub search/read tools
           # github-scope: 'public' # or 'token-accessible'; defaults to public
 ```
+
+### User-configured MCP servers
+
+MCP is opt-in for CI PR comment reviews. Add a JSON config file to the repository's
+default branch, then set `mcp-config-file` to its repository-relative path. The
+action reads the file from the default-branch ref—not from the PR head or the PR
+merge commit—so a pull request cannot change which MCP commands run. If the file
+does not exist on the default branch, the review fails rather than falling back
+to PR-controlled content. MCP tools are not enabled for local runs, replies,
+dry-runs, or non-comment output.
+
+```yaml
+      - uses: esafak/pi-reviewer@main
+        env:
+          DOCS_MCP_TOKEN: ${{ secrets.DOCS_MCP_TOKEN }}
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          model: openrouter/openai/gpt-5.4-mini
+          mcp-config-file: .github/mcp.json
+```
+
+Example `.github/mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "deepwiki": {
+      "url": "https://mcp.deepwiki.com/mcp",
+      "auth": false
+    },
+    "internal-docs": {
+      "url": "https://mcp.example.com/mcp",
+      "auth": "bearer",
+      "bearerTokenEnv": "DOCS_MCP_TOKEN"
+    }
+  }
+}
+```
+
+The adapter resolves `bearerTokenEnv` and `${ENV_VAR}` references in supported
+config fields before sending requests; MCP servers receive ordinary auth
+headers and do not need to support variable substitution. Keep credentials in
+GitHub Secrets and map them into the action step's `env:`; never commit literal
+tokens in the MCP file. Static bearer tokens and API-key headers are supported.
+If `auth` is omitted, CI disables automatic OAuth discovery; set `auth: false`
+for an anonymous server or `auth: bearer` with `bearerTokenEnv` for a bearer
+token. Interactive and client-credentials OAuth are not supported in this
+release.
+
+Use remote HTTP MCP servers where possible. Local stdio server commands execute
+on the workflow runner from a temporary checkout of the trusted default-branch
+revision, never from the PR worktree. To limit inherited secrets, the action
+disables ambient environment inheritance for stdio servers; provide only
+required variables in the server's explicit `env` mapping. The action supports
+`mcpServers` and `settings` in the config; it does not load imported configs,
+Claude/agent plugin bundles, or `settings.agentPluginPaths`. Only configure
+servers you trust: their tool output is available to the reviewer and their
+requests may receive diff or repository context. MCP output is treated as
+untrusted reference data, not instructions. When `debug: true`, MCP calls log
+tool names and status only; their arguments, results, and credentials are not
+logged. If the reviewer actually calls a configured MCP tool and that call
+fails, pi-reviewer does not post a potentially incomplete review. Servers the
+reviewer never calls are not connected.
+
+DeepWiki's public MCP server is supported as an ordinary entry in this file; it
+does not require authentication. The former `deepwiki` action input has been
+removed. Existing workflows that enabled it should add the server definition
+above and configure `mcp-config-file`.
 
 The `init` command is the generic, non-App setup. It runs only when invoked
 explicitly, creates the workflow only when `.github/workflows/pi-review.yml`

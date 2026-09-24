@@ -119,5 +119,4 @@ jobs:
           github-research: 'true'
           ai-search: 'true'
           web-search: 'true'
-          deepwiki: 'true'
           cache: true

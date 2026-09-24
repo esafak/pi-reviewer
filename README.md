@@ -59,7 +59,7 @@ Theme, view mode, default model, and thinking level are remembered across review
 
 ## CI Agent
 
-Runs on PR lifecycle events via GitHub Actions. Reviews are grouped by event batch, with authenticated GitHub review markers and durable inline-thread reconciliation; no LLM session replay is required. See [CI.md](./CI.md) for setup and policy.
+Runs on PR lifecycle events via GitHub Actions. Reviews are grouped by event batch, with authenticated GitHub review markers and durable inline-thread reconciliation; no LLM session replay is required. CI can opt into user-configured MCP servers with the `mcp-config-file` action input; the file is loaded from the repository's default branch and credentials are passed through environment variables. See [CI.md](./CI.md) for setup and policy.
 
 ---
 
