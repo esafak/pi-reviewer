@@ -528,6 +528,74 @@ describe("review", () => {
     });
   });
 
+  it("allows a failed MCP call when a retry of that tool succeeds", async () => {
+    fakeAgentEvents = [
+      {
+        type: "tool_execution_start",
+        toolName: "mcp",
+        toolCallId: "mcp-failed-attempt",
+        args: { server: "docs", tool: "search_docs", args: { query: "x" } },
+      },
+      {
+        type: "tool_execution_end",
+        toolName: "mcp",
+        toolCallId: "mcp-failed-attempt",
+        isError: true,
+      },
+      {
+        type: "tool_execution_start",
+        toolName: "mcp",
+        toolCallId: "mcp-successful-retry",
+        args: { server: "docs", tool: "search_docs", args: { query: "x" } },
+      },
+      {
+        type: "tool_execution_end",
+        toolName: "mcp",
+        toolCallId: "mcp-successful-retry",
+        isError: false,
+      },
+    ];
+    const mcpConfig: CiMcpConfig = { mcpServers: { docs: { url: "https://mcp.example/mcp" } } };
+
+    await expect(review({ cwd: "/repo", output: "comment", mcpConfig })).resolves.toBeUndefined();
+    expect(sendOutputMock).toHaveBeenCalled();
+  });
+
+  it("does not let success from a different MCP tool hide a failed call", async () => {
+    fakeAgentEvents = [
+      {
+        type: "tool_execution_start",
+        toolName: "mcp",
+        toolCallId: "mcp-failed-search",
+        args: { server: "docs", tool: "search_docs", args: { query: "x" } },
+      },
+      {
+        type: "tool_execution_end",
+        toolName: "mcp",
+        toolCallId: "mcp-failed-search",
+        isError: true,
+      },
+      {
+        type: "tool_execution_start",
+        toolName: "mcp",
+        toolCallId: "mcp-successful-fetch",
+        args: { server: "docs", tool: "fetch_doc", args: { id: "1" } },
+      },
+      {
+        type: "tool_execution_end",
+        toolName: "mcp",
+        toolCallId: "mcp-successful-fetch",
+        isError: false,
+      },
+    ];
+    const mcpConfig: CiMcpConfig = { mcpServers: { docs: { url: "https://mcp.example/mcp" } } };
+
+    await expect(review({ cwd: "/repo", output: "comment", mcpConfig })).rejects.toThrow(
+      "A configured MCP tool call failed; refusing to post the review",
+    );
+    expect(sendOutputMock).not.toHaveBeenCalled();
+  });
+
   it("removes adapter spill files after the review session shuts down", async () => {
     const outputDir = await mkdtemp(path.join(tmpdir(), "pi-mcp-output-test-"));
     const outputFile = path.join(outputDir, "output-1234abcd.txt");

@@ -90,21 +90,34 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function sanitizeMcpDebugName(value: string): string {
+  const sanitized = [...value]
+    .map((char) => {
+      const code = char.charCodeAt(0);
+      return code < 0x20 || code === 0x7f ? " " : char;
+    })
+    .join("")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 160);
+  return sanitized || "unknown";
+}
+
 function mcpDebugToolName(
   toolName: string,
   args: unknown,
   registeredMcpTools: Set<string>,
 ): string | undefined {
   if (toolName !== "mcp" && !registeredMcpTools.has(toolName)) return undefined;
-  if (toolName !== "mcp") return toolName;
+  if (toolName !== "mcp") return sanitizeMcpDebugName(toolName);
   if (!isRecord(args)) return "mcp";
   if (typeof args.tool === "string") {
     const server = typeof args.server === "string" ? `${args.server}/` : "";
-    return `${server}${args.tool}`;
+    return sanitizeMcpDebugName(`${server}${args.tool}`);
   }
   if (typeof args.search === "string") return "search";
-  if (typeof args.connect === "string") return `connect:${args.connect}`;
-  if (typeof args.action === "string") return args.action;
+  if (typeof args.connect === "string") return sanitizeMcpDebugName(`connect:${args.connect}`);
+  if (typeof args.action === "string") return sanitizeMcpDebugName(args.action);
   return "mcp";
 }
 
@@ -388,7 +401,7 @@ export async function review(options: ReviewOptions): Promise<void> {
   const mcpToolCalls = new Map<string, string>();
   const mcpOutputArtifacts = new Set<string>();
   let restoreMcpEnvironment = () => {};
-  let mcpToolFailed = false;
+  const failedMcpTools = new Set<string>();
   if (mcpConfig) {
     const agentDir = await mkdtemp(path.join(tmpdir(), "pi-reviewer-agent-"));
     let session: Awaited<ReturnType<typeof createAgentSession>>["session"] | undefined;
@@ -591,7 +604,8 @@ export async function review(options: ReviewOptions): Promise<void> {
               console.log(`[pi-reviewer] tool call: ${rawToolName}${callId} args=${args}`);
             }
           } else {
-            if (mcpName && toolEvent.isError === true) mcpToolFailed = true;
+            if (mcpName && toolEvent.isError === true) failedMcpTools.add(mcpName);
+            else if (mcpName) failedMcpTools.delete(mcpName);
             const outputArtifact = mcpName
               ? mcpOutputArtifactDirectory(toolEvent.result)
               : undefined;
@@ -677,9 +691,11 @@ export async function review(options: ReviewOptions): Promise<void> {
 
     await agent.prompt(userPrompt);
     await ended;
-    if (mcpToolFailed) {
+    if (failedMcpTools.size > 0) {
+      const failedTools = [...failedMcpTools].slice(0, 5).map(sanitizeMcpDebugName);
+      const additional = failedMcpTools.size > failedTools.length ? " and other MCP tools" : "";
       console.error(
-        "[pi-reviewer] a configured MCP tool call failed; check server availability and auth. Review not posted.",
+        `[pi-reviewer] MCP tool call failed (${failedTools.join(", ")}${additional}); check server availability and auth. Review not posted.`,
       );
       throw new Error("A configured MCP tool call failed; refusing to post the review");
     }

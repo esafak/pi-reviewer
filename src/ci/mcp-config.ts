@@ -19,6 +19,29 @@ function hasControlCharacters(value: string): boolean {
   });
 }
 
+function isEnvironmentReference(value: string): boolean {
+  return /\$\{[A-Za-z_][A-Za-z0-9_]*\}|\$env:[A-Za-z_][A-Za-z0-9_]*/.test(value);
+}
+
+function isCredentialField(name: string): boolean {
+  return /authorization|api[-_]?key|(?:^|[-_])key(?:$|[-_])|token|secret|credential|password|passphrase|cookie/i.test(
+    name,
+  );
+}
+
+function validateCredentialReferences(
+  record: Record<string, unknown>,
+  label: string,
+  field: string,
+): void {
+  for (const [name, value] of Object.entries(record)) {
+    if (isCredentialField(name) && (typeof value !== "string" || !isEnvironmentReference(value)))
+      throw new Error(
+        `${label} credential ${field} "${name}" must reference an environment variable`,
+      );
+  }
+}
+
 export function validateMcpConfig(value: unknown, label = "MCP config"): CiMcpConfig {
   if (!isRecord(value) || !isRecord(value.mcpServers))
     throw new Error(`${label} must contain an mcpServers object`);
@@ -33,6 +56,11 @@ export function validateMcpConfig(value: unknown, label = "MCP config"): CiMcpCo
   for (const [name, definition] of entries) {
     if (!name.trim() || !isRecord(definition))
       throw new Error(`${label} contains an invalid MCP server definition`);
+    if (typeof definition.url === "string") {
+      const authority = definition.url.match(/^[A-Za-z][A-Za-z0-9+.-]*:\/\/([^/?#]*)/)?.[1];
+      if (authority?.includes("@"))
+        throw new Error(`${label} server URL must not contain embedded credentials`);
+    }
     if (
       definition.auth === "oauth" ||
       (definition.oauth !== undefined && definition.oauth !== false)
@@ -43,6 +71,15 @@ export function validateMcpConfig(value: unknown, label = "MCP config"): CiMcpCo
       !/^\$(?:\{[A-Za-z_][A-Za-z0-9_]*\}|env:[A-Za-z_][A-Za-z0-9_]*)$/.test(definition.bearerToken)
     )
       throw new Error(`${label} bearerToken must reference an environment variable`);
+    if (
+      definition.bearerTokenEnv !== undefined &&
+      (typeof definition.bearerTokenEnv !== "string" ||
+        !/^[A-Za-z_][A-Za-z0-9_]*$/.test(definition.bearerTokenEnv))
+    )
+      throw new Error(`${label} bearerTokenEnv must be an environment variable name`);
+    if (isRecord(definition.headers))
+      validateCredentialReferences(definition.headers, label, "header");
+    if (isRecord(definition.env)) validateCredentialReferences(definition.env, label, "env value");
     if (definition.auth !== undefined && definition.auth !== false && definition.auth !== "bearer")
       throw new Error(`${label} contains an unsupported MCP authentication mode`);
   }

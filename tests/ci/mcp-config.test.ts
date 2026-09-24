@@ -44,6 +44,16 @@ describe("MCP CI config", () => {
         mcpServers: { docs: { url: "https://mcp.example.com/mcp", bearerToken: "${DOCS_TOKEN}" } },
       }).mcpServers.docs.bearerToken,
     ).toBe("${DOCS_TOKEN}");
+    expect(
+      validateMcpConfig({
+        mcpServers: {
+          docs: {
+            url: "https://mcp.example.com/mcp",
+            headers: { Authorization: "Bearer ${DOCS_TOKEN}", "X-API-Key": "$env:DOCS_KEY" },
+          },
+        },
+      }).mcpServers.docs.headers,
+    ).toEqual({ Authorization: "Bearer ${DOCS_TOKEN}", "X-API-Key": "$env:DOCS_KEY" });
   });
 
   it.each([
@@ -198,5 +208,31 @@ describe("MCP CI config", () => {
         mcpServers: { docs: { url: "https://mcp.example/mcp", bearerToken: "literal-secret" } },
       }),
     ).toThrow("MCP config bearerToken must reference an environment variable");
+    expect(() =>
+      validateMcpConfig({
+        mcpServers: {
+          docs: { url: "https://mcp.example/mcp", headers: { Authorization: "Bearer literal" } },
+        },
+      }),
+    ).toThrow(
+      'MCP config credential header "Authorization" must reference an environment variable',
+    );
+    expect(() =>
+      validateMcpConfig({
+        mcpServers: { docs: { url: "https://mcp.example/mcp", bearerTokenEnv: "DOCS-TOKEN" } },
+      }),
+    ).toThrow("MCP config bearerTokenEnv must be an environment variable name");
+    expect(() =>
+      validateMcpConfig({
+        mcpServers: {
+          local: { command: "node", env: { API_TOKEN: "literal-secret" } },
+        },
+      }),
+    ).toThrow('MCP config credential env value "API_TOKEN" must reference an environment variable');
+    expect(() =>
+      validateMcpConfig({
+        mcpServers: { docs: { url: "https://user:secret@mcp.example/mcp" } },
+      }),
+    ).toThrow("MCP config server URL must not contain embedded credentials");
   });
 });
