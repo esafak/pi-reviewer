@@ -20,6 +20,11 @@ inputs:
     required: false
     default: "off"
 
+  debug:
+    description: "Log agent tool calls and their arguments to the workflow log (default: false). Arguments may contain review context."
+    required: false
+    default: "false"
+
   min-severity:
     description: "Minimum severity level to report: info, warn, or critical (default: info)"
     required: false
@@ -330,6 +335,7 @@ runs:
         REVIEW_DRAFTS: ${{ inputs.review-drafts }}
         PI_REVIEWER_MODEL: ${{ inputs.model }}
         PI_REVIEWER_THINKING: ${{ inputs.thinking }}
+        PI_REVIEWER_DEBUG: ${{ inputs.debug }}
         MIN_SEVERITY: ${{ inputs.min-severity }}
         REACT_ON_NO_FINDINGS: ${{ inputs.react-on-no-findings }}
         PI_REVIEWER_DOC_DIRS: ${{ inputs.doc-dirs }}
