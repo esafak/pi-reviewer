@@ -1,0 +1,43 @@
+action.yml
+  s_c2ba98b9623f90::t_782b67227afe85 23-27,338
+src/ci/action-entry.ts
+  s_c2ba98b9623f90::t_dc8f03c19fdd63 290
+src/ci/review.ts
+  s_bc2ef67d7561ed::t_d9e4d594c261b8 57,70-83,360-383
+tests/ci/action.test.ts
+  s_e7763f3ad52e95::t_e2726e931432ab 59-64
+tests/ci/review.test.ts
+  s_bc2ef67d7561ed::t_463b35544e21af 173-174,178,192,339-377
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "34b4478ad18b4dc31c4a021b41d3b4c205ec23fa",
+  "prompts": {},
+  "sessions": {
+    "s_bc2ef67d7561ed": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f2bee2adcffe7UPMd0WTC8HS4W",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "Emre Şafak <3928300+esafak@users.noreply.github.com>"
+    },
+    "s_c2ba98b9623f90": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f2c5fc9f5ffeCgWffuSkTZJlEh",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "Emre Şafak <3928300+esafak@users.noreply.github.com>"
+    },
+    "s_e7763f3ad52e95": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f2c1f3530ffeJBgh0cNf5rZoam",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "Emre Şafak <3928300+esafak@users.noreply.github.com>"
+    }
+  }
+}
