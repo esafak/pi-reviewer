@@ -21,7 +21,7 @@ inputs:
     default: "off"
 
   debug:
-    description: "Log agent tool calls and their arguments to the workflow log (default: false). Arguments may contain review context."
+    description: "Log tool calls to the workflow log (default: false)."
     required: false
     default: "false"
 
@@ -31,14 +31,13 @@ inputs:
     default: "info"
 
   doc-dirs:
-    description: "Comma-separated dirs to scan for matching docs to inject into the review (e.g. '.pi/notes,docs/review'). Empty = inject nothing."
+    description: "Comma-separated dirs to scan for matching docs to inject into the review."
     required: false
     default: ""
 
-  deepwiki:
-    description: "Enable the reviewer agent's DeepWiki lookup tool (default: false)."
+  mcp-config-file:
+    description: "Optional repository-relative MCP JSON config path, read from the repository default branch."
     required: false
-    default: "false"
 
   web-search:
     description: "Enable optional regular CI web search (default: false)."
@@ -339,7 +338,7 @@ runs:
         MIN_SEVERITY: ${{ inputs.min-severity }}
         REACT_ON_NO_FINDINGS: ${{ inputs.react-on-no-findings }}
         PI_REVIEWER_DOC_DIRS: ${{ inputs.doc-dirs }}
-        PI_REVIEWER_DEEPWIKI: ${{ inputs.deepwiki }}
+        PI_REVIEWER_MCP_CONFIG_FILE: ${{ inputs.mcp-config-file }}
         PI_REVIEWER_WEB_SEARCH: ${{ inputs.web-search }}
         PI_REVIEWER_SEARCH_PROVIDER: ${{ inputs.search-provider || env.PI_REVIEWER_SEARCH_PROVIDER }}
         PI_REVIEWER_AI_SEARCH: ${{ inputs.ai-search }}

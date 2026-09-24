@@ -33,7 +33,6 @@ export interface ReviewCommandArgs {
   minSeverity?: MinSeverity;
   model?: string;
   thinking?: string;
-  deepwiki?: boolean;
 }
 
 export function parseArgs(rawArgs: string): ReviewCommandArgs {
@@ -55,11 +54,6 @@ export function parseArgs(rawArgs: string): ReviewCommandArgs {
 
     if (token === "--ui") {
       parsed.ui = true;
-      continue;
-    }
-
-    if (token === "--deepwiki") {
-      parsed.deepwiki = true;
       continue;
     }
 

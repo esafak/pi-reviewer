@@ -10,18 +10,12 @@ vi.mock("../../../src/core/context.js", async (importActual) => {
   return { ...actual, loadContext: vi.fn(), collectProviderContext: vi.fn() };
 });
 
-vi.mock("../../../src/core/deepwiki.js", async (importActual) => {
-  const actual = await importActual<typeof import("../../../src/core/deepwiki.js")>();
-  return { ...actual, resolvePublicGitHubRepo: vi.fn().mockResolvedValue("owner/project") };
-});
-
 vi.mock("../../../src/core/ui/server/index.js", () => ({
   readDefaultBranch: vi.fn().mockReturnValue(undefined),
 }));
 
 import { resolveDiff } from "../../../src/core/diff-resolver.js";
 import { loadContext, collectProviderContext } from "../../../src/core/context.js";
-import { resolvePublicGitHubRepo } from "../../../src/core/deepwiki.js";
 import { handleDryRun } from "../../../extensions/pi-reviewer/handlers/dry-run.js";
 import type { ReviewCommandArgs } from "../../../extensions/pi-reviewer/args.js";
 
@@ -110,16 +104,6 @@ describe("handleDryRun — SSH path", () => {
 });
 
 describe("handleDryRun — local path", () => {
-  it("includes the repo-specific DeepWiki instruction when enabled", async () => {
-    const opts = makeOpts({ deepwiki: true });
-    await handleDryRun(opts);
-    const systemPrompt = opts.notify.mock.calls.find((args) =>
-      String(args[0]).includes("System prompt:"),
-    )?.[0];
-    expect(resolvePublicGitHubRepo).toHaveBeenCalledWith("/project");
-    expect(systemPrompt).toContain('repository under review ("owner/project")');
-  });
-
   it("calls resolveDiff with parsed options", async () => {
     const opts = makeOpts({ branch: "dev" });
     await handleDryRun(opts);

@@ -1,4 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { access, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 
 vi.mock("../../src/core/diff-resolver.js", () => ({
   resolveDiff: vi.fn(),
@@ -8,14 +11,6 @@ vi.mock("../../src/core/diff-resolver.js", () => ({
 vi.mock("../../src/core/doc-context.js", () => ({
   loadDocContext: vi.fn().mockResolvedValue([]),
 }));
-
-vi.mock("../../src/core/deepwiki.js", async (importActual) => {
-  const actual = await importActual<typeof import("../../src/core/deepwiki.js")>();
-  return {
-    ...actual,
-    createDeepWikiTool: vi.fn(() => ({ name: "deepwiki", label: "deepwiki" })),
-  };
-});
 
 vi.mock("../../src/core/context.js", () => ({
   loadContext: vi.fn(),
@@ -33,6 +28,15 @@ vi.mock("@earendil-works/pi-agent-core", () => ({
 
 vi.mock("@earendil-works/pi-coding-agent", () => ({
   createReadOnlyTools: vi.fn().mockReturnValue([]),
+  createAgentSession: vi.fn(),
+  DefaultResourceLoader: vi.fn(function () {
+    return { reload: vi.fn().mockResolvedValue(undefined) };
+  }),
+  SessionManager: { inMemory: vi.fn(() => ({})) },
+}));
+
+vi.mock("pi-mcp-adapter", () => ({
+  createMcpAdapter: vi.fn(() => () => {}),
 }));
 
 vi.mock("../../src/core/review-tool.js", () => ({
@@ -63,13 +67,15 @@ vi.mock("../../src/core/reply-tool.js", () => ({
 }));
 
 import { Agent } from "@earendil-works/pi-agent-core";
-import { createReadOnlyTools } from "@earendil-works/pi-coding-agent";
+import { createAgentSession, createReadOnlyTools } from "@earendil-works/pi-coding-agent";
+import { createMcpAdapter } from "pi-mcp-adapter";
 import { loadContext } from "../../src/core/context.js";
 import { resolveDiff } from "../../src/core/diff-resolver.js";
 import { loadDocContext } from "../../src/core/doc-context.js";
 import { sendOutput } from "../../src/core/output.js";
 import { createReviewTool } from "../../src/core/review-tool.js";
 import { createReplyTool } from "../../src/core/reply-tool.js";
+import type { CiMcpConfig } from "../../src/ci/mcp-config.js";
 import {
   ALLOWED_REACTIONS,
   buildReplyPrompt,
@@ -167,10 +173,13 @@ const loadDocContextMock = vi.mocked(loadDocContext);
 const sendOutputMock = vi.mocked(sendOutput);
 const AgentMock = vi.mocked(Agent);
 const createReadOnlyToolsMock = vi.mocked(createReadOnlyTools);
+const createAgentSessionMock = vi.mocked(createAgentSession);
+const createMcpAdapterMock = vi.mocked(createMcpAdapter);
 const createReviewToolMock = vi.mocked(createReviewTool);
 const createReplyToolMock = vi.mocked(createReplyTool);
 
 let fakeAgentEvents: unknown[] = [];
+let fakeMcpSession: ReturnType<typeof makeFakeMcpSession>;
 
 function makeFakeAgent(text = "LGTM") {
   return {
@@ -186,10 +195,37 @@ function makeFakeAgent(text = "LGTM") {
   };
 }
 
+function makeFakeMcpSession() {
+  const mcpTool = { name: "mcp", label: "mcp", execute: vi.fn() };
+  const agent = Object.assign(makeFakeAgent(), {
+    state: {
+      systemPrompt: "",
+      model: undefined,
+      thinkingLevel: "off",
+      tools: [mcpTool],
+    },
+    streamFunction: vi.fn(),
+    getApiKey: vi.fn(),
+  });
+  const registered = [{ definition: { name: "mcp" } }];
+  return {
+    agent,
+    extensionRunner: {
+      getAllRegisteredTools: vi.fn(() => registered),
+      emit: vi.fn().mockResolvedValue(undefined),
+    },
+    setActiveToolsByName: vi.fn((names: string[]) => {
+      agent.state.tools = names.includes("mcp") ? [mcpTool] : [];
+    }),
+    dispose: vi.fn(),
+  };
+}
+
 describe("review", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     fakeAgentEvents = [];
+    fakeMcpSession = makeFakeMcpSession();
 
     resolveDiffMock.mockResolvedValue({
       diff: "diff --git a/a.ts b/a.ts",
@@ -201,6 +237,8 @@ describe("review", () => {
     });
     sendOutputMock.mockResolvedValue(undefined);
     createReadOnlyToolsMock.mockReturnValue([]);
+    createAgentSessionMock.mockResolvedValue({ session: fakeMcpSession } as never);
+    createMcpAdapterMock.mockReturnValue((() => {}) as never);
     createReviewToolMock.mockReturnValue({
       tool: {
         name: "submit_review",
@@ -233,7 +271,7 @@ describe("review", () => {
     delete process.env.ANTHROPIC_API_KEY;
     delete process.env.ZAI_API_KEY;
     delete process.env.PI_REVIEWER_DOC_DIRS;
-    delete process.env.PI_REVIEWER_DEEPWIKI;
+    delete process.env.PI_REVIEWER_MCP_CONFIG_FILE;
     delete process.env.PI_REVIEWER_WEB_SEARCH;
     delete process.env.PI_REVIEWER_SEARCH_PROVIDER;
     delete process.env.PI_REVIEWER_SEARCH_REQUIRED;
@@ -266,11 +304,9 @@ describe("review", () => {
     expect(sendOutputMock).not.toHaveBeenCalled();
   });
 
-  it("does not register the DeepWiki tool by default", async () => {
+  it("does not create an MCP session by default", async () => {
     await review({ cwd: "/repo", repo: "owner/repo" });
-    expect(AgentMock.mock.calls[0][0].initialState.tools).not.toEqual(
-      expect.arrayContaining([expect.objectContaining({ name: "deepwiki" })]),
-    );
+    expect(createAgentSessionMock).not.toHaveBeenCalled();
   });
 
   it("uses terminal output target in local mode", async () => {
@@ -300,30 +336,68 @@ describe("review", () => {
     );
   });
 
-  it("registers DeepWiki as an opt-in tool and instructs the agent to avoid the reviewed repo", async () => {
-    await review({ cwd: "/repo", repo: "owner/repo", deepwiki: true, output: "comment" });
+  it("does not create an MCP session for non-comment output", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const mcpConfig: CiMcpConfig = { mcpServers: { docs: { url: "https://mcp.example/mcp" } } };
+    await review({ cwd: "/repo", mcpConfig, output: "terminal" });
 
-    expect(AgentMock.mock.calls[0][0].initialState.tools).toEqual(
-      expect.arrayContaining([expect.objectContaining({ name: "deepwiki" })]),
-    );
-    expect(AgentMock.mock.calls[0][0].initialState.systemPrompt).toContain(
-      'repository under review ("owner/repo")',
+    expect(createAgentSessionMock).not.toHaveBeenCalled();
+    expect(AgentMock).toHaveBeenCalled();
+    expect(warnSpy).toHaveBeenCalledWith(
+      "[pi-reviewer] MCP disabled; only available for CI comment-output reviews",
     );
   });
 
-  it("does not provide DeepWiki to terminal-output reviews even when enabled", async () => {
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    await review({ cwd: "/repo", repo: "owner/repo", deepwiki: true, output: "terminal" });
+  it("registers configured MCP tools only for comment output and shuts the extension down", async () => {
+    const mcpConfig: CiMcpConfig = {
+      mcpServers: { docs: { url: "https://mcp.example/mcp", auth: "bearer" } },
+    };
+    const previousOutputGuard = process.env.MCP_OUTPUT_GUARD;
+    const previousUiDebug = process.env.MCP_UI_DEBUG;
+    process.env.MCP_OUTPUT_GUARD = "0";
+    process.env.MCP_UI_DEBUG = "1";
+    try {
+      await review({ cwd: "/repo", repo: "owner/repo", mcpConfig, output: "comment" });
+      expect(process.env.MCP_OUTPUT_GUARD).toBe("0");
+      expect(process.env.MCP_UI_DEBUG).toBe("1");
+    } finally {
+      if (previousOutputGuard === undefined) delete process.env.MCP_OUTPUT_GUARD;
+      else process.env.MCP_OUTPUT_GUARD = previousOutputGuard;
+      if (previousUiDebug === undefined) delete process.env.MCP_UI_DEBUG;
+      else process.env.MCP_UI_DEBUG = previousUiDebug;
+    }
 
-    expect(AgentMock.mock.calls[0][0].initialState.tools).not.toEqual(
-      expect.arrayContaining([expect.objectContaining({ name: "deepwiki" })]),
+    expect(createAgentSessionMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cwd: "/repo",
+        tools: ["read", "grep", "find", "mcp"],
+        sessionManager: expect.anything(),
+        resourceLoader: expect.anything(),
+      }),
     );
-    expect(AgentMock.mock.calls[0][0].initialState.systemPrompt).not.toContain(
-      "When considering deepwiki",
+    expect(createMcpAdapterMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        config: expect.objectContaining({
+          settings: expect.objectContaining({ allowInstall: false }),
+          mcpServers: {
+            docs: { url: "https://mcp.example/mcp", auth: "bearer", debug: false },
+          },
+        }),
+      }),
     );
-    expect(warnSpy).toHaveBeenCalledWith(
-      "[pi-reviewer] DeepWiki disabled; only available for comment-output reviews",
+    expect(fakeMcpSession.setActiveToolsByName).toHaveBeenCalledWith(
+      expect.arrayContaining(["mcp", "read", "grep", "find", "submit_review"]),
     );
+    expect(fakeMcpSession.agent.prompt).toHaveBeenCalled();
+    expect(fakeMcpSession.agent.state.systemPrompt).toContain("<mcp_tool_policy>");
+    expect(fakeMcpSession.agent.state.tools).toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: "submit_review" })]),
+    );
+    expect(fakeMcpSession.extensionRunner.emit).toHaveBeenCalledWith({
+      type: "session_shutdown",
+      reason: "quit",
+    });
+    expect(fakeMcpSession.dispose).toHaveBeenCalled();
   });
 
   it("passes the configured thinking level to the agent", async () => {
@@ -373,6 +447,183 @@ describe("review", () => {
     await review({ cwd: "/repo", debug: false });
     expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining("tool call:"));
     expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining("tool result:"));
+  });
+
+  it("logs MCP proxy tool names and status without writing args or returned payloads", async () => {
+    const secretArgument = "credential-that-must-not-appear";
+    fakeAgentEvents = [
+      {
+        type: "tool_execution_start",
+        toolName: "mcp",
+        toolCallId: "mcp-call-1",
+        args: {
+          server: "docs",
+          tool: "search_docs",
+          args: { query: "private query", token: secretArgument },
+        },
+      },
+      { type: "tool_execution_end", toolName: "mcp", toolCallId: "mcp-call-1", isError: false },
+    ];
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const mcpConfig: CiMcpConfig = { mcpServers: { docs: { url: "https://mcp.example/mcp" } } };
+
+    await review({ cwd: "/repo", output: "comment", mcpConfig, debug: true });
+
+    expect(logSpy).toHaveBeenCalledWith(
+      "[pi-reviewer] MCP tool call: docs/search_docs id=mcp-call-1",
+    );
+    expect(logSpy).toHaveBeenCalledWith(
+      "[pi-reviewer] MCP tool result: docs/search_docs id=mcp-call-1 success",
+    );
+    expect(logSpy.mock.calls.flat().join("\n")).not.toContain(secretArgument);
+    expect(logSpy.mock.calls.flat().join("\n")).not.toContain("private query");
+  });
+
+  it("does not pass ambient process environment to configured stdio servers", async () => {
+    const mcpConfig: CiMcpConfig = {
+      mcpServers: {
+        local: { command: "node", args: ["server.js"], env: { API_TOKEN: "${TOKEN}" } },
+      },
+    };
+    await review({ cwd: "/repo", output: "comment", mcpConfig, mcpServerCwd: "/trusted/base" });
+
+    expect(createMcpAdapterMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        config: expect.objectContaining({
+          mcpServers: {
+            local: {
+              command: "node",
+              args: ["server.js"],
+              env: { API_TOKEN: "${TOKEN}" },
+              cwd: "/trusted/base",
+              auth: false,
+              debug: false,
+              inheritEnv: false,
+            },
+          },
+        }),
+      }),
+    );
+  });
+
+  it("refuses to post a review when a configured MCP tool call fails", async () => {
+    fakeAgentEvents = [
+      {
+        type: "tool_execution_start",
+        toolName: "mcp",
+        toolCallId: "mcp-failed-call",
+        args: { server: "docs", tool: "search_docs", args: { query: "x" } },
+      },
+      { type: "tool_execution_end", toolName: "mcp", toolCallId: "mcp-failed-call", isError: true },
+    ];
+    const mcpConfig: CiMcpConfig = { mcpServers: { docs: { url: "https://mcp.example/mcp" } } };
+
+    await expect(review({ cwd: "/repo", output: "comment", mcpConfig })).rejects.toThrow(
+      "A configured MCP tool call failed; refusing to post the review",
+    );
+    expect(sendOutputMock).not.toHaveBeenCalled();
+    expect(fakeMcpSession.extensionRunner.emit).toHaveBeenCalledWith({
+      type: "session_shutdown",
+      reason: "quit",
+    });
+  });
+
+  it("allows a failed MCP call when a retry of that tool succeeds", async () => {
+    fakeAgentEvents = [
+      {
+        type: "tool_execution_start",
+        toolName: "mcp",
+        toolCallId: "mcp-failed-attempt",
+        args: { server: "docs", tool: "search_docs", args: { query: "x" } },
+      },
+      {
+        type: "tool_execution_end",
+        toolName: "mcp",
+        toolCallId: "mcp-failed-attempt",
+        isError: true,
+      },
+      {
+        type: "tool_execution_start",
+        toolName: "mcp",
+        toolCallId: "mcp-successful-retry",
+        args: { server: "docs", tool: "search_docs", args: { query: "x" } },
+      },
+      {
+        type: "tool_execution_end",
+        toolName: "mcp",
+        toolCallId: "mcp-successful-retry",
+        isError: false,
+      },
+    ];
+    const mcpConfig: CiMcpConfig = { mcpServers: { docs: { url: "https://mcp.example/mcp" } } };
+
+    await expect(review({ cwd: "/repo", output: "comment", mcpConfig })).resolves.toBeUndefined();
+    expect(sendOutputMock).toHaveBeenCalled();
+  });
+
+  it("does not let success from a different MCP tool hide a failed call", async () => {
+    fakeAgentEvents = [
+      {
+        type: "tool_execution_start",
+        toolName: "mcp",
+        toolCallId: "mcp-failed-search",
+        args: { server: "docs", tool: "search_docs", args: { query: "x" } },
+      },
+      {
+        type: "tool_execution_end",
+        toolName: "mcp",
+        toolCallId: "mcp-failed-search",
+        isError: true,
+      },
+      {
+        type: "tool_execution_start",
+        toolName: "mcp",
+        toolCallId: "mcp-successful-fetch",
+        args: { server: "docs", tool: "fetch_doc", args: { id: "1" } },
+      },
+      {
+        type: "tool_execution_end",
+        toolName: "mcp",
+        toolCallId: "mcp-successful-fetch",
+        isError: false,
+      },
+    ];
+    const mcpConfig: CiMcpConfig = { mcpServers: { docs: { url: "https://mcp.example/mcp" } } };
+
+    await expect(review({ cwd: "/repo", output: "comment", mcpConfig })).rejects.toThrow(
+      "A configured MCP tool call failed; refusing to post the review",
+    );
+    expect(sendOutputMock).not.toHaveBeenCalled();
+  });
+
+  it("removes adapter spill files after the review session shuts down", async () => {
+    const outputDir = await mkdtemp(path.join(tmpdir(), "pi-mcp-output-test-"));
+    const outputFile = path.join(outputDir, "output-1234abcd.txt");
+    await writeFile(outputFile, "sensitive MCP output");
+    fakeAgentEvents = [
+      {
+        type: "tool_execution_start",
+        toolName: "mcp",
+        toolCallId: "mcp-output-call",
+        args: { server: "docs", tool: "large_result", args: {} },
+      },
+      {
+        type: "tool_execution_end",
+        toolName: "mcp",
+        toolCallId: "mcp-output-call",
+        isError: false,
+        result: { details: { outputGuard: { fullOutputPath: outputFile } } },
+      },
+    ];
+    const mcpConfig: CiMcpConfig = { mcpServers: { docs: { url: "https://mcp.example/mcp" } } };
+
+    try {
+      await review({ cwd: "/repo", output: "comment", mcpConfig });
+      await expect(access(outputFile)).rejects.toThrow();
+      await expect(access(outputDir)).rejects.toThrow();
+    } finally {
+      await rm(outputDir, { recursive: true, force: true });
+    }
   });
 
   it("uses comment output target in CI mode", async () => {

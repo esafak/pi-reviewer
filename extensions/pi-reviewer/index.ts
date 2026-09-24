@@ -1,5 +1,4 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { createDeepWikiTool } from "../../src/core/deepwiki.js";
 import {
   readVerbose,
   readMinSeverity,
@@ -53,11 +52,9 @@ function resolveCommonOpts(
 }
 
 export default function (pi: ExtensionAPI): void {
-  if (process.env.PI_REVIEWER_DEEPWIKI_TOOL_ENABLED === "true")
-    pi.registerTool(createDeepWikiTool());
   pi.registerCommand("review", {
     description:
-      "Review a PR diff with pi-reviewer (flags: --diff, --branch, --pr, --ssh, --ui, --dry-run, --deepwiki)",
+      "Review a PR diff with pi-reviewer (flags: --diff, --branch, --pr, --ssh, --ui, --dry-run)",
     async handler(args, ctx) {
       const notify = ctx.ui.notify.bind(ctx.ui);
       const loaderState = { stop: () => {} };
@@ -65,9 +62,6 @@ export default function (pi: ExtensionAPI): void {
       try {
         const parsed = parseArgs(args);
         sshMode = parsed.ssh;
-        if (parsed.ssh && parsed.deepwiki) {
-          throw new Error("--deepwiki is currently supported only for local reviews.");
-        }
         const common = resolveCommonOpts(parsed, ctx, pi, notify, loaderState);
 
         if (parsed.dryRun) return void (await handleDryRun({ parsed, cwd: ctx.cwd, ...common }));
