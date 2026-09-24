@@ -99,8 +99,6 @@ dry-runs, or non-comment output.
 
 ```yaml
       - uses: esafak/pi-reviewer@main
-        env:
-          DOCS_MCP_TOKEN: ${{ secrets.DOCS_MCP_TOKEN }}
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           model: openrouter/openai/gpt-5.4-mini
@@ -115,7 +113,16 @@ Example `.github/mcp.json`:
     "deepwiki": {
       "url": "https://mcp.deepwiki.com/mcp",
       "auth": false
-    },
+    }
+  }
+}
+```
+
+For an authenticated server, add a config entry such as:
+
+```json
+{
+  "mcpServers": {
     "internal-docs": {
       "url": "https://mcp.example.com/mcp",
       "auth": "bearer",
@@ -123,6 +130,18 @@ Example `.github/mcp.json`:
     }
   }
 }
+```
+
+Then map the secret into the action step's environment:
+
+```yaml
+      - uses: esafak/pi-reviewer@main
+        env:
+          DOCS_MCP_TOKEN: ${{ secrets.DOCS_MCP_TOKEN }}
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          model: openrouter/openai/gpt-5.4-mini
+          mcp-config-file: .github/mcp.json
 ```
 
 The adapter resolves `bearerTokenEnv` and `${ENV_VAR}` references in supported
@@ -150,10 +169,11 @@ logged. If the reviewer actually calls a configured MCP tool and that call
 fails, pi-reviewer does not post a potentially incomplete review. Servers the
 reviewer never calls are not connected.
 
-DeepWiki's public MCP server is supported as an ordinary entry in this file; it
-does not require authentication. The former `deepwiki` action input has been
-removed. Existing workflows that enabled it should add the server definition
-above and configure `mcp-config-file`.
+DeepWiki's public MCP server is supported as an ordinary entry in this file and
+does not require authentication. This repository's [`.github/mcp.json`](./.github/mcp.json)
+is a ready-to-use example, and the dogfooding workflow opts into it. Workflows
+that previously used a DeepWiki-specific action input or `/review --deepwiki`
+flag should configure the server through their MCP config instead.
 
 The `init` command is the generic, non-App setup. It runs only when invoked
 explicitly, creates the workflow only when `.github/workflows/pi-review.yml`

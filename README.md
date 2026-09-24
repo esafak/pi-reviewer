@@ -23,7 +23,6 @@ The default. Fetches the diff and your project conventions locally, spawns a pi 
 /review --branch dev
 /review --pr 42
 /review --diff HEAD~1
-/review --deepwiki
 ```
 
 ### SSH mode (`--ssh`)
@@ -40,9 +39,22 @@ Before starting the agent, pi-reviewer fetches everything over SSH in parallel: 
 
 > **Note:** `--model` and `--thinking` have no effect in SSH mode — the model is fixed to whatever the parent session is using.
 
-### DeepWiki tool (`--deepwiki`)
+### MCP context sources
 
-Enables the reviewer agent to call the public DeepWiki MCP server when it needs external repository documentation. The agent chooses whether to call it and supplies the repository and question; DeepWiki results are bounded, untrusted reference context. The system prompt tells the agent not to use DeepWiki for the repository being reviewed. No API key or separate DeepWiki installation is required. This is not supported in SSH mode.
+The reviewer does not include provider-specific MCP integrations. To use DeepWiki or another MCP server locally, install [`pi-mcp-adapter`](https://github.com/nicobailon/pi-mcp-adapter) in Pi and add the server to your MCP config. For example, the public DeepWiki server requires no authentication:
+
+```json
+{
+  "mcpServers": {
+    "deepwiki": {
+      "url": "https://mcp.deepwiki.com/mcp",
+      "auth": false
+    }
+  }
+}
+```
+
+MCP results are external, untrusted reference data. In CI, use the `mcp-config-file` action input instead; see [CI.md](./CI.md).
 
 ### UI mode (`--ui`)
 
@@ -82,7 +94,6 @@ Then inside the pi TUI:
 | `--diff <ref>` | Review changes since a specific git ref | `--diff HEAD~1` |
 | `--ssh` | SSH mode: agent fetches diff and conventions on the remote | `--ssh` |
 | `--ui` | Open browser review UI after the agent finishes | `--ui` |
-| `--deepwiki` | Enable the agent-callable public DeepWiki tool. **Local mode only.** | `--deepwiki` |
 | `--min-severity <level>` | Only report issues at this level and above: `info`, `warn`, or `critical` | `--min-severity warn` |
 | `--model <id>` | Model for this review in `provider/id` format. **Local mode only.** | `--model openai/gpt-4o` |
 | `--thinking <level>` | Thinking budget: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`. **Local mode only.** | `--thinking low` |

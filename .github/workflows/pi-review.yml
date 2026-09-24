@@ -119,4 +119,5 @@ jobs:
           github-research: 'true'
           ai-search: 'true'
           web-search: 'true'
+          mcp-config-file: '.github/mcp.json'
           cache: true

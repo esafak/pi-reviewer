@@ -26,11 +26,6 @@ vi.mock("../../../src/core/context.js", async (importActual) => {
   return { ...actual, loadContext: vi.fn() };
 });
 
-vi.mock("../../../src/core/deepwiki.js", async (importActual) => {
-  const actual = await importActual<typeof import("../../../src/core/deepwiki.js")>();
-  return { ...actual, resolvePublicGitHubRepo: vi.fn().mockResolvedValue("owner/project") };
-});
-
 vi.mock("../../../src/core/ui/server/index.js", () => ({
   readDefaultBranch: vi.fn().mockReturnValue(undefined),
 }));
@@ -52,7 +47,6 @@ import { spawn } from "node:child_process";
 import { writeFile } from "node:fs/promises";
 import { resolveDiff } from "../../../src/core/diff-resolver.js";
 import { loadContext } from "../../../src/core/context.js";
-import { resolvePublicGitHubRepo } from "../../../src/core/deepwiki.js";
 import { setReviewFooter } from "../../../extensions/pi-reviewer/footer.js";
 import { handleUIReview } from "../../../extensions/pi-reviewer/handlers/ui.js";
 import { buildContextGroups } from "../../../extensions/pi-reviewer/handlers/context.js";
@@ -134,7 +128,6 @@ beforeEach(() => {
     source: "feature vs main",
   });
   vi.mocked(loadContext).mockResolvedValue({ conventions: [], reviewRules: [] });
-  vi.mocked(resolvePublicGitHubRepo).mockResolvedValue("owner/project");
   vi.mocked(spawn).mockReturnValue(makeFakeProcess() as any);
   vi.mocked(buildContextGroups).mockResolvedValue({
     groups: [],
@@ -146,28 +139,6 @@ beforeEach(() => {
 });
 
 describe("handleLocalReview — non-UI path", () => {
-  it("does not resolve a DeepWiki repository unless explicitly enabled", async () => {
-    await handleLocalReview(makeOpts());
-    expect(resolvePublicGitHubRepo).not.toHaveBeenCalled();
-    expect(vi.mocked(spawn).mock.calls[0][2]?.env).toMatchObject({
-      PI_REVIEWER_DEEPWIKI_TOOL_ENABLED: "false",
-    });
-  });
-
-  it("adds an opt-in DeepWiki instruction with the reviewed repo to the system prompt", async () => {
-    await handleLocalReview(makeOpts({ deepwiki: true }));
-    expect(resolvePublicGitHubRepo).toHaveBeenCalledWith("/project");
-    expect(vi.mocked(spawn).mock.calls[0][2]?.env).toMatchObject({
-      PI_REVIEWER_DEEPWIKI_TOOL_ENABLED: "true",
-    });
-    const systemPrompt = vi
-      .mocked(writeFile)
-      .mock.calls.find((call) =>
-        String(call[0]).includes("pi-reviewer-system-prompt"),
-      )?.[1] as string;
-    expect(systemPrompt).toContain('repository under review ("owner/project")');
-  });
-
   it("sends progress notifications in order", async () => {
     const opts = makeOpts();
     await handleLocalReview(opts);
