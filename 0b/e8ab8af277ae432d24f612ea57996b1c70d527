@@ -1,0 +1,25 @@
+src/ci/mcp-config.ts
+  s_0fe0234657dadc::t_99a25f908d22d6 22-44,59-63,74-82
+src/ci/review.ts
+  s_0fe0234657dadc::t_70436f8b2bfe48 93-105,112,116,119-120,404,607-608,694-696,698
+tests/ci/mcp-config.test.ts
+  s_0fe0234657dadc::t_159c8bdb9b8177 47-56,211-236
+tests/ci/review.test.ts
+  s_0fe0234657dadc::t_0173c109ec352f 531-598
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "0be8ab8af277ae432d24f612ea57996b1c70d527",
+  "prompts": {},
+  "sessions": {
+    "s_0fe0234657dadc": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f2b611c19ffeY6htPChwhl1u2X",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "Emre Şafak <3928300+esafak@users.noreply.github.com>"
+    }
+  }
+}
