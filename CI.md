@@ -309,6 +309,7 @@ Draft pull requests are skipped by default, including manual dispatch and `/pi-r
 | `ai-search-max-sources` | no | AI sources per answer (default: 5) |
 | `search-timeout-ms` | no | Per-request regular search timeout (default: 8000) |
 | `ai-search-timeout-ms` | no | Per-request AI search timeout (default: 15000) |
+| `registry-wall-time-budget-ms` | no | Total wall-clock budget across all package registry lookups, bounded to 1000-120000 ms (default: 15000) |
 | `search-required` | no | Fail instead of warn when required regular search is unavailable or fails |
 | `ai-search-required` | no | Fail instead of warn when required AI search is unavailable or fails |
 | `review-drafts` | no | Review draft PRs (default: `false`) |

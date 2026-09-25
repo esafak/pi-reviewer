@@ -1,6 +1,12 @@
 import { describe, expect, it, vi } from "vite-plus/test";
 import { createRegistryClient } from "../../src/ci/registry/client.js";
-import { MAX_RESPONSE_BYTES } from "../../src/ci/registry/helpers.js";
+import {
+  DEFAULT_WALL_TIME_BUDGET_MS,
+  MAX_RESPONSE_BYTES,
+  MAX_WALL_TIME_BUDGET_MS,
+  MIN_WALL_TIME_BUDGET_MS,
+  resolveRegistryWallTimeBudgetMs,
+} from "../../src/ci/registry/helpers.js";
 import {
   createRegistryProvider,
   registryProjectionInternals,
@@ -285,6 +291,28 @@ describe("registry providers", () => {
 });
 
 describe("registry client and tool", () => {
+  it("resolves the configurable registry wall-time budget with safe bounds", () => {
+    expect(resolveRegistryWallTimeBudgetMs(undefined)).toBe(DEFAULT_WALL_TIME_BUDGET_MS);
+    expect(resolveRegistryWallTimeBudgetMs("  ")).toBe(DEFAULT_WALL_TIME_BUDGET_MS);
+    expect(resolveRegistryWallTimeBudgetMs("45000")).toBe(45_000);
+    expect(resolveRegistryWallTimeBudgetMs("invalid")).toBe(DEFAULT_WALL_TIME_BUDGET_MS);
+    expect(resolveRegistryWallTimeBudgetMs("1")).toBe(MIN_WALL_TIME_BUDGET_MS);
+    expect(resolveRegistryWallTimeBudgetMs("999999")).toBe(MAX_WALL_TIME_BUDGET_MS);
+  });
+
+  it("uses the configured total wall-time budget for each lookup run", async () => {
+    vi.stubEnv("PI_REVIEWER_REGISTRY_WALL_TIME_BUDGET_MS", "1000");
+    const now = vi.spyOn(Date, "now").mockReturnValueOnce(0).mockReturnValueOnce(1000);
+    try {
+      await expect(
+        createRegistryClient().lookup({ ecosystem: "python", name: "pkg" }),
+      ).rejects.toThrow("Registry wall-clock budget exhausted");
+    } finally {
+      now.mockRestore();
+      vi.unstubAllEnvs();
+    }
+  });
+
   it("enforces lookup count, per-result output size, and aggregate output size", async () => {
     const fetchMock = vi.fn<typeof fetch>().mockImplementation(async () =>
       json({

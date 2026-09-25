@@ -5,7 +5,18 @@ export const MAX_TOTAL_RESULT_BYTES = 15 * 1024;
 export const MAX_TOOL_CONTENT_BYTES = 8 * 1024;
 export const MAX_LOOKUPS = 5;
 export const REQUEST_TIMEOUT_MS = 8_000;
-export const WALL_TIME_MS = 15_000;
+export const DEFAULT_WALL_TIME_BUDGET_MS = 15_000;
+export const MIN_WALL_TIME_BUDGET_MS = 1_000;
+export const MAX_WALL_TIME_BUDGET_MS = 120_000;
+
+export function resolveRegistryWallTimeBudgetMs(
+  raw = process.env.PI_REVIEWER_REGISTRY_WALL_TIME_BUDGET_MS,
+): number {
+  if (!raw?.trim()) return DEFAULT_WALL_TIME_BUDGET_MS;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || !Number.isInteger(value)) return DEFAULT_WALL_TIME_BUDGET_MS;
+  return Math.max(MIN_WALL_TIME_BUDGET_MS, Math.min(MAX_WALL_TIME_BUDGET_MS, value));
+}
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);

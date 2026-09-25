@@ -50,6 +50,15 @@ describe("GitHub Action Vite+ setup", () => {
     );
   });
 
+  it("maps the package registry wall-time budget input to the CI environment", async () => {
+    const action = await readFile(path.join(process.cwd(), "action.yml"), "utf8");
+    expect(action).toContain("registry-wall-time-budget-ms:");
+    expect(action).toContain('default: "15000"');
+    expect(action).toContain(
+      "PI_REVIEWER_REGISTRY_WALL_TIME_BUDGET_MS: ${{ inputs.registry-wall-time-budget-ms }}",
+    );
+  });
+
   it("maps the optional MCP config path to the CI environment", async () => {
     const action = await readFile(path.join(process.cwd(), "action.yml"), "utf8");
     expect(action).toContain("mcp-config-file:");
