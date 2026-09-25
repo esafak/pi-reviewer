@@ -1,0 +1,18 @@
+src/logging/formatter.ts
+  h_ea91e2db23540f 80-83,103-108,121
+tests/ci/review.test.ts
+  h_ea91e2db23540f 350,352,356-363
+tests/logging/logger.test.ts
+  h_ea91e2db23540f 82-112
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "3b074c10ad6758f2030d3f997754832e2807c860",
+  "prompts": {},
+  "humans": {
+    "h_ea91e2db23540f": {
+      "author": "Emre Şafak <3928300+esafak@users.noreply.github.com>"
+    }
+  }
+}
