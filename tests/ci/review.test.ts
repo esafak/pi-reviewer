@@ -586,6 +586,46 @@ describe("review", () => {
     }
   });
 
+  it("captures thinking content parts when the provider sends no thinking deltas", async () => {
+    fakeAgentEvents = [
+      {
+        type: "agent_end",
+        messages: [
+          {
+            role: "assistant",
+            content: [
+              { type: "thinking", thinking: "The model's completed reasoning." },
+              { type: "text", text: "LGTM" },
+            ],
+          },
+        ],
+      },
+    ];
+    const directory = await mkdtemp(path.join(tmpdir(), "pi-reviewer-thinking-final-test-"));
+    const artifactPath = path.join(directory, "thinking.jsonl");
+    const previousArtifactPath = process.env.PI_REVIEWER_THINKING_ARTIFACT;
+    process.env.PI_REVIEWER_THINKING_ARTIFACT = artifactPath;
+    try {
+      await review({ cwd: "/repo", debug: true });
+      const trace = (await readFile(artifactPath, "utf8"))
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as Record<string, unknown>);
+      expect(trace).toEqual([
+        expect.objectContaining({
+          type: "thinking",
+          text: "The model's completed reasoning.",
+          timestamp: expect.stringMatching(/^\d{4}-\d\d-\d\dT/),
+          endTimestamp: expect.stringMatching(/^\d{4}-\d\d-\d\dT/),
+        }),
+      ]);
+    } finally {
+      if (previousArtifactPath === undefined) delete process.env.PI_REVIEWER_THINKING_ARTIFACT;
+      else process.env.PI_REVIEWER_THINKING_ARTIFACT = previousArtifactPath;
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("logs MCP proxy tool names and status without writing args or returned payloads", async () => {
     const secretArgument = "credential-that-must-not-appear";
     fakeAgentEvents = [

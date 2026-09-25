@@ -581,6 +581,8 @@ export async function review(options: ReviewOptions): Promise<void> {
     let structuredResult: ReturnType<typeof getResult>;
     const thinkingTrace: Array<Record<string, unknown>> = [];
     let pendingThinking: { timestamp: string; text: string } | undefined;
+    let thinkingDeltaCount = 0;
+    let finalMessageThinkingCaptured = false;
     const traceEnabled = options.debug && Boolean(process.env.PI_REVIEWER_THINKING_ARTIFACT);
     const addTraceEvent = (type: string, fields: Record<string, unknown> = {}) => {
       if (!traceEnabled) return;
@@ -625,6 +627,7 @@ export async function review(options: ReviewOptions): Promise<void> {
           };
           const thinkingEvent = update.assistantMessageEvent;
           if (thinkingEvent?.type === "thinking_delta" && typeof thinkingEvent.delta === "string") {
+            thinkingDeltaCount++;
             if (pendingThinking) pendingThinking.text += thinkingEvent.delta;
             else
               pendingThinking = { timestamp: new Date().toISOString(), text: thinkingEvent.delta };
@@ -706,6 +709,30 @@ export async function review(options: ReviewOptions): Promise<void> {
           .find((m) => (m as { role?: string })?.role === "assistant") as
           | { stopReason?: string; errorMessage?: string; content?: unknown }
           | undefined;
+
+        if (traceEnabled && thinkingDeltaCount === 0 && !finalMessageThinkingCaptured) {
+          for (const message of msgs) {
+            const assistantMessage = message as { role?: string; content?: unknown };
+            if (assistantMessage.role !== "assistant" || !Array.isArray(assistantMessage.content))
+              continue;
+            for (const part of assistantMessage.content) {
+              if (
+                !part ||
+                typeof part !== "object" ||
+                (part as { type?: unknown }).type !== "thinking" ||
+                typeof (part as { thinking?: unknown }).thinking !== "string"
+              )
+                continue;
+              const timestamp = new Date().toISOString();
+              addTraceEvent("thinking", {
+                timestamp,
+                endTimestamp: timestamp,
+                text: (part as { thinking: string }).thinking,
+              });
+              finalMessageThinkingCaptured = true;
+            }
+          }
+        }
 
         // The error may surface on the agent_end event OR on the last assistant
         // message (e.g. provider 402/429/401 — pi-agent-core attaches it there).
