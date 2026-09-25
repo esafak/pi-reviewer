@@ -1,0 +1,24 @@
+CI.md
+  h_ea91e2db23540f 312
+action.yml
+  h_ea91e2db23540f 102-106,359
+src/ci/registry/client.ts
+  h_ea91e2db23540f 6,14,24,32
+src/ci/registry/helpers.ts
+  h_ea91e2db23540f 8-19
+tests/ci/action.test.ts
+  h_ea91e2db23540f 53-61
+tests/ci/registry.test.ts
+  h_ea91e2db23540f 3-9,294-315
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "0a95c7d6128789898ff49677c2a7f7bf98fde30f",
+  "prompts": {},
+  "humans": {
+    "h_ea91e2db23540f": {
+      "author": "Emre Şafak <3928300+esafak@users.noreply.github.com>"
+    }
+  }
+}
