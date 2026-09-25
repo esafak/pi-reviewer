@@ -93,6 +93,24 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+interface AssistantMessage {
+  role: "assistant";
+  content?: unknown;
+}
+
+interface ThinkingContentPart {
+  type: "thinking";
+  thinking: string;
+}
+
+function isAssistantMessage(value: unknown): value is AssistantMessage {
+  return isRecord(value) && value.role === "assistant";
+}
+
+function isThinkingContentPart(value: unknown): value is ThinkingContentPart {
+  return isRecord(value) && value.type === "thinking" && typeof value.thinking === "string";
+}
+
 function sanitizeMcpDebugName(value: string): string {
   const sanitized = [...value]
     .map((char) => {
@@ -581,6 +599,8 @@ export async function review(options: ReviewOptions): Promise<void> {
     let structuredResult: ReturnType<typeof getResult>;
     const thinkingTrace: Array<Record<string, unknown>> = [];
     let pendingThinking: { timestamp: string; text: string } | undefined;
+    let thinkingDeltaCount = 0;
+    let finalMessageThinkingCaptured = false;
     const traceEnabled = options.debug && Boolean(process.env.PI_REVIEWER_THINKING_ARTIFACT);
     const addTraceEvent = (type: string, fields: Record<string, unknown> = {}) => {
       if (!traceEnabled) return;
@@ -625,6 +645,7 @@ export async function review(options: ReviewOptions): Promise<void> {
           };
           const thinkingEvent = update.assistantMessageEvent;
           if (thinkingEvent?.type === "thinking_delta" && typeof thinkingEvent.delta === "string") {
+            thinkingDeltaCount++;
             if (pendingThinking) pendingThinking.text += thinkingEvent.delta;
             else
               pendingThinking = { timestamp: new Date().toISOString(), text: thinkingEvent.delta };
@@ -706,6 +727,22 @@ export async function review(options: ReviewOptions): Promise<void> {
           .find((m) => (m as { role?: string })?.role === "assistant") as
           | { stopReason?: string; errorMessage?: string; content?: unknown }
           | undefined;
+
+        if (traceEnabled && thinkingDeltaCount === 0 && !finalMessageThinkingCaptured) {
+          for (const message of msgs) {
+            if (!isAssistantMessage(message) || !Array.isArray(message.content)) continue;
+            for (const part of message.content) {
+              if (!isThinkingContentPart(part)) continue;
+              const timestamp = new Date().toISOString();
+              addTraceEvent("thinking", {
+                timestamp,
+                endTimestamp: timestamp,
+                text: part.thinking,
+              });
+              finalMessageThinkingCaptured = true;
+            }
+          }
+        }
 
         // The error may surface on the agent_end event OR on the last assistant
         // message (e.g. provider 402/429/401 — pi-agent-core attaches it there).
