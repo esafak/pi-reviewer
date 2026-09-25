@@ -93,6 +93,24 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+interface AssistantMessage {
+  role: "assistant";
+  content?: unknown;
+}
+
+interface ThinkingContentPart {
+  type: "thinking";
+  thinking: string;
+}
+
+function isAssistantMessage(value: unknown): value is AssistantMessage {
+  return isRecord(value) && value.role === "assistant";
+}
+
+function isThinkingContentPart(value: unknown): value is ThinkingContentPart {
+  return isRecord(value) && value.type === "thinking" && typeof value.thinking === "string";
+}
+
 function sanitizeMcpDebugName(value: string): string {
   const sanitized = [...value]
     .map((char) => {
@@ -712,22 +730,14 @@ export async function review(options: ReviewOptions): Promise<void> {
 
         if (traceEnabled && thinkingDeltaCount === 0 && !finalMessageThinkingCaptured) {
           for (const message of msgs) {
-            const assistantMessage = message as { role?: string; content?: unknown };
-            if (assistantMessage.role !== "assistant" || !Array.isArray(assistantMessage.content))
-              continue;
-            for (const part of assistantMessage.content) {
-              if (
-                !part ||
-                typeof part !== "object" ||
-                (part as { type?: unknown }).type !== "thinking" ||
-                typeof (part as { thinking?: unknown }).thinking !== "string"
-              )
-                continue;
+            if (!isAssistantMessage(message) || !Array.isArray(message.content)) continue;
+            for (const part of message.content) {
+              if (!isThinkingContentPart(part)) continue;
               const timestamp = new Date().toISOString();
               addTraceEvent("thinking", {
                 timestamp,
                 endTimestamp: timestamp,
-                text: (part as { thinking: string }).thinking,
+                text: part.thinking,
               });
               finalMessageThinkingCaptured = true;
             }
