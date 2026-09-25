@@ -3,7 +3,7 @@ import {
   MAX_RESULT_BYTES,
   MAX_TOTAL_RESULT_BYTES,
   REQUEST_TIMEOUT_MS,
-  WALL_TIME_MS,
+  resolveRegistryWallTimeBudgetMs,
 } from "./helpers.js";
 import { createRegistryProvider } from "./providers.js";
 import type { RegistryClient } from "./types.js";
@@ -11,6 +11,7 @@ import { safePackageName, safeVersion } from "./helpers.js";
 
 export function createRegistryClient(): RegistryClient {
   const started = Date.now();
+  const wallTimeBudgetMs = resolveRegistryWallTimeBudgetMs();
   let lookupCount = 0;
   let outputBytes = 0;
   let nextCratesIoRequest = 0;
@@ -20,7 +21,7 @@ export function createRegistryClient(): RegistryClient {
       if (!safePackageName(params.name)) throw new Error("Package name is invalid");
       if (params.version !== undefined && !safeVersion(params.version))
         throw new Error("Package version is invalid");
-      if (Date.now() - started >= WALL_TIME_MS)
+      if (Date.now() - started >= wallTimeBudgetMs)
         throw new Error("Registry wall-clock budget exhausted");
       if (lookupCount >= MAX_LOOKUPS) throw new Error("Registry lookup budget exhausted");
       if (params.ecosystem === "java" && params.name.split(":").length !== 2)
@@ -28,7 +29,7 @@ export function createRegistryClient(): RegistryClient {
 
       lookupCount++;
       const elapsed = Date.now() - started;
-      const timeout = Math.min(REQUEST_TIMEOUT_MS, WALL_TIME_MS - elapsed);
+      const timeout = Math.min(REQUEST_TIMEOUT_MS, wallTimeBudgetMs - elapsed);
       const signal = AbortSignal.timeout(timeout);
       if (params.ecosystem === "rust") {
         const now = Date.now();

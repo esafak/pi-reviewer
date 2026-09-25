@@ -99,6 +99,11 @@ inputs:
     required: false
     default: "15000"
 
+  registry-wall-time-budget-ms:
+    description: "Total wall-clock budget for all package registry lookups in milliseconds (1000-120000, default: 15000)."
+    required: false
+    default: "15000"
+
   search-required:
     description: "Fail when required regular search is unavailable or fails."
     required: false
@@ -351,6 +356,7 @@ runs:
         PI_REVIEWER_AI_SEARCH_MAX_SOURCES: ${{ inputs.ai-search-max-sources }}
         PI_REVIEWER_SEARCH_TIMEOUT_MS: ${{ inputs.search-timeout-ms }}
         PI_REVIEWER_AI_SEARCH_TIMEOUT_MS: ${{ inputs.ai-search-timeout-ms }}
+        PI_REVIEWER_REGISTRY_WALL_TIME_BUDGET_MS: ${{ inputs.registry-wall-time-budget-ms }}
         PI_REVIEWER_SEARCH_REQUIRED: ${{ inputs.search-required }}
         PI_REVIEWER_AI_SEARCH_REQUIRED: ${{ inputs.ai-search-required }}
       run: >-
