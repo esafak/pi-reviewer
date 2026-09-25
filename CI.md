@@ -65,6 +65,8 @@ jobs:
           pi-api-key: ${{ secrets.PI_API_KEY }}
           model: openrouter/openai/gpt-5.4-mini
           thinking: off
+          # Optional: log tool calls and upload the short-retention thinking trace.
+          # debug: 'true'
           min-severity: ${{ inputs.min-severity || 'info' }}
           review-drafts: 'false'
           react-on-no-findings: 'true'
@@ -294,6 +296,7 @@ Draft pull requests are skipped by default, including manual dispatch and `/pi-r
 | `pi-api-key` | no | Optional explicit API key for the model's provider. When omitted, the action uses the provider-specific environment variable (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or `ZAI_API_KEY`). |
 | `model` | yes | Model to use in `provider/modelId` format (e.g. `openrouter/openai/gpt-5.4-mini`) |
 | `thinking` | no | Thinking budget: `off`, `minimal`, `low`, `medium`, `high`, or `xhigh` (default: `off`) |
+| `debug` | no | Log tool calls and upload available model thinking as a one-day artifact (default: `false`). Thinking may contain sensitive context. |
 | `min-severity` | no | Minimum severity: `info`, `warn`, or `critical` (default: `info`) |
 | `react-on-no-findings` | no | Leave a thumbs-up reaction on the PR instead of posting a comment when no new findings remain and all existing findings are resolved (default: `true`) |
 | `doc-dirs` | no | Comma-separated dirs to scan for docs to inject into the review (default: empty — inject nothing) |
