@@ -1,0 +1,49 @@
+src/ci/action-entry.ts
+  s_dbda328dae7e29::t_1dfc62eb43f91f 22,103-107,112,116-119,123,130,140,145,163,165-167,185,189,267,271-273,276,301-305,358-360,362-365,396-398
+src/ci/log.ts
+  s_dbda328dae7e29::t_bb9931433f8709 1-26
+src/ci/recovery.ts
+  s_dbda328dae7e29::t_afdb1e8105473a 11,33-36,48
+src/ci/reply.ts
+  s_dbda328dae7e29::t_0669d9f3cfb0ab 11-12,57,66-69,71-74,126,140,194,223-227,229-233,285-291,312,314-317,324-326,330-334,340-342,346-350,364-367,373-377,383-387,399-403,426-428,434-437,442-446,455-459,476-479,485-489,495-499,511-515,534-538,544-548,561-564,580,585,592,594-599,605-609,612-614,617-619,623-626,633,636-643,645,649,653,657,666-669,673,676,678-680,706,709-711
+src/ci/review.ts
+  s_dbda328dae7e29::t_1f9ca3bfb7815f 47-48,51,243,251-254,265-266,271,273,282-284,300-301,328,356-358,387,546,607-611,614-618,628-635,656,667-669,689-694,704-708,718-724,852,860-863
+src/ci/search/tool.ts
+  s_dbda328dae7e29::t_d8bbf5b30d869f 5,41-43
+src/logging/formatter.ts
+  s_dbda328dae7e29::t_a3458cddba6a87 1-116
+src/logging/logger.ts
+  s_e03183a9af1eae::t_733d8f548e1997 1-46
+src/logging/types.ts
+  s_e03183a9af1eae::t_f208d6c256d889 1-23
+tests/ci/reply.test.ts
+  s_dbda328dae7e29::t_bee3607ba08390 11,430-432,448-464,487-489,895-911,913-919,924-944,946-947,958-974,976-977
+tests/ci/review.test.ts
+  s_dbda328dae7e29::t_9de0356548c31a 5,291,293,295-311,438,440,442-463,466-473,491,494-500,502-512,514-515,828,833-838,843-845,1229-1230,1245-1274
+tests/logging/logger.test.ts
+  s_dbda328dae7e29::t_cf129be760c699 1-105
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "b34228204fdf52e333ec4f72ddc6bd52fcab3a5a",
+  "prompts": {},
+  "sessions": {
+    "s_dbda328dae7e29": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f29e8b57affe8HEjEEbyuBVfUR",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "Emre Şafak <3928300+esafak@users.noreply.github.com>"
+    },
+    "s_e03183a9af1eae": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f29c8638dffepLS0wcybKWTFBc",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "Emre Şafak <3928300+esafak@users.noreply.github.com>"
+    }
+  }
+}
