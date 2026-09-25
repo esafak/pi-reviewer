@@ -4,6 +4,11 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { createLogger, createMemorySink, formatGroup } from "../../src/logging/index.js";
 
+vi.mock("node:fs/promises", async (importActual) => {
+  const actual = await importActual<typeof import("node:fs/promises")>();
+  return { ...actual, writeFile: vi.fn(actual.writeFile) };
+});
+
 vi.mock("../../src/core/diff-resolver.js", () => ({
   resolveDiff: vi.fn(),
   extractDiffFiles: vi.fn(() => []),
@@ -503,6 +508,10 @@ describe("review", () => {
         isError: false,
       },
       {
+        type: "agent_end",
+        messages: [{ role: "assistant", content: [{ type: "text", text: "LGTM" }] }],
+      },
+      {
         type: "message_update",
         assistantMessageEvent: {
           type: "thinking_delta",
@@ -515,9 +524,12 @@ describe("review", () => {
     const directory = await mkdtemp(path.join(tmpdir(), "pi-reviewer-thinking-test-"));
     const artifactPath = path.join(directory, "thinking.txt");
     const previousArtifactPath = process.env.PI_REVIEWER_THINKING_ARTIFACT;
+    const writeFileSpy = vi.mocked(writeFile);
+    writeFileSpy.mockClear();
     process.env.PI_REVIEWER_THINKING_ARTIFACT = artifactPath;
     try {
       await review({ cwd: "/repo", debug: true, logger: createLogger({ sink }) });
+      expect(writeFileSpy).toHaveBeenCalledTimes(1);
       const trace = (await readFile(artifactPath, "utf8"))
         .trim()
         .split("\n")
@@ -537,10 +549,8 @@ describe("review", () => {
         status: "success",
       });
       expect(trace[3]).toMatchObject({ type: "thinking", text: "After tool." });
-      for (const [index, entry] of trace.entries()) {
-        expect(entry.sequence).toBe(index);
+      for (const entry of trace) {
         expect(entry.timestamp).toEqual(expect.stringMatching(/^\d{4}-\d\d-\d\dT/));
-        expect(entry.elapsedMs).toEqual(expect.any(Number));
       }
       expect(JSON.stringify(trace)).not.toContain("private/path.ts");
       expect(JSON.stringify(trace)).not.toContain("private file contents");
@@ -554,6 +564,7 @@ describe("review", () => {
     } finally {
       if (previousArtifactPath === undefined) delete process.env.PI_REVIEWER_THINKING_ARTIFACT;
       else process.env.PI_REVIEWER_THINKING_ARTIFACT = previousArtifactPath;
+      writeFileSpy.mockClear();
       await rm(directory, { recursive: true, force: true });
     }
   });

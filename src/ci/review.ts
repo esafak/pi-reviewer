@@ -580,19 +580,30 @@ export async function review(options: ReviewOptions): Promise<void> {
     let finalResponse = "";
     let structuredResult: ReturnType<typeof getResult>;
     const thinkingTrace: Array<Record<string, unknown>> = [];
-    const traceStartedAt = performance.now();
     const traceEnabled = options.debug && Boolean(process.env.PI_REVIEWER_THINKING_ARTIFACT);
     const addTraceEvent = (type: string, fields: Record<string, unknown> = {}) => {
       if (!traceEnabled) return;
       thinkingTrace.push({
-        sequence: thinkingTrace.length,
         timestamp: new Date().toISOString(),
-        elapsedMs: Math.round(performance.now() - traceStartedAt),
         type,
         ...fields,
       });
     };
-    let thinkingArtifactWrite: Promise<void> | undefined;
+    const writeThinkingTrace = async () => {
+      const artifactPath = process.env.PI_REVIEWER_THINKING_ARTIFACT;
+      if (!traceEnabled || !artifactPath || thinkingTrace.length === 0) return;
+      try {
+        await writeFile(
+          artifactPath,
+          `${thinkingTrace.map((entry) => JSON.stringify(entry)).join("\n")}\n`,
+          { encoding: "utf8", mode: 0o600 },
+        );
+      } catch (error) {
+        logger.warn("review.agent.thinking_artifact_failed", "Could not write thinking artifact", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    };
 
     const ended = new Promise<void>((resolve, reject) => {
       unsubscribe = agent.subscribe((event: unknown) => {
@@ -674,25 +685,6 @@ export async function review(options: ReviewOptions): Promise<void> {
 
         const ev = event as { messages?: unknown; stopReason?: string; errorMessage?: string };
         const msgs = Array.isArray(ev.messages) ? ev.messages : [];
-        if (thinkingTrace.length > 0 && process.env.PI_REVIEWER_THINKING_ARTIFACT) {
-          thinkingArtifactWrite = writeFile(
-            process.env.PI_REVIEWER_THINKING_ARTIFACT,
-            `${thinkingTrace.map((entry) => JSON.stringify(entry)).join("\n")}\n`,
-            { encoding: "utf8", mode: 0o600 },
-          ).catch((error: unknown) => {
-            logger.warn(
-              "review.agent.thinking_artifact_failed",
-              "Could not write thinking artifact",
-              {
-                error: error instanceof Error ? error.message : String(error),
-              },
-            );
-          });
-        }
-        const finish = (callback: () => void) => {
-          if (thinkingArtifactWrite) void thinkingArtifactWrite.then(callback);
-          else callback();
-        };
         const lastAssistant = [...msgs]
           .reverse()
           .find((m) => (m as { role?: string })?.role === "assistant") as
@@ -706,7 +698,7 @@ export async function review(options: ReviewOptions): Promise<void> {
           (lastAssistant?.stopReason === "error" ? lastAssistant.errorMessage : undefined);
         if (errorMessage) {
           logger.error("review.agent.error", "Agent error", { error: errorMessage });
-          finish(() => reject(new Error(`Agent failed: ${errorMessage}`)));
+          reject(new Error(`Agent failed: ${errorMessage}`));
           return;
         }
 
@@ -719,7 +711,7 @@ export async function review(options: ReviewOptions): Promise<void> {
           logger.info("review.agent.completed", "Agent completed via submit_review tool", {
             comments: toolResult.comments.length,
           });
-          finish(resolve);
+          resolve();
           return;
         }
 
@@ -744,7 +736,7 @@ export async function review(options: ReviewOptions): Promise<void> {
               .length,
             lastAssistantContent: shape,
           });
-          finish(() => reject(new Error("Agent returned an empty response")));
+          reject(new Error("Agent returned an empty response"));
           return;
         }
 
@@ -758,13 +750,16 @@ export async function review(options: ReviewOptions): Promise<void> {
         logger.info("review.agent.completed_fallback", "Agent completed with text fallback", {
           responseLength: finalResponse.length,
         });
-        finish(resolve);
+        resolve();
       });
     });
 
-    await agent.prompt(userPrompt);
-    await ended;
-    await thinkingArtifactWrite;
+    try {
+      await agent.prompt(userPrompt);
+      await ended;
+    } finally {
+      await writeThinkingTrace();
+    }
     if (failedMcpTools.size > 0) {
       const failedTools = [...failedMcpTools].slice(0, 5).map(sanitizeMcpDebugName);
       const additional = failedMcpTools.size > failedTools.length ? " and other MCP tools" : "";
