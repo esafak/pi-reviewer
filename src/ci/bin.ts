@@ -1,12 +1,13 @@
 #!/usr/bin/env tsx
 import { init } from "./init.js";
+import { log } from "./log.js";
 
 const command = process.argv[2];
 
 if (command === "init") {
   await init();
 } else {
-  console.error(`Unknown command: ${command ?? "(none)"}`);
-  console.error("Usage: pi-reviewer init");
+  log.error("cli.command.unknown", "Unknown command", { command: command ?? "(none)" });
+  log.error("cli.usage", "Usage: pi-reviewer init");
   process.exit(1);
 }

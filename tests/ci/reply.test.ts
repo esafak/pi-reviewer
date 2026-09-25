@@ -8,6 +8,7 @@ import {
 import { recoverSynchronizeReplies } from "../../src/ci/recovery.js";
 import { parseReplyAction } from "../../src/ci/review.js";
 import { replyMarker, type Event } from "../../src/ci/batch.js";
+import { createLogger, createMemorySink } from "../../src/logging/index.js";
 import {
   GitHubClient,
   type PullRequest,
@@ -426,7 +427,9 @@ describe("review-comment reply action path", () => {
           generate: vi.fn(),
         }),
       ).toBe(false);
-      expect(warn).toHaveBeenCalledWith(expect.stringContaining("could not resolve permission"));
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining("Could not resolve permission; denying reply"),
+      );
       expect(github.reply).not.toHaveBeenCalled();
     } finally {
       warn.mockRestore();
@@ -442,17 +445,23 @@ describe("review-comment reply action path", () => {
       user: { login: "outsider", type: "User" },
     };
     const snapshot = { pullRequest: pr, comments: [root, outsider], threads: [thread] };
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    try {
-      expect(
-        discoverPendingReplies(snapshot, { login: "reviewer[bot]" }, new Set(["human"])),
-      ).toEqual([]);
-      expect(warn).toHaveBeenCalledWith(
-        expect.stringContaining('"outsider" association=NONE is not authorized'),
-      );
-    } finally {
-      warn.mockRestore();
-    }
+    const { sink, records } = createMemorySink();
+    expect(
+      discoverPendingReplies(
+        snapshot,
+        { login: "reviewer[bot]" },
+        new Set(["human"]),
+        createLogger({ sink }),
+      ),
+    ).toEqual([]);
+    expect(records).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          event: "reply.not_authorized",
+          fields: { commentId: 30, login: "outsider", association: "NONE" },
+        }),
+      ]),
+    );
   });
 
   // The recovery path resolves permissions itself when the caller does not inject a set.
@@ -475,7 +484,9 @@ describe("review-comment reply action path", () => {
           generate,
         }),
       ).toBe(0);
-      expect(warn).toHaveBeenCalledWith(expect.stringContaining('"human" lacks write permission'));
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining("Reply author lacks write permission; ignoring"),
+      );
       expect(github.reply).not.toHaveBeenCalled();
       expect(generate).not.toHaveBeenCalled();
     } finally {
@@ -881,50 +892,59 @@ describe("review-comment reply action path", () => {
   // its branch.
   it("logs the reply fast path and the authorization denial instead of exiting silently", async () => {
     const github = client([root, triggering], pr, { human: "read" });
-    const info = vi.spyOn(console, "log").mockImplementation(() => {});
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    try {
-      expect(
-        await handleReply({
-          event,
-          repo: "owner/repo",
-          pullRequest: pr,
-          identity: { login: "reviewer[bot]" },
-          github,
-          generate: vi.fn(),
+    const { sink, records } = createMemorySink();
+    expect(
+      await handleReply({
+        event,
+        repo: "owner/repo",
+        pullRequest: pr,
+        identity: { login: "reviewer[bot]" },
+        github,
+        generate: vi.fn(),
+        logger: createLogger({ sink }),
+      }),
+    ).toBe(false);
+    expect(records).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          event: "reply.event.received",
+          fields: expect.objectContaining({ kind: "reply", commentId: 9 }),
         }),
-      ).toBe(false);
-      expect(info).toHaveBeenCalledWith(expect.stringContaining("reply event received"));
-      expect(warn).toHaveBeenCalledWith(expect.stringContaining('"human" lacks write permission'));
-      expect(warn).toHaveBeenCalledWith(
-        expect.stringContaining('"human" is not authorized to reply'),
-      );
-    } finally {
-      info.mockRestore();
-      warn.mockRestore();
-    }
+        expect.objectContaining({
+          event: "reply.permission.denied",
+          fields: { login: "human", permission: "read" },
+        }),
+        expect.objectContaining({ event: "reply.event.ignored", fields: { login: "human" } }),
+      ]),
+    );
   });
 
   it("logs a head move that aborts reply handling instead of exiting silently", async () => {
     const github = client([root, triggering], { ...pr, head: { ...pr.head, sha: "new-head" } });
-    const info = vi.spyOn(console, "log").mockImplementation(() => {});
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    try {
-      expect(
-        await handleReply({
-          event,
-          repo: "owner/repo",
-          pullRequest: pr,
-          identity: { login: "reviewer[bot]" },
-          github,
-          generate: vi.fn(),
+    const { sink, records } = createMemorySink();
+    expect(
+      await handleReply({
+        event,
+        repo: "owner/repo",
+        pullRequest: pr,
+        identity: { login: "reviewer[bot]" },
+        github,
+        generate: vi.fn(),
+        logger: createLogger({ sink }),
+      }),
+    ).toBe(false);
+    expect(records).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          event: "reply.head_changed",
+          fields: expect.objectContaining({
+            commentId: 9,
+            expectedHeadSha: "head",
+            actualHeadSha: "new-head",
+          }),
         }),
-      ).toBe(false);
-      expect(warn).toHaveBeenCalledWith(expect.stringContaining("PR head moved on refresh"));
-    } finally {
-      info.mockRestore();
-      warn.mockRestore();
-    }
+      ]),
+    );
   });
 
   it("logs an unrecoverable existing reply marker instead of returning silently", async () => {
@@ -935,25 +955,25 @@ describe("review-comment reply action path", () => {
       triggering,
       { id: 10, body, in_reply_to_id: 8, user: { login: "reviewer[bot]" } },
     ]);
-    const info = vi.spyOn(console, "log").mockImplementation(() => {});
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    try {
-      expect(
-        await handleReply({
-          event,
-          repo: "owner/repo",
-          pullRequest: pr,
-          identity: { login: "reviewer[bot]" },
-          github,
-          generate: vi.fn(),
+    const { sink, records } = createMemorySink();
+    expect(
+      await handleReply({
+        event,
+        repo: "owner/repo",
+        pullRequest: pr,
+        identity: { login: "reviewer[bot]" },
+        github,
+        generate: vi.fn(),
+        logger: createLogger({ sink }),
+      }),
+    ).toBe(false);
+    expect(records).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          event: "reply.marker.unrecoverable",
+          fields: { commentId: 9, headSha: "head" },
         }),
-      ).toBe(false);
-      expect(warn).toHaveBeenCalledWith(
-        expect.stringContaining("existing reply marker is not recoverable"),
-      );
-    } finally {
-      info.mockRestore();
-      warn.mockRestore();
-    }
+      ]),
+    );
   });
 });

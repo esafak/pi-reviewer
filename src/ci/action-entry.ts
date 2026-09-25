@@ -19,6 +19,7 @@ import {
 import { fetchReplySnapshot, handleReply } from "./reply.js";
 import { recoverSynchronizeReplies } from "./recovery.js";
 import { loadMcpConfigFromBase, resolveDefaultBranchSha } from "./mcp-config.js";
+import { log } from "./log.js";
 
 async function readEvent(): Promise<unknown> {
   const file = process.env.GITHUB_EVENT_PATH;
@@ -99,27 +100,34 @@ async function main(): Promise<void> {
   const repo = process.env.GITHUB_REPOSITORY;
   const token = process.env.GITHUB_TOKEN;
   if (!repo || !token) {
-    console.error("[pi-reviewer] this action requires GITHUB_REPOSITORY and GITHUB_TOKEN");
+    log.error(
+      "action.configuration.missing",
+      "This action requires repository and token configuration",
+      { missing: [!repo && "GITHUB_REPOSITORY", !token && "GITHUB_TOKEN"].filter(Boolean) },
+    );
     process.exitCode = 1;
     return;
   }
   if (!isSafePullRequestNumber(event.pr)) {
-    console.log("[pi-reviewer] ignoring event without a pull request");
+    log.info("action.event.ignored", "Ignoring event without a pull request");
     return;
   }
   if (event.fork) {
-    console.log("[pi-reviewer] fork PRs are not reviewed because secrets are unavailable");
+    log.info(
+      "action.pull_request.fork_skipped",
+      "Fork PRs are not reviewed because secrets are unavailable",
+    );
     return;
   }
   if (event.command && !isAuthorizedReviewCommand(event)) {
-    console.log("[pi-reviewer] ignoring unauthorized comment");
+    log.info("action.comment.unauthorized", "Ignoring unauthorized comment");
     return;
   }
 
   const github = new GitHubClient(token);
   let pr = await github.getPullRequest(repo, event.pr);
   if (isRenovatePullRequest(pr)) {
-    console.log("[pi-reviewer] Renovate PRs are not reviewed");
+    log.info("action.pull_request.renovate_skipped", "Renovate PRs are not reviewed");
     return;
   }
   if (
@@ -129,12 +137,12 @@ async function main(): Promise<void> {
   )
     return;
   if (pr.draft && process.env.REVIEW_DRAFTS !== "true") {
-    console.log("[pi-reviewer] draft PR reviews are disabled");
+    log.info("action.pull_request.draft_skipped", "Draft PR reviews are disabled");
     return;
   }
   const identity = await github.getUser();
   if (pr.head.repo?.full_name !== repo) {
-    console.log("[pi-reviewer] fork or deleted-head PRs are not reviewed");
+    log.info("action.pull_request.head_unavailable", "Fork or deleted-head PRs are not reviewed");
     return;
   }
   if (event.kind === "reply") {
@@ -152,11 +160,11 @@ async function main(): Promise<void> {
           piApiKey: process.env.PI_API_KEY,
         })
       )
-        console.log(`[pi-reviewer] replied to review comment ${event.commentId}`);
+        log.info("reply.completed", "Replied to review comment", { commentId: event.commentId });
     } catch (error) {
-      console.warn(
-        `[pi-reviewer] reply skipped after error: ${error instanceof Error ? error.message : String(error)}`,
-      );
+      log.warn("reply.failed", "Reply skipped after error", {
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
     return;
   }
@@ -174,11 +182,11 @@ async function main(): Promise<void> {
       piApiKey: process.env.PI_API_KEY,
     });
     if (recovered > 0)
-      console.log(`[pi-reviewer] recovered ${recovered} review reply(ies) before review`);
+      log.info("reply.recovery.completed", "Recovered review replies before review", { recovered });
     replySnapshot = await fetchReplySnapshot(github, repo, event.pr!);
     pr = replySnapshot.pullRequest;
     if (pr.head.repo?.full_name !== repo || pr.head.sha !== expectedHead) {
-      console.log("[pi-reviewer] PR state changed during reply recovery; skipping normal review");
+      log.info("review.skipped", "PR state changed during reply recovery; skipping normal review");
       return;
     }
   }
@@ -256,15 +264,16 @@ async function main(): Promise<void> {
         encoding: "utf8",
       }).trim() || mergeBase;
   } catch {
-    console.warn("[pi-reviewer] could not compute merge-base; using PR base SHA");
+    log.warn("review.merge_base.unavailable", "Could not compute merge-base; using PR base SHA");
   }
   const range = selectBatchRange(mergeBase, head, latest, ancestor, mergeHead);
   if (!isEventRangeConsistent(event, latest?.toSha ?? mergeBase, head))
-    console.warn(
-      `[pi-reviewer] event SHAs differ from authenticated PR state; using authenticated marker range`,
+    log.warn(
+      "review.event_sha.mismatch",
+      "Event SHAs differ from authenticated PR state; using authenticated marker range",
     );
   if (!range.fresh && event.kind !== "manual") {
-    console.log("[pi-reviewer] current head was already reviewed");
+    log.info("review.skipped.already_reviewed", "Current head was already reviewed");
     return;
   }
   const mcpConfigPath = process.env.PI_REVIEWER_MCP_CONFIG_FILE;
@@ -289,7 +298,11 @@ async function main(): Promise<void> {
     actor: identity.login,
     reviewId: 0,
   });
-  console.log(`[pi-reviewer] reviewing PR #${event.pr}: ${range.fromSha}..${range.toSha}`);
+  log.info("review.started", "Reviewing pull request", {
+    pullRequest: event.pr,
+    fromSha: range.fromSha,
+    toSha: range.toSha,
+  });
   const worktree = await mkdtemp(path.join(tmpdir(), "pi-reviewer-"));
   let trustedMcpWorktree: string | undefined;
   try {
@@ -342,9 +355,14 @@ async function main(): Promise<void> {
           piApiKey: process.env.PI_API_KEY,
         });
         if (recovered > 0)
-          console.log(`[pi-reviewer] recovered ${recovered} review reply(ies) after review`);
+          log.info("reply.recovery.completed", "Recovered review replies after review", {
+            recovered,
+          });
       } else {
-        console.log("[pi-reviewer] skipping final reply recovery because the PR head changed");
+        log.info(
+          "reply.recovery.skipped",
+          "Skipping final reply recovery because the PR head changed",
+        );
       }
     }
   } finally {
@@ -375,8 +393,8 @@ async function main(): Promise<void> {
 try {
   await main();
 } catch (error) {
-  console.error(
-    `[pi-reviewer] action failed: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}`,
-  );
+  log.error("action.failed", "Action failed", {
+    error: error instanceof Error ? (error.stack ?? error.message) : String(error),
+  });
   process.exitCode = 1;
 }

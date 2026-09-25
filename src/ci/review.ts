@@ -44,8 +44,11 @@ import {
 } from "./github-research/config.js";
 import { createGitHubResearchTools } from "./github-research/tool.js";
 import type { CiMcpConfig } from "./mcp-config.js";
+import { log, logAssistantFallback } from "./log.js";
+import type { Logger } from "../logging/index.js";
 
 export interface ReviewOptions {
+  logger?: Logger;
   cwd?: string;
   pr?: number;
   diff?: string;
@@ -237,6 +240,7 @@ export function defuseReplyMetadata(body: string): string {
 }
 
 export async function review(options: ReviewOptions): Promise<void> {
+  const logger = options.logger ?? log;
   const cwd = options.cwd ?? process.cwd();
   const githubToken = options.githubToken ?? process.env.GITHUB_TOKEN;
   const repo = options.repo ?? process.env.GITHUB_REPOSITORY;
@@ -244,7 +248,10 @@ export async function review(options: ReviewOptions): Promise<void> {
     options.output ?? (process.env.GITHUB_ACTIONS === "true" ? "comment" : "terminal");
   const mcpConfig = target === "comment" ? options.mcpConfig : undefined;
   if (options.mcpConfig && target !== "comment")
-    console.warn("[pi-reviewer] MCP disabled; only available for CI comment-output reviews");
+    logger.warn(
+      "review.mcp.disabled",
+      "MCP disabled; only available for CI comment-output reviews",
+    );
 
   const { diff, source, warning, skippedFiles } = await resolveDiff({
     pr: options.pr,
@@ -255,15 +262,15 @@ export async function review(options: ReviewOptions): Promise<void> {
     toSha: options.commitId,
     allowEmpty: options.allowEmptyDiff,
   });
-  console.log(`[pi-reviewer] diff resolved — source: ${source}, size: ${diff.length} chars`);
-  if (warning) console.warn(`[pi-reviewer] ${warning}`);
+  logger.info("review.diff.resolved", "Diff resolved", { source, size: diff.length });
+  if (warning) logger.warn("review.diff.warning", warning);
 
   const context = await loadContext({ cwd });
   const loadedPaths = mergeContextFiles(context).map((f) => f.path);
   if (loadedPaths.length > 0) {
-    console.log(`[pi-reviewer] context loaded: ${loadedPaths.join(", ")}`);
+    logger.info("review.context.loaded", "Context loaded", { paths: loadedPaths });
   } else {
-    console.log("[pi-reviewer] context: no conventions found (AGENTS.md / CLAUDE.md / REVIEW.md)");
+    logger.info("review.context.empty", "No conventions found (AGENTS.md / CLAUDE.md / REVIEW.md)");
   }
 
   const docDirs = options.docDirs ?? parseDocDirs(process.env.PI_REVIEWER_DOC_DIRS);
@@ -272,9 +279,9 @@ export async function review(options: ReviewOptions): Promise<void> {
       ? await loadDocContext({ cwd, diffFiles: extractDiffFiles(diff), docDirs })
       : [];
   if (docContextFiles.length > 0) {
-    console.log(
-      `[pi-reviewer] doc-context loaded: ${docContextFiles.map((f) => f.path).join(", ")}`,
-    );
+    logger.info("review.doc_context.loaded", "Documentation context loaded", {
+      paths: docContextFiles.map((f) => f.path),
+    });
   }
 
   const resolvedFindings = selectResolvedFindings(options.resolvedFindings ?? []);
@@ -290,7 +297,8 @@ export async function review(options: ReviewOptions): Promise<void> {
   // receive network tools merely because CI configuration leaked into env.
   const searchConfig = target === "comment" ? resolveSearchConfig() : {};
   if (target === "comment") {
-    for (const warning of unavailableSearchWarnings()) console.warn(`[pi-reviewer] ${warning}`);
+    for (const warning of unavailableSearchWarnings())
+      logger.warn("review.search.unavailable", warning);
     if (
       process.env.PI_REVIEWER_SEARCH_REQUIRED === "true" &&
       process.env.PI_REVIEWER_WEB_SEARCH === "true" &&
@@ -317,7 +325,7 @@ export async function review(options: ReviewOptions): Promise<void> {
     target === "comment" ? resolveGitHubResearchConfig(process.env, githubToken) : undefined;
   if (target === "comment") {
     for (const warning of unavailableGitHubResearchWarnings(process.env, githubToken))
-      console.warn(`[pi-reviewer] ${warning}`);
+      logger.warn("review.github_research.unavailable", warning);
   }
   const githubResearchTools = githubResearchConfig
     ? createGitHubResearchTools(githubResearchConfig)
@@ -345,9 +353,9 @@ export async function review(options: ReviewOptions): Promise<void> {
   const userPrompt = buildUserPrompt(diff, skippedFiles);
 
   if (options.dryRun) {
-    console.log(`Diff source: ${source}`);
-    console.log(`System prompt:\n\n${effectiveSystemPrompt}`);
-    console.log(`User prompt:\n\n${userPrompt}`);
+    logger.info("review.dry_run.diff_source", "Diff source", { source });
+    logger.info("review.dry_run.system_prompt", "System prompt", { prompt: effectiveSystemPrompt });
+    logger.info("review.dry_run.user_prompt", "User prompt", { prompt: userPrompt });
     return;
   }
 
@@ -376,7 +384,7 @@ export async function review(options: ReviewOptions): Promise<void> {
   if (!resolvedModel) {
     throw new Error(`Unknown model "${modelStr}" — not found in the pi model registry.`);
   }
-  console.log(`[pi-reviewer] running agent (model: ${resolvedModel.api})`);
+  logger.info("review.agent.started", "Running agent", { model: resolvedModel.api });
 
   const { tool: reviewTool, getResult } = createReviewTool();
   const models = builtinModels();
@@ -535,7 +543,7 @@ export async function review(options: ReviewOptions): Promise<void> {
           }
         }
       };
-      console.log(`[pi-reviewer] MCP enabled — ${mcpToolNames.size} tool(s) registered`);
+      logger.info("review.mcp.enabled", "MCP enabled", { toolCount: mcpToolNames.size });
     } catch (error) {
       try {
         if (session) {
@@ -586,8 +594,6 @@ export async function review(options: ReviewOptions): Promise<void> {
           };
           const rawToolName =
             typeof toolEvent.toolName === "string" ? toolEvent.toolName : "unknown";
-          const callId =
-            typeof toolEvent.toolCallId === "string" ? ` id=${toolEvent.toolCallId}` : "";
           const rawCallId =
             typeof toolEvent.toolCallId === "string" ? toolEvent.toolCallId : undefined;
           const mcpName =
@@ -598,10 +604,18 @@ export async function review(options: ReviewOptions): Promise<void> {
           if (eventType === "tool_execution_start") {
             if (mcpName) {
               if (rawCallId) mcpToolCalls.set(rawCallId, mcpName);
-              if (options.debug) console.log(`[pi-reviewer] MCP tool call: ${mcpName}${callId}`);
+              if (options.debug)
+                logger.debug("review.mcp.tool_call", "MCP tool call", {
+                  tool: mcpName,
+                  callId: rawCallId,
+                });
             } else if (options.debug) {
               const args = formatDebugToolArgs(toolEvent.args);
-              console.log(`[pi-reviewer] tool call: ${rawToolName}${callId} args=${args}`);
+              logger.debug("review.tool.call", "Tool call", {
+                tool: rawToolName,
+                callId: rawCallId,
+                args,
+              });
             }
           } else {
             if (mcpName && toolEvent.isError === true) failedMcpTools.add(mcpName);
@@ -611,8 +625,14 @@ export async function review(options: ReviewOptions): Promise<void> {
               : undefined;
             if (outputArtifact) mcpOutputArtifacts.add(outputArtifact);
             if (options.debug)
-              console.log(
-                `[pi-reviewer] ${mcpName ? "MCP tool result" : "tool result"}: ${mcpName ?? rawToolName}${callId} ${toolEvent.isError === true ? "error" : "success"}`,
+              logger.debug(
+                mcpName ? "review.mcp.tool_result" : "review.tool.result",
+                mcpName ? "MCP tool result" : "Tool result",
+                {
+                  tool: mcpName ?? rawToolName,
+                  callId: rawCallId,
+                  status: toolEvent.isError === true ? "error" : "success",
+                },
               );
             if (rawCallId) mcpToolCalls.delete(rawCallId);
           }
@@ -633,7 +653,7 @@ export async function review(options: ReviewOptions): Promise<void> {
           (ev.stopReason === "error" ? ev.errorMessage : undefined) ??
           (lastAssistant?.stopReason === "error" ? lastAssistant.errorMessage : undefined);
         if (errorMessage) {
-          console.error(`[pi-reviewer] agent error: ${errorMessage}`);
+          logger.error("review.agent.error", "Agent error", { error: errorMessage });
           reject(new Error(`Agent failed: ${errorMessage}`));
           return;
         }
@@ -644,9 +664,9 @@ export async function review(options: ReviewOptions): Promise<void> {
         const toolResult = getResult();
         if (toolResult) {
           structuredResult = toolResult;
-          console.log(
-            `[pi-reviewer] agent completed via submit_review tool — ${toolResult.comments.length} comment(s)`,
-          );
+          logger.info("review.agent.completed", "Agent completed via submit_review tool", {
+            comments: toolResult.comments.length,
+          });
           resolve();
           return;
         }
@@ -666,9 +686,12 @@ export async function review(options: ReviewOptions): Promise<void> {
                     : 0,
             }));
           }
-          console.error(
-            `[pi-reviewer] agent returned an empty response — stopReason=${ev.stopReason ?? "unknown"}, assistantMessages=${msgs.filter((m) => (m as { role?: string })?.role === "assistant").length}, lastAssistantContent=${JSON.stringify(shape)}`,
-          );
+          logger.error("review.agent.empty_response", "Agent returned an empty response", {
+            stopReason: ev.stopReason ?? "unknown",
+            assistantMessages: msgs.filter((m) => (m as { role?: string })?.role === "assistant")
+              .length,
+            lastAssistantContent: shape,
+          });
           reject(new Error("Agent returned an empty response"));
           return;
         }
@@ -678,13 +701,11 @@ export async function review(options: ReviewOptions): Promise<void> {
         // Actions command. This is the only artifact available when a model
         // emits a textual/tool-protocol response instead of calling
         // submit_review.
-        console.warn("[pi-reviewer] submit_review was not called; using text fallback");
-        console.log("::group::Pi Reviewer raw assistant response (text fallback)");
-        for (const line of finalResponse.split(/\r?\n/)) {
-          console.log(`| ${line}`);
-        }
-        console.log("::endgroup::");
-        console.log(`[pi-reviewer] agent completed — response: ${finalResponse.length} chars`);
+        logger.warn("review.text_fallback", "submit_review was not called; using text fallback");
+        logAssistantFallback(finalResponse, logger);
+        logger.info("review.agent.completed_fallback", "Agent completed with text fallback", {
+          responseLength: finalResponse.length,
+        });
         resolve();
       });
     });
@@ -694,8 +715,13 @@ export async function review(options: ReviewOptions): Promise<void> {
     if (failedMcpTools.size > 0) {
       const failedTools = [...failedMcpTools].slice(0, 5).map(sanitizeMcpDebugName);
       const additional = failedMcpTools.size > failedTools.length ? " and other MCP tools" : "";
-      console.error(
-        `[pi-reviewer] MCP tool call failed (${failedTools.join(", ")}${additional}); check server availability and auth. Review not posted.`,
+      logger.error(
+        "review.mcp.failed",
+        "MCP tool call failed; check server availability and auth. Review not posted.",
+        {
+          tools: failedTools,
+          additionalTools: additional,
+        },
       );
       throw new Error("A configured MCP tool call failed; refusing to post the review");
     }
@@ -823,7 +849,7 @@ export async function generateReplyResponse(
         if (!structuredAction) {
           settle(new Error("Agent returned a malformed reply action"));
         } else {
-          console.log("[pi-reviewer] conversation agent completed via submit_reply tool");
+          log.info("reply.agent.completed", "Conversation agent completed via submit_reply tool");
           settle();
         }
         return;
@@ -831,7 +857,10 @@ export async function generateReplyResponse(
 
       answer = extractLastAssistantText(e.messages);
       if (answer) {
-        console.warn("[pi-reviewer] submit_reply was not called; using legacy JSON text fallback");
+        log.warn(
+          "reply.agent.legacy_fallback",
+          "submit_reply was not called; using legacy JSON text fallback",
+        );
         settle();
       } else settle(new Error("Agent returned an empty response"));
     });

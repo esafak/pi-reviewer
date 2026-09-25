@@ -3,6 +3,7 @@ import { Type, type Static } from "@earendil-works/pi-ai";
 import { createRegistryClient } from "./client.js";
 import { hasControlCharacters, MAX_TOOL_CONTENT_BYTES } from "./helpers.js";
 import type { RegistryClient, RegistryLookupParams } from "./types.js";
+import { log } from "../log.js";
 
 const ecosystemValues = ["python", "java", "rust", "javascript", "go"] as const;
 const lookupSchema = Type.Object(
@@ -93,7 +94,7 @@ function safeFailure(error: unknown): string {
   })
     .join("")
     .slice(0, 240);
-  console.warn(`[pi-reviewer] package registry lookup failed: ${safe}`);
+  log.warn("registry.lookup.failed", "Package registry lookup failed", { error: safe });
   return safe;
 }
 

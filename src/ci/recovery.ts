@@ -8,6 +8,7 @@ import {
 import type { PullRequest } from "./github.js";
 import type { ThinkingLevel } from "../core/config.js";
 import type { generateReplyResponse } from "./review.js";
+import { log } from "./log.js";
 
 export interface SynchronizeRecoveryOptions {
   repo: string;
@@ -29,7 +30,10 @@ export async function recoverSynchronizeReplies(
     options.pullRequest.head.repo?.full_name !== options.repo ||
     options.pullRequest.head.sha !== options.expectedHeadSha
   ) {
-    console.warn("[pi-reviewer] reply recovery skipped: PR head or repository changed");
+    log.warn(
+      "reply.recovery.state_changed",
+      "Reply recovery skipped: PR head or repository changed",
+    );
     return 0;
   }
   const snapshot =
@@ -41,7 +45,7 @@ export async function recoverSynchronizeReplies(
       options.pullRequest,
     ));
   if (snapshot.pullRequest.head.sha !== options.expectedHeadSha) {
-    console.warn("[pi-reviewer] reply recovery skipped: snapshot head changed");
+    log.warn("reply.recovery.snapshot_changed", "Reply recovery skipped: snapshot head changed");
     return 0;
   }
   return recoverPendingReplies({
