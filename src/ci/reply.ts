@@ -8,6 +8,8 @@ import {
 } from "./batch.js";
 import type { PullRequest, ReviewComment, ReviewThread } from "./github.js";
 import type { ThinkingLevel } from "../core/config.js";
+import { log } from "./log.js";
+import type { Logger } from "../logging/index.js";
 
 export interface ReplyClient {
   listComments(repo: string, number: number): Promise<ReviewComment[]>;
@@ -52,6 +54,7 @@ export async function resolveAuthorizedLogins(
   github: ReplyClient,
   repo: string,
   logins: Iterable<string>,
+  logger: Logger = log,
 ): Promise<ReadonlySet<string>> {
   const authorized = new Set<string>();
   for (const login of new Set(logins)) {
@@ -60,13 +63,15 @@ export async function resolveAuthorizedLogins(
       const permission = await github.getCollaboratorPermission(repo, login);
       if (permission && AUTHORIZED_PERMISSIONS.has(permission)) authorized.add(login);
       else
-        console.warn(
-          `[pi-reviewer] reply author "${login}" lacks write permission (permission=${permission ?? "unknown"}); ignoring`,
-        );
+        logger.warn("reply.permission.denied", "Reply author lacks write permission; ignoring", {
+          login,
+          permission: permission ?? "unknown",
+        });
     } catch (error) {
-      console.warn(
-        `::warning::[pi-reviewer] could not resolve permission for reply author "${login}"; denying reply: ${error instanceof Error ? error.message : String(error)}`,
-      );
+      logger.warn("reply.permission.lookup_failed", "Could not resolve permission; denying reply", {
+        login,
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   }
   return authorized;
@@ -118,6 +123,7 @@ export interface ReplyHandlerOptions {
   thinking?: ThinkingLevel;
   piApiKey?: string;
   generate?: (options: Parameters<typeof generateReplyResponse>[0]) => Promise<unknown>;
+  logger?: Logger;
 }
 
 export interface ReplyCommentOptions {
@@ -131,6 +137,7 @@ export interface ReplyCommentOptions {
   thinking?: ThinkingLevel;
   piApiKey?: string;
   generate?: (options: Parameters<typeof generateReplyResponse>[0]) => Promise<unknown>;
+  logger?: Logger;
 }
 
 function isPendingReplyAuthorized(
@@ -184,6 +191,7 @@ export function discoverPendingReplies(
   snapshot: ReplySnapshot,
   identity: ReplyIdentity,
   authorizedLogins: ReadonlySet<string>,
+  logger: Logger = log,
 ): PendingReply[] {
   const threadByComment = new Map(
     snapshot.threads.flatMap((thread) =>
@@ -210,12 +218,19 @@ export function discoverPendingReplies(
           login !== undefined &&
           login !== identity.login &&
           authorizedLogins.has(login);
-        const detail = `reply ${comment.id} by "${login ?? "unknown"}" association=${comment.author_association ?? "unknown"}`;
         if (authorized) {
           authorizedReplyCount++;
-          console.log(`[pi-reviewer] ${detail} is authorized`);
+          logger.info("reply.authorized", "Reply author is authorized", {
+            commentId: comment.id,
+            login: login ?? "unknown",
+            association: comment.author_association ?? "unknown",
+          });
         } else if (comment.user?.type !== "Bot" && login !== identity.login)
-          console.warn(`[pi-reviewer] ${detail} is not authorized`);
+          logger.warn("reply.not_authorized", "Reply author is not authorized", {
+            commentId: comment.id,
+            login: login ?? "unknown",
+            association: comment.author_association ?? "unknown",
+          });
         return authorized;
       })
       .sort(
@@ -267,9 +282,13 @@ export function discoverPendingReplies(
         headSha: snapshot.pullRequest.head.sha,
       });
   }
-  console.log(
-    `[pi-reviewer] reply discovery: roots=${roots.length} replies=${replyCount} authors=${authorizedLogins.size} authorized_replies=${authorizedReplyCount} pending=${pending.length}`,
-  );
+  logger.info("reply.discovery.completed", "Reply discovery completed", {
+    roots: roots.length,
+    replies: replyCount,
+    authors: authorizedLogins.size,
+    authorizedReplies: authorizedReplyCount,
+    pending: pending.length,
+  });
   return pending;
 }
 
@@ -290,37 +309,45 @@ export async function fetchReplySnapshot(
 /** Handles one discovered reply using the same semantics as the webhook fast path. */
 export async function handleReplyComment(options: ReplyCommentOptions): Promise<boolean> {
   const { pending, repo, identity, github } = options;
+  const logger = options.logger ?? log;
   if (!isPendingReplyAuthorized(pending, identity, options.authorizedLogins)) {
-    console.warn(
-      `[pi-reviewer] reply ${pending.commentId} by "${pending.actor.login ?? "unknown"}" is not authorized; ignoring`,
-    );
+    logger.warn("reply.comment.not_authorized", "Reply is not authorized; ignoring", {
+      commentId: pending.commentId,
+      login: pending.actor.login ?? "unknown",
+    });
     return false;
   }
   try {
     let snapshot = options.snapshot;
     let context = findReplyContext(snapshot, pending, identity);
     if (!context) {
-      console.warn(
-        `[pi-reviewer] reply ${pending.commentId} has no usable context (missing root/reply/thread or thread already resolved); ignoring`,
-      );
+      logger.warn("reply.context.unavailable", "Reply has no usable context; ignoring", {
+        commentId: pending.commentId,
+      });
       return false;
     }
     if (snapshot.pullRequest.head.sha !== pending.headSha) {
-      console.warn(
-        `[pi-reviewer] reply ${pending.commentId} skipped: PR head moved before handling`,
-      );
+      logger.warn("reply.head_changed", "PR head moved before handling reply", {
+        commentId: pending.commentId,
+        expectedHeadSha: pending.headSha,
+        actualHeadSha: snapshot.pullRequest.head.sha,
+      });
       return false;
     }
     snapshot = await options.refreshSnapshot();
     context = findReplyContext(snapshot, pending, identity);
     if (!context) {
-      console.warn(
-        `[pi-reviewer] reply ${pending.commentId} context disappeared on refresh; ignoring`,
-      );
+      logger.warn("reply.context.disappeared", "Reply context disappeared on refresh; ignoring", {
+        commentId: pending.commentId,
+      });
       return false;
     }
     if (snapshot.pullRequest.head.sha !== pending.headSha) {
-      console.warn(`[pi-reviewer] reply ${pending.commentId} skipped: PR head moved on refresh`);
+      logger.warn("reply.head_changed", "PR head moved on refresh", {
+        commentId: pending.commentId,
+        expectedHeadSha: pending.headSha,
+        actualHeadSha: snapshot.pullRequest.head.sha,
+      });
       return false;
     }
     const { parent, triggering, thread } = context;
@@ -334,25 +361,30 @@ export async function handleReplyComment(options: ReplyCommentOptions): Promise<
         existingStatus.targetSha !== pending.headSha ||
         !["STILL_OPEN", "RESOLVED"].includes(existingStatus.status)
       ) {
-        console.warn(
-          `[pi-reviewer] reply ${pending.commentId} skipped: existing reply marker is not recoverable for head ${pending.headSha}`,
-        );
+        logger.warn("reply.marker.unrecoverable", "Existing reply marker is not recoverable", {
+          commentId: pending.commentId,
+          headSha: pending.headSha,
+        });
         return false;
       }
       if (existingStatus.status === "STILL_OPEN") {
         const beforeResolve = await github.getPullRequest(repo, snapshot.pullRequest.number);
         if (beforeResolve.head.sha !== pending.headSha) {
-          console.warn(
-            `[pi-reviewer] reply ${pending.commentId} skipped: PR head moved before resolving an existing reply`,
-          );
+          logger.warn("reply.head_changed", "PR head moved before resolving an existing reply", {
+            commentId: pending.commentId,
+            expectedHeadSha: pending.headSha,
+            actualHeadSha: beforeResolve.head.sha,
+          });
           return false;
         }
         await github.resolveThread(thread.id);
         const beforeUpdate = await github.getPullRequest(repo, snapshot.pullRequest.number);
         if (beforeUpdate.head.sha !== pending.headSha) {
-          console.warn(
-            `[pi-reviewer] reply ${pending.commentId} skipped: PR head moved before updating an existing reply`,
-          );
+          logger.warn("reply.head_changed", "PR head moved before updating an existing reply", {
+            commentId: pending.commentId,
+            expectedHeadSha: pending.headSha,
+            actualHeadSha: beforeUpdate.head.sha,
+          });
           return false;
         }
         await github.updateReviewComment(
@@ -364,9 +396,11 @@ export async function handleReplyComment(options: ReplyCommentOptions): Promise<
       } else {
         const beforeResolve = await github.getPullRequest(repo, snapshot.pullRequest.number);
         if (beforeResolve.head.sha !== pending.headSha) {
-          console.warn(
-            `[pi-reviewer] reply ${pending.commentId} skipped: PR head moved before resolving an existing reply`,
-          );
+          logger.warn("reply.head_changed", "PR head moved before resolving an existing reply", {
+            commentId: pending.commentId,
+            expectedHeadSha: pending.headSha,
+            actualHeadSha: beforeResolve.head.sha,
+          });
           return false;
         }
         await github.resolveThread(thread.id);
@@ -389,23 +423,27 @@ export async function handleReplyComment(options: ReplyCommentOptions): Promise<
       }),
     );
     if (!action) {
-      console.warn(
-        `[pi-reviewer] reply ${pending.commentId}: model returned no actionable response`,
-      );
+      logger.warn("reply.model.no_action", "Model returned no actionable response", {
+        commentId: pending.commentId,
+      });
       return false;
     }
     snapshot = await options.refreshSnapshot();
     context = findReplyContext(snapshot, pending, identity);
     if (!context) {
-      console.warn(
-        `[pi-reviewer] reply ${pending.commentId} context disappeared before posting; ignoring`,
+      logger.warn(
+        "reply.context.disappeared",
+        "Reply context disappeared before posting; ignoring",
+        { commentId: pending.commentId },
       );
       return false;
     }
     if (snapshot.pullRequest.head.sha !== pending.headSha) {
-      console.warn(
-        `[pi-reviewer] reply ${pending.commentId} skipped: PR head moved before posting`,
-      );
+      logger.warn("reply.head_changed", "PR head moved before posting reply", {
+        commentId: pending.commentId,
+        expectedHeadSha: pending.headSha,
+        actualHeadSha: snapshot.pullRequest.head.sha,
+      });
       return false;
     }
     const freshReply = snapshot.comments.find(
@@ -414,9 +452,11 @@ export async function handleReplyComment(options: ReplyCommentOptions): Promise<
     if (action.action === "react") {
       const beforeReaction = await github.getPullRequest(repo, snapshot.pullRequest.number);
       if (beforeReaction.head.sha !== pending.headSha) {
-        console.warn(
-          `[pi-reviewer] reply ${pending.commentId} skipped: PR head moved before reacting`,
-        );
+        logger.warn("reply.head_changed", "PR head moved before reacting", {
+          commentId: pending.commentId,
+          expectedHeadSha: pending.headSha,
+          actualHeadSha: beforeReaction.head.sha,
+        });
         return false;
       }
       await github.createReviewCommentReaction(
@@ -433,25 +473,30 @@ export async function handleReplyComment(options: ReplyCommentOptions): Promise<
         freshStatus.targetSha !== pending.headSha ||
         !["STILL_OPEN", "RESOLVED"].includes(freshStatus.status)
       ) {
-        console.warn(
-          `[pi-reviewer] reply ${pending.commentId} skipped: fresh reply marker is not recoverable for head ${pending.headSha}`,
-        );
+        logger.warn("reply.marker.unrecoverable", "Fresh reply marker is not recoverable", {
+          commentId: pending.commentId,
+          headSha: pending.headSha,
+        });
         return false;
       }
       if (freshStatus.status === "STILL_OPEN") {
         const beforeResolve = await github.getPullRequest(repo, snapshot.pullRequest.number);
         if (beforeResolve.head.sha !== pending.headSha) {
-          console.warn(
-            `[pi-reviewer] reply ${pending.commentId} skipped: PR head moved before resolving a fresh reply`,
-          );
+          logger.warn("reply.head_changed", "PR head moved before resolving a fresh reply", {
+            commentId: pending.commentId,
+            expectedHeadSha: pending.headSha,
+            actualHeadSha: beforeResolve.head.sha,
+          });
           return false;
         }
         await github.resolveThread(context.thread.id);
         const beforeUpdate = await github.getPullRequest(repo, snapshot.pullRequest.number);
         if (beforeUpdate.head.sha !== pending.headSha) {
-          console.warn(
-            `[pi-reviewer] reply ${pending.commentId} skipped: PR head moved before updating a fresh reply`,
-          );
+          logger.warn("reply.head_changed", "PR head moved before updating a fresh reply", {
+            commentId: pending.commentId,
+            expectedHeadSha: pending.headSha,
+            actualHeadSha: beforeUpdate.head.sha,
+          });
           return false;
         }
         await github.updateReviewComment(
@@ -463,9 +508,11 @@ export async function handleReplyComment(options: ReplyCommentOptions): Promise<
       } else {
         const beforeResolve = await github.getPullRequest(repo, snapshot.pullRequest.number);
         if (beforeResolve.head.sha !== pending.headSha) {
-          console.warn(
-            `[pi-reviewer] reply ${pending.commentId} skipped: PR head moved before resolving a fresh reply`,
-          );
+          logger.warn("reply.head_changed", "PR head moved before resolving a fresh reply", {
+            commentId: pending.commentId,
+            expectedHeadSha: pending.headSha,
+            actualHeadSha: beforeResolve.head.sha,
+          });
           return false;
         }
         await github.resolveThread(context.thread.id);
@@ -484,17 +531,21 @@ export async function handleReplyComment(options: ReplyCommentOptions): Promise<
       if (action.action === "resolve") {
         const beforeResolve = await github.getPullRequest(repo, snapshot.pullRequest.number);
         if (beforeResolve.head.sha !== pending.headSha) {
-          console.warn(
-            `[pi-reviewer] reply ${pending.commentId} skipped: PR head moved before resolving the posted reply`,
-          );
+          logger.warn("reply.head_changed", "PR head moved before resolving the posted reply", {
+            commentId: pending.commentId,
+            expectedHeadSha: pending.headSha,
+            actualHeadSha: beforeResolve.head.sha,
+          });
           return false;
         }
         await github.resolveThread(context.thread.id);
         const beforeUpdate = await github.getPullRequest(repo, snapshot.pullRequest.number);
         if (beforeUpdate.head.sha !== pending.headSha) {
-          console.warn(
-            `[pi-reviewer] reply ${pending.commentId} skipped: PR head moved before updating the posted reply`,
-          );
+          logger.warn("reply.head_changed", "PR head moved before updating the posted reply", {
+            commentId: pending.commentId,
+            expectedHeadSha: pending.headSha,
+            actualHeadSha: beforeUpdate.head.sha,
+          });
           return false;
         }
         await github.updateReviewComment(
@@ -507,9 +558,10 @@ export async function handleReplyComment(options: ReplyCommentOptions): Promise<
     }
     return true;
   } catch (error) {
-    console.warn(
-      `[pi-reviewer] reply skipped after error: ${error instanceof Error ? error.message : String(error)}`,
-    );
+    logger.warn("reply.failed", "Reply skipped after error", {
+      commentId: pending.commentId,
+      error: error instanceof Error ? error.message : String(error),
+    });
     return false;
   }
 }
@@ -525,63 +577,84 @@ export interface ReplyRecoveryOptions {
   thinking?: ThinkingLevel;
   piApiKey?: string;
   generate?: (options: Parameters<typeof generateReplyResponse>[0]) => Promise<unknown>;
+  logger?: Logger;
 }
 
 /** Recovers one oldest unprocessed reply per unresolved root. */
 export async function recoverPendingReplies(options: ReplyRecoveryOptions): Promise<number> {
+  const logger = options.logger ?? log;
   const authorizedLogins =
     options.authorizedLogins ??
     (await resolveAuthorizedLogins(
       options.github,
       options.repo,
       candidateReplyAuthors(options.snapshot, options.identity),
+      logger,
     ));
-  const pending = discoverPendingReplies(options.snapshot, options.identity, authorizedLogins);
+  const pending = discoverPendingReplies(
+    options.snapshot,
+    options.identity,
+    authorizedLogins,
+    logger,
+  );
   let recovered = 0;
   for (const reply of pending) {
     try {
       const snapshot = options.snapshot;
       if (snapshot.pullRequest.head.sha !== reply.headSha) {
-        console.warn(
-          `[pi-reviewer] reply ${reply.commentId} skipped: PR head changed before recovery`,
-        );
+        logger.warn("reply.head_changed", "PR head changed before recovery", {
+          commentId: reply.commentId,
+          expectedHeadSha: reply.headSha,
+          actualHeadSha: snapshot.pullRequest.head.sha,
+        });
         continue;
       }
-      if (await handleReplyComment({ ...options, authorizedLogins, pending: reply, snapshot }))
+      if (
+        await handleReplyComment({ ...options, logger, authorizedLogins, pending: reply, snapshot })
+      )
         recovered++;
     } catch (error) {
-      console.warn(
-        `[pi-reviewer] reply recovery skipped: ${error instanceof Error ? error.message : String(error)}`,
-      );
+      logger.warn("reply.recovery.failed", "Reply recovery skipped after error", {
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   }
   if (pending.length > 0)
-    console.log(`[pi-reviewer] reply recovery: pending=${pending.length} recovered=${recovered}`);
+    logger.info("reply.recovery.completed", "Reply recovery completed", {
+      pending: pending.length,
+      recovered,
+    });
   return recovered;
 }
 
 /** Handle one review-comment reply without entering the normal review path. */
 export async function handleReply(options: ReplyHandlerOptions): Promise<boolean> {
   const { event, repo, pullRequest, identity, github } = options;
+  const logger = options.logger ?? log;
   // Log before any bail so the fast path identifies the event it handled even
   // when it ends without side effects.
-  console.log(
-    `[pi-reviewer] reply event received: kind=${event.kind} commentId=${String(event.commentId)} parentCommentId=${String(event.parentCommentId)} author="${event.actor?.login ?? "unknown"}" type="${event.actor?.type ?? "unknown"}" headSha=${event.headSha ?? "none"}`,
-  );
+  logger.info("reply.event.received", "Reply event received", {
+    kind: event.kind,
+    commentId: event.commentId,
+    parentCommentId: event.parentCommentId,
+    author: event.actor?.login ?? "unknown",
+    actorType: event.actor?.type ?? "unknown",
+    headSha: event.headSha ?? "none",
+  });
   if (event.kind !== "reply") {
-    console.warn(`[pi-reviewer] reply event ignored: unexpected event kind "${event.kind}"`);
+    logger.warn("reply.event.ignored", "Unexpected event kind", { kind: event.kind });
     return false;
   }
   if (event.actor?.type === "Bot") {
-    console.log("[pi-reviewer] reply event ignored: author is a bot");
+    logger.info("reply.event.ignored", "Reply author is a bot");
     return false;
   }
   if (!event.actor?.login) {
-    console.warn("[pi-reviewer] reply event ignored: event has no actor login");
+    logger.warn("reply.event.ignored", "Reply event has no actor login");
     return false;
   }
   if (event.actor.login === identity.login) {
-    console.log("[pi-reviewer] reply event ignored: author is the reviewer itself");
+    logger.info("reply.event.ignored", "Reply author is the reviewer itself");
     return false;
   }
   if (
@@ -590,20 +663,21 @@ export async function handleReply(options: ReplyHandlerOptions): Promise<boolean
     (event.commentId ?? 0) <= 0 ||
     (event.parentCommentId ?? 0) <= 0
   ) {
-    console.warn(
-      `[pi-reviewer] reply event ignored: invalid comment ids commentId=${String(event.commentId)} parentCommentId=${String(event.parentCommentId)}`,
-    );
+    logger.warn("reply.event.invalid_comment_ids", "Reply event has invalid comment IDs", {
+      commentId: event.commentId,
+      parentCommentId: event.parentCommentId,
+    });
     return false;
   }
   if (!event.headSha) {
-    console.warn("[pi-reviewer] reply event ignored: event has no head SHA");
+    logger.warn("reply.event.ignored", "Reply event has no head SHA");
     return false;
   }
-  const authorizedLogins = await resolveAuthorizedLogins(github, repo, [event.actor.login]);
+  const authorizedLogins = await resolveAuthorizedLogins(github, repo, [event.actor.login], logger);
   if (!authorizedLogins.has(event.actor.login)) {
-    console.warn(
-      `[pi-reviewer] reply event ignored: author "${event.actor.login}" is not authorized to reply`,
-    );
+    logger.warn("reply.event.ignored", "Reply author is not authorized", {
+      login: event.actor.login,
+    });
     return false;
   }
   try {
@@ -629,11 +703,12 @@ export async function handleReply(options: ReplyHandlerOptions): Promise<boolean
       thinking: options.thinking,
       piApiKey: options.piApiKey,
       generate: options.generate,
+      logger,
     });
   } catch (error) {
-    console.warn(
-      `[pi-reviewer] reply skipped after error: ${error instanceof Error ? error.message : String(error)}`,
-    );
+    logger.warn("reply.failed", "Reply skipped after error", {
+      error: error instanceof Error ? error.message : String(error),
+    });
     return false;
   }
 }

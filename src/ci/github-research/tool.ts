@@ -7,6 +7,7 @@ import {
   type GitHubSearchKind,
 } from "./client.js";
 import type { GitHubResearchConfig } from "./config.js";
+import { log } from "../log.js";
 
 const searchKinds = ["repositories", "code", "pull_requests", "issues", "discussions"] as const;
 const readKinds = ["file", "pull_request", "issue", "discussion"] as const;
@@ -60,7 +61,7 @@ export function createGitHubResearchTools(
         return { content: [{ type: "text", text }], details: params };
       } catch (error) {
         const message = safeFailure(error);
-        console.warn(`[pi-reviewer] GitHub search failed: ${message}`);
+        log.warn("github_research.search.failed", "GitHub search failed", { error: message });
         return {
           content: [
             { type: "text", text: `GitHub search unavailable: ${message}. Continue without it.` },
@@ -90,7 +91,7 @@ export function createGitHubResearchTools(
         return { content: [{ type: "text", text }], details: params };
       } catch (error) {
         const message = safeFailure(error);
-        console.warn(`[pi-reviewer] GitHub read failed: ${message}`);
+        log.warn("github_research.read.failed", "GitHub read failed", { error: message });
         return {
           content: [
             { type: "text", text: `GitHub read unavailable: ${message}. Continue without it.` },

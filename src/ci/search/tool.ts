@@ -2,6 +2,7 @@ import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { Type, type Static } from "@earendil-works/pi-ai";
 import type { SearchCitation } from "./types.js";
 import type { SearchClient } from "./client.js";
+import { log } from "../log.js";
 
 const searchSchema = Type.Object(
   {
@@ -37,7 +38,9 @@ function logSearchFailure(kind: "web search" | "AI search", error: unknown): voi
   })
     .join("")
     .slice(0, 300);
-  console.warn(`[pi-reviewer] ${kind} failed: ${safeMessage}`);
+  log.warn(kind === "web search" ? "search.web.failed" : "search.ai.failed", `${kind} failed`, {
+    error: safeMessage,
+  });
 }
 
 export function createSearchTools(

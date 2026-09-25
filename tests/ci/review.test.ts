@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { access, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { createLogger, createMemorySink, formatGroup } from "../../src/logging/index.js";
 
 vi.mock("../../src/core/diff-resolver.js", () => ({
   resolveDiff: vi.fn(),
@@ -287,18 +288,27 @@ describe("review", () => {
   });
 
   it("dry-run logs source and prompt, without calling agent or output", async () => {
-    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const { sink, records } = createMemorySink();
 
-    await review({ cwd: "/repo", dryRun: true });
+    await review({ cwd: "/repo", dryRun: true, logger: createLogger({ sink }) });
 
-    expect(logSpy).toHaveBeenCalledWith("Diff source: git diff origin/main...HEAD");
-    expect(logSpy).toHaveBeenCalledWith(
-      expect.stringContaining("System prompt:\n\nYou are a code reviewer"),
-    );
-    expect(logSpy).toHaveBeenCalledWith(
-      expect.stringContaining(
-        "User prompt:\n\nReview this diff:\n<diff>\ndiff --git a/a.ts b/a.ts",
-      ),
+    expect(records).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          event: "review.dry_run.diff_source",
+          fields: { source: "git diff origin/main...HEAD" },
+        }),
+        expect.objectContaining({
+          event: "review.dry_run.system_prompt",
+          fields: expect.objectContaining({
+            prompt: expect.stringContaining("You are a code reviewer"),
+          }),
+        }),
+        expect.objectContaining({
+          event: "review.dry_run.user_prompt",
+          fields: expect.objectContaining({ prompt: expect.stringContaining("diff --git a/a.ts") }),
+        }),
+      ]),
     );
     expect(AgentMock).not.toHaveBeenCalled();
     expect(sendOutputMock).not.toHaveBeenCalled();
@@ -425,28 +435,42 @@ describe("review", () => {
       { type: "tool_execution_start", toolName: "inspect", args: circularArgs },
       { type: "tool_execution_start", toolName: "submit_review", args: { body: "x".repeat(5000) } },
     ];
-    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const { sink, records } = createMemorySink();
 
-    await review({ cwd: "/repo", debug: true });
+    await review({ cwd: "/repo", debug: true, logger: createLogger({ sink }) });
 
-    expect(logSpy).toHaveBeenCalledWith(
-      '[pi-reviewer] tool call: web_search id=call-1 args={"query":"AWS SDK ErrorMetadata export"}',
-    );
-    expect(logSpy).toHaveBeenCalledWith("[pi-reviewer] tool result: web_search id=call-1 error");
-    expect(logSpy).toHaveBeenCalledWith("[pi-reviewer] tool call: read_file id=call-2 args={}");
-    expect(logSpy).toHaveBeenCalledWith(
-      "[pi-reviewer] tool call: inspect args=[unserializable args]",
-    );
-    expect(logSpy).toHaveBeenCalledWith(
-      expect.stringMatching(
-        /^\[pi-reviewer\] tool call: submit_review args=.{3000}… \[truncated \d+ chars\]$/,
-      ),
+    expect(records).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          event: "review.tool.call",
+          fields: expect.objectContaining({ tool: "web_search", callId: "call-1" }),
+        }),
+        expect.objectContaining({
+          event: "review.tool.result",
+          fields: expect.objectContaining({ tool: "web_search", status: "error" }),
+        }),
+        expect.objectContaining({
+          event: "review.tool.call",
+          fields: expect.objectContaining({ tool: "inspect", args: "[unserializable args]" }),
+        }),
+        expect.objectContaining({
+          event: "review.tool.call",
+          fields: expect.objectContaining({
+            tool: "submit_review",
+            args: expect.stringMatching(/^.{3000}… \[truncated \d+ chars\]$/),
+          }),
+        }),
+      ]),
     );
 
-    logSpy.mockClear();
-    await review({ cwd: "/repo", debug: false });
-    expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining("tool call:"));
-    expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining("tool result:"));
+    const disabled = createMemorySink();
+    await review({ cwd: "/repo", debug: false, logger: createLogger({ sink: disabled.sink }) });
+    expect(disabled.records).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ event: "review.tool.call" }),
+        expect.objectContaining({ event: "review.tool.result" }),
+      ]),
+    );
   });
 
   it("logs MCP proxy tool names and status without writing args or returned payloads", async () => {
@@ -464,19 +488,31 @@ describe("review", () => {
       },
       { type: "tool_execution_end", toolName: "mcp", toolCallId: "mcp-call-1", isError: false },
     ];
-    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const { sink, records } = createMemorySink();
     const mcpConfig: CiMcpConfig = { mcpServers: { docs: { url: "https://mcp.example/mcp" } } };
 
-    await review({ cwd: "/repo", output: "comment", mcpConfig, debug: true });
+    await review({
+      cwd: "/repo",
+      output: "comment",
+      mcpConfig,
+      debug: true,
+      logger: createLogger({ sink }),
+    });
 
-    expect(logSpy).toHaveBeenCalledWith(
-      "[pi-reviewer] MCP tool call: docs/search_docs id=mcp-call-1",
+    expect(records).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          event: "review.mcp.tool_call",
+          fields: { tool: "docs/search_docs", callId: "mcp-call-1" },
+        }),
+        expect.objectContaining({
+          event: "review.mcp.tool_result",
+          fields: { tool: "docs/search_docs", callId: "mcp-call-1", status: "success" },
+        }),
+      ]),
     );
-    expect(logSpy).toHaveBeenCalledWith(
-      "[pi-reviewer] MCP tool result: docs/search_docs id=mcp-call-1 success",
-    );
-    expect(logSpy.mock.calls.flat().join("\n")).not.toContain(secretArgument);
-    expect(logSpy.mock.calls.flat().join("\n")).not.toContain("private query");
+    expect(JSON.stringify(records)).not.toContain(secretArgument);
+    expect(JSON.stringify(records)).not.toContain("private query");
   });
 
   it("does not pass ambient process environment to configured stdio servers", async () => {
@@ -789,18 +825,24 @@ describe("review", () => {
   });
 
   it("scans configured doc dirs and injects matching docs into the system prompt", async () => {
-    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const { sink, records } = createMemorySink();
     loadDocContextMock.mockResolvedValueOnce([
       { path: ".pi/notes/auth.md", content: "auth doc body" },
     ]);
 
-    await review({ cwd: "/repo", dryRun: true, docDirs: [".pi/notes"] });
+    await review({
+      cwd: "/repo",
+      dryRun: true,
+      docDirs: [".pi/notes"],
+      logger: createLogger({ sink }),
+    });
 
     expect(loadDocContextMock).toHaveBeenCalledWith(
       expect.objectContaining({ cwd: "/repo", docDirs: [".pi/notes"] }),
     );
-    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("System prompt:"));
-    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("auth doc body"));
+    expect(
+      records.find(({ event }) => event === "review.dry_run.system_prompt")?.fields.prompt,
+    ).toContain("auth doc body");
   });
 
   it("reads doc dirs from PI_REVIEWER_DOC_DIRS env when option absent", async () => {
@@ -1184,8 +1226,8 @@ describe("review", () => {
     );
   });
 
-  it("logs the raw text fallback in CI-safe lines", async () => {
-    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+  it("records text fallback semantically and keeps rendered group lines inert", async () => {
+    const { sink, records } = createMemorySink();
     createReviewToolMock.mockReturnValue({
       tool: {
         name: "submit_review",
@@ -1200,12 +1242,36 @@ describe("review", () => {
       return makeFakeAgent("first line\n::warning::not-a-command") as any;
     });
 
-    await review({ cwd: "/repo" });
+    await review({ cwd: "/repo", logger: createLogger({ sink }) });
 
-    expect(log).toHaveBeenCalledWith("::group::Pi Reviewer raw assistant response (text fallback)");
-    expect(log).toHaveBeenCalledWith("| first line");
-    expect(log).toHaveBeenCalledWith("| ::warning::not-a-command");
-    expect(log).toHaveBeenCalledWith("::endgroup::");
+    expect(
+      records
+        .filter(
+          ({ event }) =>
+            event.startsWith("review.text_fallback") || event === "review.agent.completed_fallback",
+        )
+        .map(({ event, level, kind, fields }) => ({ event, level, kind, fields })),
+    ).toEqual([
+      { event: "review.text_fallback", level: "warn", kind: undefined, fields: {} },
+      {
+        event: "review.text_fallback.content",
+        level: "info",
+        kind: "group",
+        fields: { content: "first line\n::warning::not-a-command" },
+      },
+      {
+        event: "review.agent.completed_fallback",
+        level: "info",
+        kind: undefined,
+        fields: { responseLength: 35 },
+      },
+    ]);
+    expect(formatGroup("response", "first line\n::warning::not-a-command")).toEqual([
+      "::group::response",
+      "| first line",
+      "| ::warning::not-a-command",
+      "::endgroup::",
+    ]);
   });
 });
 
