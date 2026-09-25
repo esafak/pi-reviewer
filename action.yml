@@ -21,7 +21,7 @@ inputs:
     default: "off"
 
   debug:
-    description: "Log tool calls to the workflow log (default: false)."
+    description: "Log tool calls and upload model thinking as a one-day artifact. Thinking may contain sensitive context (default: false)."
     required: false
     default: "false"
 
@@ -340,6 +340,7 @@ runs:
         PI_REVIEWER_MODEL: ${{ inputs.model }}
         PI_REVIEWER_THINKING: ${{ inputs.thinking }}
         PI_REVIEWER_DEBUG: ${{ inputs.debug }}
+        PI_REVIEWER_THINKING_ARTIFACT: ${{ runner.temp }}/pi-reviewer-thinking.txt
         MIN_SEVERITY: ${{ inputs.min-severity }}
         REACT_ON_NO_FINDINGS: ${{ inputs.react-on-no-findings }}
         PI_REVIEWER_DOC_DIRS: ${{ inputs.doc-dirs }}
@@ -362,6 +363,15 @@ runs:
       run: >-
         "${{ github.action_path }}/node_modules/.bin/tsx"
         "${{ github.action_path }}/src/ci/action-entry.ts"
+
+    - name: Upload model thinking artifact
+      if: ${{ always() && inputs.debug == 'true' }}
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      with:
+        name: pi-reviewer-thinking
+        path: ${{ runner.temp }}/pi-reviewer-thinking.txt
+        retention-days: 1
+        if-no-files-found: ignore
 
     - name: Clean up executable temporary directory
       if: ${{ always() && steps.executable-temp.outputs.path != '' }}

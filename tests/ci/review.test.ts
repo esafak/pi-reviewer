@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
-import { access, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { createLogger, createMemorySink, formatGroup } from "../../src/logging/index.js";
@@ -477,6 +477,39 @@ describe("review", () => {
         expect.objectContaining({ event: "review.tool.result" }),
       ]),
     );
+  });
+
+  it("writes agent thinking to the configured artifact only when debug is enabled", async () => {
+    fakeAgentEvents = [
+      {
+        type: "message_update",
+        assistantMessageEvent: {
+          type: "thinking_delta",
+          contentIndex: 0,
+          delta: "Considering the diff.",
+        },
+      },
+    ];
+    const { sink, records } = createMemorySink();
+    const directory = await mkdtemp(path.join(tmpdir(), "pi-reviewer-thinking-test-"));
+    const artifactPath = path.join(directory, "thinking.txt");
+    const previousArtifactPath = process.env.PI_REVIEWER_THINKING_ARTIFACT;
+    process.env.PI_REVIEWER_THINKING_ARTIFACT = artifactPath;
+    try {
+      await review({ cwd: "/repo", debug: true, logger: createLogger({ sink }) });
+      expect(await readFile(artifactPath, "utf8")).toBe("Considering the diff.\n");
+      expect(records).not.toEqual(
+        expect.arrayContaining([expect.objectContaining({ event: "review.agent.thinking" })]),
+      );
+
+      await rm(artifactPath);
+      await review({ cwd: "/repo", debug: false, logger: createLogger({ sink }) });
+      await expect(access(artifactPath)).rejects.toThrow();
+    } finally {
+      if (previousArtifactPath === undefined) delete process.env.PI_REVIEWER_THINKING_ARTIFACT;
+      else process.env.PI_REVIEWER_THINKING_ARTIFACT = previousArtifactPath;
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 
   it("logs MCP proxy tool names and status without writing args or returned payloads", async () => {
