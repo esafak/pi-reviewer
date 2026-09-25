@@ -579,20 +579,32 @@ export async function review(options: ReviewOptions): Promise<void> {
   try {
     let finalResponse = "";
     let structuredResult: ReturnType<typeof getResult>;
-    let thinking = "";
+    const thinkingTrace: Array<Record<string, unknown>> = [];
+    const traceStartedAt = performance.now();
+    const traceEnabled = options.debug && Boolean(process.env.PI_REVIEWER_THINKING_ARTIFACT);
+    const addTraceEvent = (type: string, fields: Record<string, unknown> = {}) => {
+      if (!traceEnabled) return;
+      thinkingTrace.push({
+        sequence: thinkingTrace.length,
+        timestamp: new Date().toISOString(),
+        elapsedMs: Math.round(performance.now() - traceStartedAt),
+        type,
+        ...fields,
+      });
+    };
     let thinkingArtifactWrite: Promise<void> | undefined;
 
     const ended = new Promise<void>((resolve, reject) => {
       unsubscribe = agent.subscribe((event: unknown) => {
         if (!event || typeof event !== "object") return;
         const eventType = (event as { type?: string }).type;
-        if (eventType === "message_update" && options.debug) {
+        if (eventType === "message_update" && traceEnabled) {
           const update = event as {
             assistantMessageEvent?: { type?: string; delta?: unknown };
           };
           const thinkingEvent = update.assistantMessageEvent;
           if (thinkingEvent?.type === "thinking_delta" && typeof thinkingEvent.delta === "string") {
-            thinking += thinkingEvent.delta;
+            addTraceEvent("thinking", { text: thinkingEvent.delta });
           }
         }
         if (eventType === "tool_execution_start" || eventType === "tool_execution_end") {
@@ -612,6 +624,16 @@ export async function review(options: ReviewOptions): Promise<void> {
               ? (mcpToolCalls.get(rawCallId) ??
                 mcpDebugToolName(rawToolName, toolEvent.args, registeredMcpTools))
               : mcpDebugToolName(rawToolName, toolEvent.args, registeredMcpTools);
+          if (traceEnabled) {
+            const toolName = mcpName ?? rawToolName;
+            addTraceEvent(eventType === "tool_execution_start" ? "tool_start" : "tool_end", {
+              tool: sanitizeMcpDebugName(toolName).slice(0, 200),
+              callId: rawCallId ? sanitizeMcpDebugName(rawCallId).slice(0, 128) : undefined,
+              ...(eventType === "tool_execution_end"
+                ? { status: toolEvent.isError === true ? "error" : "success" }
+                : {}),
+            });
+          }
           if (eventType === "tool_execution_start") {
             if (mcpName) {
               if (rawCallId) mcpToolCalls.set(rawCallId, mcpName);
@@ -652,10 +674,10 @@ export async function review(options: ReviewOptions): Promise<void> {
 
         const ev = event as { messages?: unknown; stopReason?: string; errorMessage?: string };
         const msgs = Array.isArray(ev.messages) ? ev.messages : [];
-        if (options.debug && thinking && process.env.PI_REVIEWER_THINKING_ARTIFACT) {
+        if (thinkingTrace.length > 0 && process.env.PI_REVIEWER_THINKING_ARTIFACT) {
           thinkingArtifactWrite = writeFile(
             process.env.PI_REVIEWER_THINKING_ARTIFACT,
-            `${thinking}\n`,
+            `${thinkingTrace.map((entry) => JSON.stringify(entry)).join("\n")}\n`,
             { encoding: "utf8", mode: 0o600 },
           ).catch((error: unknown) => {
             logger.warn(

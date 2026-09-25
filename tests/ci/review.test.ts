@@ -486,7 +486,28 @@ describe("review", () => {
         assistantMessageEvent: {
           type: "thinking_delta",
           contentIndex: 0,
-          delta: "Considering the diff.",
+          delta: "Before tool.",
+        },
+      },
+      {
+        type: "tool_execution_start",
+        toolName: "read_file",
+        toolCallId: "call-1",
+        args: { path: "private/path.ts" },
+      },
+      {
+        type: "tool_execution_end",
+        toolName: "read_file",
+        toolCallId: "call-1",
+        result: "private file contents",
+        isError: false,
+      },
+      {
+        type: "message_update",
+        assistantMessageEvent: {
+          type: "thinking_delta",
+          contentIndex: 0,
+          delta: "After tool.",
         },
       },
     ];
@@ -497,7 +518,32 @@ describe("review", () => {
     process.env.PI_REVIEWER_THINKING_ARTIFACT = artifactPath;
     try {
       await review({ cwd: "/repo", debug: true, logger: createLogger({ sink }) });
-      expect(await readFile(artifactPath, "utf8")).toBe("Considering the diff.\n");
+      const trace = (await readFile(artifactPath, "utf8"))
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as Record<string, unknown>);
+      expect(trace.map((entry) => entry.type)).toEqual([
+        "thinking",
+        "tool_start",
+        "tool_end",
+        "thinking",
+      ]);
+      expect(trace[0]).toMatchObject({ type: "thinking", text: "Before tool." });
+      expect(trace[1]).toMatchObject({ type: "tool_start", tool: "read_file", callId: "call-1" });
+      expect(trace[2]).toMatchObject({
+        type: "tool_end",
+        tool: "read_file",
+        callId: "call-1",
+        status: "success",
+      });
+      expect(trace[3]).toMatchObject({ type: "thinking", text: "After tool." });
+      for (const [index, entry] of trace.entries()) {
+        expect(entry.sequence).toBe(index);
+        expect(entry.timestamp).toEqual(expect.stringMatching(/^\d{4}-\d\d-\d\dT/));
+        expect(entry.elapsedMs).toEqual(expect.any(Number));
+      }
+      expect(JSON.stringify(trace)).not.toContain("private/path.ts");
+      expect(JSON.stringify(trace)).not.toContain("private file contents");
       expect(records).not.toEqual(
         expect.arrayContaining([expect.objectContaining({ event: "review.agent.thinking" })]),
       );
