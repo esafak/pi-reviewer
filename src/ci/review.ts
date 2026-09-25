@@ -7,7 +7,7 @@ import {
   DefaultResourceLoader,
   SessionManager,
 } from "@earendil-works/pi-coding-agent";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -579,11 +579,22 @@ export async function review(options: ReviewOptions): Promise<void> {
   try {
     let finalResponse = "";
     let structuredResult: ReturnType<typeof getResult>;
+    let thinking = "";
+    let thinkingArtifactWrite: Promise<void> | undefined;
 
     const ended = new Promise<void>((resolve, reject) => {
       unsubscribe = agent.subscribe((event: unknown) => {
         if (!event || typeof event !== "object") return;
         const eventType = (event as { type?: string }).type;
+        if (eventType === "message_update" && options.debug) {
+          const update = event as {
+            assistantMessageEvent?: { type?: string; delta?: unknown };
+          };
+          const thinkingEvent = update.assistantMessageEvent;
+          if (thinkingEvent?.type === "thinking_delta" && typeof thinkingEvent.delta === "string") {
+            thinking += thinkingEvent.delta;
+          }
+        }
         if (eventType === "tool_execution_start" || eventType === "tool_execution_end") {
           const toolEvent = event as {
             toolName?: unknown;
@@ -641,6 +652,25 @@ export async function review(options: ReviewOptions): Promise<void> {
 
         const ev = event as { messages?: unknown; stopReason?: string; errorMessage?: string };
         const msgs = Array.isArray(ev.messages) ? ev.messages : [];
+        if (options.debug && thinking && process.env.PI_REVIEWER_THINKING_ARTIFACT) {
+          thinkingArtifactWrite = writeFile(
+            process.env.PI_REVIEWER_THINKING_ARTIFACT,
+            `${thinking}\n`,
+            { encoding: "utf8", mode: 0o600 },
+          ).catch((error: unknown) => {
+            logger.warn(
+              "review.agent.thinking_artifact_failed",
+              "Could not write thinking artifact",
+              {
+                error: error instanceof Error ? error.message : String(error),
+              },
+            );
+          });
+        }
+        const finish = (callback: () => void) => {
+          if (thinkingArtifactWrite) void thinkingArtifactWrite.then(callback);
+          else callback();
+        };
         const lastAssistant = [...msgs]
           .reverse()
           .find((m) => (m as { role?: string })?.role === "assistant") as
@@ -654,7 +684,7 @@ export async function review(options: ReviewOptions): Promise<void> {
           (lastAssistant?.stopReason === "error" ? lastAssistant.errorMessage : undefined);
         if (errorMessage) {
           logger.error("review.agent.error", "Agent error", { error: errorMessage });
-          reject(new Error(`Agent failed: ${errorMessage}`));
+          finish(() => reject(new Error(`Agent failed: ${errorMessage}`)));
           return;
         }
 
@@ -667,7 +697,7 @@ export async function review(options: ReviewOptions): Promise<void> {
           logger.info("review.agent.completed", "Agent completed via submit_review tool", {
             comments: toolResult.comments.length,
           });
-          resolve();
+          finish(resolve);
           return;
         }
 
@@ -692,7 +722,7 @@ export async function review(options: ReviewOptions): Promise<void> {
               .length,
             lastAssistantContent: shape,
           });
-          reject(new Error("Agent returned an empty response"));
+          finish(() => reject(new Error("Agent returned an empty response")));
           return;
         }
 
@@ -706,12 +736,13 @@ export async function review(options: ReviewOptions): Promise<void> {
         logger.info("review.agent.completed_fallback", "Agent completed with text fallback", {
           responseLength: finalResponse.length,
         });
-        resolve();
+        finish(resolve);
       });
     });
 
     await agent.prompt(userPrompt);
     await ended;
+    await thinkingArtifactWrite;
     if (failedMcpTools.size > 0) {
       const failedTools = [...failedMcpTools].slice(0, 5).map(sanitizeMcpDebugName);
       const additional = failedMcpTools.size > failedTools.length ? " and other MCP tools" : "";

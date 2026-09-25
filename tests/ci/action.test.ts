@@ -70,6 +70,11 @@ describe("GitHub Action Vite+ setup", () => {
   it("maps the opt-in debug input to the CI environment", async () => {
     const action = await readFile(path.join(process.cwd(), "action.yml"), "utf8");
     expect(action).toContain("PI_REVIEWER_DEBUG: ${{ inputs.debug }}");
+    expect(action).toContain(
+      "PI_REVIEWER_THINKING_ARTIFACT: ${{ runner.temp }}/pi-reviewer-thinking.txt",
+    );
+    expect(action).toContain("name: Upload model thinking artifact");
+    expect(action).toContain("retention-days: 1");
     expect(action).toContain('default: "false"');
   });
 
