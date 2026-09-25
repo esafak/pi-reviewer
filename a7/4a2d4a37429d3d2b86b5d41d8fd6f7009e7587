@@ -1,0 +1,16 @@
+src/ci/review.ts
+  h_ea91e2db23540f 592-606,701,714,739,753,757-762
+tests/ci/review.test.ts
+  h_ea91e2db23540f 7-11,510-513,527-528,532,552,567
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "a74a2d4a37429d3d2b86b5d41d8fd6f7009e7587",
+  "prompts": {},
+  "humans": {
+    "h_ea91e2db23540f": {
+      "author": "Emre Şafak <3928300+esafak@users.noreply.github.com>"
+    }
+  }
+}
