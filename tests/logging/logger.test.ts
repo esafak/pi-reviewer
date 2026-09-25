@@ -79,6 +79,37 @@ describe("structured logger", () => {
     expect(output).toContain("\u001b[94mtool\u001b[0m=\u001b[32mgithub_read\u001b[0m");
   });
 
+  it("escapes GitHub line breaks in ordinary log records without rewriting percents", () => {
+    const output = formatLog(
+      {
+        level: "warn",
+        event: "reply.failed",
+        message: "Reply failed\n::warning::injected",
+        fields: { error: "first\r\n::error::forged%" },
+      },
+      { target: "github", color: true },
+    ).text;
+
+    expect(output).not.toContain("\n");
+    expect(output).toContain("WARN Reply failed%0A::warning::injected");
+    expect(output).toContain("first%0D%0A::error::forged%");
+  });
+
+  it("keeps multiline GitHub groups line-prefixed instead of flattening them", () => {
+    expect(
+      formatLog(
+        {
+          level: "info",
+          event: "review.fallback.content",
+          message: "Assistant response",
+          fields: { content: "first\n::warning::not-a-command" },
+          kind: "group",
+        },
+        { target: "github", color: true },
+      ).text,
+    ).toBe("::group::Assistant response\n| first\n| ::warning::not-a-command\n::endgroup::");
+  });
+
   it("escapes workflow command delimiters", () => {
     expect(escapeWorkflowCommand("x%\r\ny")).toBe("x%25%0D%0Ay");
   });

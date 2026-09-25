@@ -347,14 +347,20 @@ describe("review", () => {
   });
 
   it("does not create an MCP session for non-comment output", async () => {
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { sink, records } = createMemorySink();
     const mcpConfig: CiMcpConfig = { mcpServers: { docs: { url: "https://mcp.example/mcp" } } };
-    await review({ cwd: "/repo", mcpConfig, output: "terminal" });
+    await review({ cwd: "/repo", mcpConfig, output: "terminal", logger: createLogger({ sink }) });
 
     expect(createAgentSessionMock).not.toHaveBeenCalled();
     expect(AgentMock).toHaveBeenCalled();
-    expect(warnSpy).toHaveBeenCalledWith(
-      "[pi-reviewer] MCP disabled; only available for CI comment-output reviews",
+    expect(records).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          event: "review.mcp.disabled",
+          level: "warn",
+          message: "MCP disabled; only available for CI comment-output reviews",
+        }),
+      ]),
     );
   });
 

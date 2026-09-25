@@ -77,6 +77,10 @@ export function escapeWorkflowCommand(value: string): string {
   return value.replace(/%/g, "%25").replace(/\r/g, "%0D").replace(/\n/g, "%0A");
 }
 
+function escapeGithubLogLineBreaks(value: string): string {
+  return value.replace(/\r/g, "%0D").replace(/\n/g, "%0A");
+}
+
 export function formatLog(record: LogRecord, options: FormatOptions = {}): FormattedLog {
   const prefix = options.prefix ? `[${options.prefix}] ` : "";
   const annotation = options.target === "github" ? options.annotations?.[record.event] : undefined;
@@ -96,7 +100,12 @@ export function formatLog(record: LogRecord, options: FormatOptions = {}): Forma
         : [`${record.message}:`, String(record.fields.content ?? "")];
     return { stream: record.level === "warn" ? "stderr" : "stdout", text: lines.join("\n") };
   }
-  const renderedContent = githubAnnotation ? escapeWorkflowCommand(content) : content;
+  const renderedContent =
+    options.target === "github"
+      ? githubAnnotation
+        ? escapeWorkflowCommand(content)
+        : escapeGithubLogLineBreaks(content)
+      : content;
   const colorized = useColor
     ? `${ANSI[record.level]}${renderedContent}${ANSI_RESET}`
     : renderedContent;
@@ -109,7 +118,7 @@ export function formatLog(record: LogRecord, options: FormatOptions = {}): Forma
 
 export function formatGroup(label: string, content: string): readonly string[] {
   return [
-    `::group::${label}`,
+    `::group::${escapeWorkflowCommand(label)}`,
     ...content.split(/\r?\n/).map((line) => `| ${line}`),
     "::endgroup::",
   ];
