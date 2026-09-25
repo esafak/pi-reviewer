@@ -110,7 +110,6 @@ jobs:
           pi-api-key: ${{ env.PI_API_KEY }}
           model: ${{ vars.MODEL_NAME }}
           thinking: off
-          debug: true
           review-drafts: false
           react-on-no-findings: true
           min-severity: ${{ inputs.min-severity || 'warn' }}
