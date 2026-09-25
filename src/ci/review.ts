@@ -580,6 +580,7 @@ export async function review(options: ReviewOptions): Promise<void> {
     let finalResponse = "";
     let structuredResult: ReturnType<typeof getResult>;
     const thinkingTrace: Array<Record<string, unknown>> = [];
+    let pendingThinking: { timestamp: string; text: string } | undefined;
     const traceEnabled = options.debug && Boolean(process.env.PI_REVIEWER_THINKING_ARTIFACT);
     const addTraceEvent = (type: string, fields: Record<string, unknown> = {}) => {
       if (!traceEnabled) return;
@@ -588,6 +589,15 @@ export async function review(options: ReviewOptions): Promise<void> {
         type,
         ...fields,
       });
+    };
+    const flushThinking = () => {
+      if (!pendingThinking) return;
+      addTraceEvent("thinking", {
+        timestamp: pendingThinking.timestamp,
+        endTimestamp: new Date().toISOString(),
+        text: pendingThinking.text,
+      });
+      pendingThinking = undefined;
     };
     const writeThinkingTrace = async () => {
       const artifactPath = process.env.PI_REVIEWER_THINKING_ARTIFACT;
@@ -615,10 +625,15 @@ export async function review(options: ReviewOptions): Promise<void> {
           };
           const thinkingEvent = update.assistantMessageEvent;
           if (thinkingEvent?.type === "thinking_delta" && typeof thinkingEvent.delta === "string") {
-            addTraceEvent("thinking", { text: thinkingEvent.delta });
+            if (pendingThinking) pendingThinking.text += thinkingEvent.delta;
+            else
+              pendingThinking = { timestamp: new Date().toISOString(), text: thinkingEvent.delta };
+          } else {
+            flushThinking();
           }
         }
         if (eventType === "tool_execution_start" || eventType === "tool_execution_end") {
+          flushThinking();
           const toolEvent = event as {
             toolName?: unknown;
             toolCallId?: unknown;
@@ -682,6 +697,7 @@ export async function review(options: ReviewOptions): Promise<void> {
           }
         }
         if (eventType !== "agent_end") return;
+        flushThinking();
 
         const ev = event as { messages?: unknown; stopReason?: string; errorMessage?: string };
         const msgs = Array.isArray(ev.messages) ? ev.messages : [];

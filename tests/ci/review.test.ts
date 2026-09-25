@@ -491,7 +491,15 @@ describe("review", () => {
         assistantMessageEvent: {
           type: "thinking_delta",
           contentIndex: 0,
-          delta: "Before tool.",
+          delta: "Before",
+        },
+      },
+      {
+        type: "message_update",
+        assistantMessageEvent: {
+          type: "thinking_delta",
+          contentIndex: 0,
+          delta: " tool.",
         },
       },
       {
@@ -516,7 +524,15 @@ describe("review", () => {
         assistantMessageEvent: {
           type: "thinking_delta",
           contentIndex: 0,
-          delta: "After tool.",
+          delta: "After",
+        },
+      },
+      {
+        type: "message_update",
+        assistantMessageEvent: {
+          type: "thinking_delta",
+          contentIndex: 0,
+          delta: " tool.",
         },
       },
     ];
@@ -552,6 +568,7 @@ describe("review", () => {
       for (const entry of trace) {
         expect(entry.timestamp).toEqual(expect.stringMatching(/^\d{4}-\d\d-\d\dT/));
       }
+      expect(trace[0].endTimestamp).toEqual(expect.stringMatching(/^\d{4}-\d\d-\d\dT/));
       expect(JSON.stringify(trace)).not.toContain("private/path.ts");
       expect(JSON.stringify(trace)).not.toContain("private file contents");
       expect(records).not.toEqual(
