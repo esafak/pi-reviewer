@@ -1,5 +1,5 @@
 [tools]
-hk = "2.0.0"
+hk = "2.0.1"
 pnpm = "12.4.1"
 vp = "0.3.2"
 "npm:renovate" = "latest"
