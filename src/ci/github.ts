@@ -69,7 +69,7 @@ type GitHubPathRegistry = {
   reviewCommentReactions: (repo: string, number: number, comment: number) => string;
   collaboratorPermission: (repo: string, login: string) => string;
   issueReactions: (repo: string, number: number) => string;
-  issueReaction: (repo: string, reaction: number) => string;
+  issueReaction: (repo: string, number: number, reaction: number) => string;
 };
 
 export const githubPaths = {
@@ -87,7 +87,8 @@ export const githubPaths = {
   collaboratorPermission: (repo, login) =>
     githubPath("repos", repo, "collaborators", login, "permission"),
   issueReactions: (repo, number) => githubPath("repos", repo, "issues", number, "reactions"),
-  issueReaction: (repo, reaction) => githubPath("repos", repo, "issues", "reactions", reaction),
+  issueReaction: (repo, number, reaction) =>
+    githubPath("repos", repo, "issues", number, "reactions", reaction),
 } as const satisfies GitHubPathRegistry;
 
 function normalizeThreadComment(comment: any): ReviewThreadComment {
@@ -291,8 +292,10 @@ export class GitHubClient {
   listReactions(repo: string, number: number) {
     return this.list<Reaction>(githubPaths.issueReactions(repo, number));
   }
-  deleteReaction(repo: string, reaction: number) {
-    return this.request<void>(githubPaths.issueReaction(repo, reaction), { method: "DELETE" });
+  deleteReaction(repo: string, number: number, reaction: number) {
+    return this.request<void>(githubPaths.issueReaction(repo, number, reaction), {
+      method: "DELETE",
+    });
   }
   async graphql<T>(query: string, variables: Record<string, unknown>) {
     const result = await this.request<{ data?: T; errors?: { message: string }[] }>(

@@ -1617,16 +1617,16 @@ printf("first\\nsecond")
     });
 
     expect(fetchMock).toHaveBeenCalledWith(
-      "https://api.github.com/repos/owner/repo/issues/reactions/7",
+      "https://api.github.com/repos/owner/repo/issues/42/reactions/7",
       expect.objectContaining({ method: "DELETE" }),
     );
-    expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("/issues/reactions/8"))).toBe(
-      false,
-    );
+    expect(
+      fetchMock.mock.calls.some(([url]) => String(url).endsWith("/issues/42/reactions/8")),
+    ).toBe(false);
     expect(
       fetchMock.mock.calls.findIndex(([url]) => String(url).includes("/issues/42/comments")),
     ).toBeLessThan(
-      fetchMock.mock.calls.findIndex(([url]) => String(url).endsWith("/issues/reactions/7")),
+      fetchMock.mock.calls.findIndex(([url]) => String(url).endsWith("/issues/42/reactions/7")),
     );
   });
 
