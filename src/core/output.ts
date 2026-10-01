@@ -158,11 +158,23 @@ async function clearStaleThumbsUp(token: string, repo: string, prNumber: number)
       (reaction) => reaction.content === "+1" && reaction.user?.login === identity.login,
     );
     const deletions = await Promise.allSettled(
-      ownThumbsUps.map((reaction) => client.deleteReaction(repo, reaction.id)),
+      ownThumbsUps.map((reaction) => client.deleteReaction(repo, prNumber, reaction.id)),
     );
     const failed = deletions.filter((result) => result.status === "rejected");
-    if (failed.length > 0)
-      console.warn(`[pi-reviewer] could not remove ${failed.length} stale thumbs-up reaction(s)`);
+    if (failed.length > 0) {
+      const reasons = failed
+        .map((result) =>
+          result.status === "rejected"
+            ? result.reason instanceof Error
+              ? result.reason.message
+              : String(result.reason)
+            : "",
+        )
+        .join("; ");
+      console.warn(
+        `[pi-reviewer] could not remove ${failed.length} stale thumbs-up reaction(s): ${reasons}`,
+      );
+    }
     const removed = ownThumbsUps.length - failed.length;
     if (removed > 0)
       console.log(
