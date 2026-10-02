@@ -274,7 +274,7 @@ runs:
 
     - name: Setup Vite+
       if: ${{ steps.toolchain.outputs.vite_plus_ready != 'true' }}
-      uses: voidzero-dev/setup-vp@9fd26ff49f9b5e6276c2b493da4454ad4527f7f4 # v1.20.0
+      uses: voidzero-dev/setup-vp@24d870228786dc83ae73482406bdd1e7befaec14 # v1.21.0
       env:
         TMPDIR: ${{ steps.executable-temp.outputs.path }}
         VP_HOME: ${{ steps.executable-temp.outputs.path }}
