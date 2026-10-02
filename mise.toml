@@ -1,7 +1,7 @@
 [tools]
 hk = "2.0.1"
 pnpm = "12.4.2"
-vp = "0.3.2"
+vp = "0.3.3"
 "npm:renovate" = "latest"
 
 [env]
