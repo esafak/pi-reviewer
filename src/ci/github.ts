@@ -4,6 +4,8 @@ export interface PullRequest {
   base: { sha: string; repo?: { full_name?: string } };
   draft?: boolean;
   user?: { login?: string; type?: string };
+  title?: string;
+  body?: string | null;
 }
 export interface Review {
   id: number;

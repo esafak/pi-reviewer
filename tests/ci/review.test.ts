@@ -1015,6 +1015,40 @@ describe("review", () => {
     expect(parseDocDirs(".pi/notes\n\ndocs/review,")).toEqual([".pi/notes", "docs/review"]);
   });
 
+  it("injects PR title and body into the system prompt", async () => {
+    const { sink, records } = createMemorySink();
+
+    await review({
+      cwd: "/repo",
+      dryRun: true,
+      title: "Add retry",
+      body: "Fixes the timeout",
+      logger: createLogger({ sink }),
+    });
+
+    const prompt = records.find(({ event }) => event === "review.dry_run.system_prompt")?.fields
+      .prompt as string;
+    expect(prompt).toContain("<pull_request>");
+    expect(prompt).toContain("<title>\nAdd retry\n</title>");
+    expect(prompt).toContain("<body>\nFixes the timeout\n</body>");
+  });
+
+  it("omits the PR section when title and body are null or blank", async () => {
+    const { sink, records } = createMemorySink();
+
+    await review({
+      cwd: "/repo",
+      dryRun: true,
+      title: null,
+      body: "   ",
+      logger: createLogger({ sink }),
+    });
+
+    const prompt = records.find(({ event }) => event === "review.dry_run.system_prompt")?.fields
+      .prompt as string;
+    expect(prompt).not.toContain("<pull_request>");
+  });
+
   it("resolves a provider/modelId with slashes (OpenRouter) for the agent", async () => {
     await review({ cwd: "/repo", model: "openrouter/openai/gpt-5.4-mini" });
 

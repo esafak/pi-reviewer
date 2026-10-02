@@ -329,6 +329,11 @@ async function main(): Promise<void> {
       activeFindings,
       resolvedFindings,
       priorSummary,
+      // Author-stated intent comes from the authenticated pulls API result in
+      // scope here, never from the webhook payload, so intent stays consistent
+      // with the SHAs actually reviewed.
+      title: pr.title,
+      body: pr.body,
       output: "comment",
       minSeverity,
       thinking: parseThinkingLevel(process.env.PI_REVIEWER_THINKING),
