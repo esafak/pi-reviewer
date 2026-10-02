@@ -73,6 +73,8 @@ export interface ReviewOptions {
   allowEmptyDiff?: boolean;
   priorSummary?: string;
   reactOnNoFindings?: boolean;
+  title?: string | null;
+  body?: string | null;
 }
 
 const MAX_DEBUG_TOOL_ARGS_LENGTH = 3000;
@@ -303,6 +305,10 @@ export async function review(options: ReviewOptions): Promise<void> {
   }
 
   const resolvedFindings = selectResolvedFindings(options.resolvedFindings ?? []);
+  // Null and blank titles/bodies carry no intent, so normalize them to absent
+  // before prompt construction keeps the omission check in one place.
+  const prTitle = options.title?.trim() ? options.title : undefined;
+  const prBody = options.body?.trim() ? options.body : undefined;
   const systemPrompt = buildJSONSystemPrompt(
     context,
     options.minSeverity,
@@ -310,6 +316,7 @@ export async function review(options: ReviewOptions): Promise<void> {
     options.activeFindings,
     options.priorSummary,
     resolvedFindings,
+    prTitle || prBody ? { title: prTitle, body: prBody } : undefined,
   );
   // Search is deliberately CI-comment-only. Local terminal/file runs must not
   // receive network tools merely because CI configuration leaked into env.
