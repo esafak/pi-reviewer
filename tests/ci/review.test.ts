@@ -73,7 +73,11 @@ vi.mock("../../src/core/reply-tool.js", () => ({
 }));
 
 import { Agent } from "@earendil-works/pi-agent-core";
-import { createAgentSession, createReadOnlyTools } from "@earendil-works/pi-coding-agent";
+import {
+  createAgentSession,
+  createReadOnlyTools,
+  DefaultResourceLoader,
+} from "@earendil-works/pi-coding-agent";
 import { createMcpAdapter } from "pi-mcp-adapter";
 import { loadContext } from "../../src/core/context.js";
 import { resolveDiff } from "../../src/core/diff-resolver.js";
@@ -180,6 +184,7 @@ const sendOutputMock = vi.mocked(sendOutput);
 const AgentMock = vi.mocked(Agent);
 const createReadOnlyToolsMock = vi.mocked(createReadOnlyTools);
 const createAgentSessionMock = vi.mocked(createAgentSession);
+const DefaultResourceLoaderMock = vi.mocked(DefaultResourceLoader);
 const createMcpAdapterMock = vi.mocked(createMcpAdapter);
 const createReviewToolMock = vi.mocked(createReviewTool);
 const createReplyToolMock = vi.mocked(createReplyTool);
@@ -410,7 +415,11 @@ describe("review", () => {
       expect.arrayContaining(["mcp", "read", "grep", "find", "submit_review"]),
     );
     expect(fakeMcpSession.agent.prompt).toHaveBeenCalled();
-    expect(fakeMcpSession.agent.state.systemPrompt).toContain("<mcp_tool_policy>");
+    // The prompt is seeded via the resource loader's leading system message;
+    // state.systemPrompt replays the transcript and is read-only.
+    expect(DefaultResourceLoaderMock).toHaveBeenCalledWith(
+      expect.objectContaining({ systemPrompt: expect.stringContaining("<mcp_tool_policy>") }),
+    );
     expect(fakeMcpSession.agent.state.tools).toEqual(
       expect.arrayContaining([expect.objectContaining({ name: "submit_review" })]),
     );
