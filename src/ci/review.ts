@@ -532,7 +532,8 @@ export async function review(options: ReviewOptions): Promise<void> {
         throw new Error("MCP adapter tools were not enabled in the review agent");
 
       agent = session.agent;
-      agent.state.systemPrompt = effectiveSystemPrompt;
+      // The system prompt is seeded via the resource loader's leading system
+      // message; state.systemPrompt replays the transcript and is read-only.
       agent.state.model = resolvedModel;
       agent.state.thinkingLevel = options.thinking ?? "off";
       agent.state.tools = [

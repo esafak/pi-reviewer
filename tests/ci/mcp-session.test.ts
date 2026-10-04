@@ -2,7 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vite-plus/test";
-import { EventStream } from "@earendil-works/pi-ai";
+import { EventStream, getCurrentTools } from "@earendil-works/pi-ai";
 import {
   createAgentSession,
   createReadOnlyTools,
@@ -72,10 +72,11 @@ describe("MCP session host integration", () => {
       ];
       const model = getBuiltinModel("anthropic" as never, "claude-opus-4-6" as never)!;
       session.agent.state.model = model as never;
-      session.agent.state.systemPrompt = "MCP session integration test";
+      // The system prompt is seeded via the resource loader above;
+      // state.systemPrompt replays the transcript and is read-only.
       let modelToolNames: string[] = [];
       session.agent.streamFunction = ((_model, context) => {
-        modelToolNames = (context.tools ?? []).map((tool) => tool.name);
+        modelToolNames = getCurrentTools(context.messages).map((tool) => tool.name);
         const message = {
           role: "assistant" as const,
           content: [{ type: "text" as const, text: "done" }],
