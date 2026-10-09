@@ -40,6 +40,15 @@ jobs:
           if ! command -v bwrap >/dev/null 2>&1; then
             sudo apt-get update && sudo apt-get install -y bubblewrap
           fi
+          # Ubuntu 24.04 confines unprivileged user namespaces via AppArmor,
+          # which lets bwrap create namespaces but denies CAP_NET_ADMIN
+          # inside them (loopback setup fails with RTM_NEWADDR EPERM).
+          # Runners are disposable, so relax the restriction rather than
+          # installing a bwrap AppArmor profile.
+          if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ] && \
+             [ "$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns)" != "0" ]; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
           bwrap --version
           # Prove the sandbox substrate itself works before the contract
           # tests run: a failure here (e.g. user namespaces restricted on

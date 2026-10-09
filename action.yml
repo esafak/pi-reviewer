@@ -370,6 +370,16 @@ runs:
           echo "[pi-reviewer] installing bubblewrap for sandboxed exec"
           sudo apt-get update && sudo apt-get install -y bubblewrap
         fi
+        # Ubuntu 24.04 confines unprivileged user namespaces via AppArmor,
+        # which lets bwrap create namespaces but denies the in-namespace
+        # capabilities its loopback setup needs. Relaxed here because the
+        # runner is disposable; persistent hosts should prefer the
+        # bwrap-userns-restrict AppArmor profile instead (see CI.md).
+        if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ] && \
+           [ "$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns)" != "0" ]; then
+          echo "[pi-reviewer] relaxing AppArmor unprivileged-userns restriction for sandboxed exec"
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+        fi
 
     - name: Run review
       shell: bash

@@ -399,6 +399,15 @@ none is present:
 | `none` | anywhere else | never executes; the tool throws `code execution unavailable` so the agent moves on |
 
 The action auto-installs `bubblewrap` on Linux runners when `exec` is enabled.
+Ubuntu 24.04 confines unprivileged user namespaces via AppArmor
+(`kernel.apparmor_restrict_unprivileged_userns=1`), under which `bwrap`
+creates namespaces but is denied the in-namespace capabilities its loopback
+setup needs (`bwrap: loopback: Failed RTM_NEWADDR`). The action therefore
+relaxes that restriction on the runner before reviewing — safe on disposable
+GitHub-hosted runners, which die with the job. Persistent self-hosted hosts
+should instead load Ubuntu's `bwrap-userns-restrict` AppArmor profile
+(`apparmor-profiles` package) and leave the sysctl alone; without either,
+`code_exec` fails closed with the refusal.
 On macOS the backend requires the Apple Container `container` CLI plus an
 explicit Linux image with your toolchains, set via `exec-image`. The image
 must be pre-pulled before the review step (an un-pulled image stalls the run
