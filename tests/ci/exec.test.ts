@@ -393,8 +393,11 @@ describe("sandbox backends", () => {
   });
 
   it("points MXC temp env at workspace scratch and cleans it up", async () => {
+    // Capture before stubbing: os.tmpdir() honors TEMP, and the stub below
+    // would otherwise poison the mkdtemp parent on hosts without TMPDIR.
+    const parent = tmpdir();
     vi.stubEnv("TEMP", "/host/temp");
-    const workspace = mkdtempSync(path.join(tmpdir(), "pi-exec-test-"));
+    const workspace = mkdtempSync(path.join(parent, "pi-exec-test-"));
     const run = vi.fn().mockResolvedValue({ stdout: "", stderr: "", exitCode: 0 });
     try {
       const backend = new MxcBackend(() => ({ run }));
