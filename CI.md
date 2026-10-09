@@ -408,6 +408,10 @@ GitHub-hosted runners, which die with the job. Persistent self-hosted hosts
 should instead load Ubuntu's `bwrap-userns-restrict` AppArmor profile
 (`apparmor-profiles` package) and leave the sysctl alone; without either,
 `code_exec` fails closed with the refusal.
+This requirement is Linux/bubblewrap-only: the Apple Container and MXC
+backends isolate differently and are unaffected. If you see
+`bwrap: loopback: Failed RTM_NEWADDR` in CI logs on a custom runner, this
+restriction is the cause.
 On macOS the backend requires the Apple Container `container` CLI plus an
 explicit Linux image with your toolchains, set via `exec-image`. The image
 must be pre-pulled before the review step (an un-pulled image stalls the run
