@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import path from "node:path";
@@ -237,11 +237,11 @@ export function isMxcAvailable(
   }
 }
 
-// Minimal Windows environment: cmd.exe needs SystemRoot, toolchains need
-// PATH, temp files need TEMP/TMP. Scrubbed through the shared helper like
-// every other backend.
+// Minimal Windows environment: cmd.exe needs SystemRoot and toolchains need
+// PATH. TMP/TEMP are set per-run to workspace scratch by run(), never
+// inherited. Scrubbed through the shared helper like every other backend.
 function mxcEnv(): Record<string, string> {
-  return pickEnv(["PATH", "PATHEXT", "SYSTEMROOT", "TEMP", "TMP", "LANG"]);
+  return pickEnv(["PATH", "PATHEXT", "SYSTEMROOT", "LANG"]);
 }
 
 function mxcString(value: unknown): string {
@@ -280,37 +280,49 @@ export class MxcBackend implements SandboxBackend {
 
     // Deny egress by default, workspace writable with read-only .git, UI
     // disabled, default environment inheritance off with an explicit
-    // scrubbed environment. The host temp dir joins the workspace as
-    // writable so scratch-file-using frameworks behave like under bwrap's
-    // tmpfs /tmp. Mirrors the bubblewrap contract.
-    const readwritePaths = [request.workspace];
-    const tempDir = process.env.TEMP ?? process.env.TMP;
-    if (tempDir) readwritePaths.push(tempDir);
-    const result = await mod.run({
-      command: request.command,
-      workingDirectory: resolved,
-      filesystem: {
-        readwritePaths,
-        readonlyPaths: [path.join(request.workspace, ".git")],
-      },
-      network: { egress: { default: "deny" } },
-      ui: { disable: true },
-      timeoutMs: request.timeoutMs,
-      environment: mxcEnv(),
-      inheritDefaultEnvironment: false,
-      containment: { type: "processcontainer" },
-    });
-    const cap = request.maxStreamBytes;
-    const stdout = truncateUtf8(mxcString(result.stdout), cap);
-    const stderr = truncateUtf8(mxcString(result.stderr), cap);
-    return {
-      exitCode: typeof result.exitCode === "number" ? result.exitCode : 1,
-      stdout: stdout.text,
-      stderr: stderr.text,
-      stdoutTruncated: stdout.truncated,
-      stderrTruncated: stderr.truncated,
-      timedOut: result.timedOut === true,
-    };
+    // scrubbed environment. Sandbox scratch lives inside the workspace so
+    // no host path is readable or writable through temp files.
+    const scratchDir = path.join(request.workspace, ".pi-exec-tmp");
+    try {
+      mkdirSync(scratchDir, { recursive: true });
+    } catch {
+      throw new Error("code execution unavailable: cannot create sandbox scratch dir");
+    }
+    try {
+      const result = await mod.run({
+        command: request.command,
+        workingDirectory: resolved,
+        filesystem: {
+          readwritePaths: [request.workspace],
+          readonlyPaths: [path.join(request.workspace, ".git")],
+        },
+        network: { egress: { default: "deny" } },
+        ui: { disable: true },
+        timeoutMs: request.timeoutMs,
+        environment: { ...mxcEnv(), TMP: scratchDir, TEMP: scratchDir },
+        inheritDefaultEnvironment: false,
+        containment: { type: "processcontainer" },
+      });
+      const cap = request.maxStreamBytes;
+      const stdout = truncateUtf8(mxcString(result.stdout), cap);
+      const stderr = truncateUtf8(mxcString(result.stderr), cap);
+      return {
+        exitCode: typeof result.exitCode === "number" ? result.exitCode : 1,
+        stdout: stdout.text,
+        stderr: stderr.text,
+        stdoutTruncated: stdout.truncated,
+        stderrTruncated: stderr.truncated,
+        timedOut: result.timedOut === true,
+      };
+    } finally {
+      // Best-effort scratch cleanup; the workspace is ephemeral in CI and
+      // rmSync with force:true cannot throw a surviving error worth surfacing.
+      try {
+        rmSync(scratchDir, { recursive: true, force: true });
+      } catch {
+        /* ignore */
+      }
+    }
   }
   unavailableReason(): string | undefined {
     return this.isAvailable()

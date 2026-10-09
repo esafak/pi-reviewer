@@ -475,6 +475,19 @@ describe("review", () => {
     expect(fakeMcpSession.dispose).toHaveBeenCalled();
   });
 
+  it("keeps code_exec in the final MCP agent tools when enabled", async () => {
+    process.env.PI_REVIEWER_EXEC = "true";
+    const mcpConfig: CiMcpConfig = {
+      mcpServers: { docs: { url: "https://mcp.example/mcp" } },
+    };
+    await review({ cwd: "/repo", repo: "owner/repo", mcpConfig, output: "comment" });
+    // Assert on the post-reassignment array: presence in the active-names
+    // list alone would pass even while the tool definition is dropped.
+    expect(fakeMcpSession.agent.state.tools).toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: "code_exec" })]),
+    );
+  });
+
   it("passes the configured thinking level to the agent", async () => {
     await review({ cwd: "/repo", thinking: "high" });
 

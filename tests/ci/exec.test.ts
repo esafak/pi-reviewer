@@ -1,4 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 
 import { parseMaxCalls, resolveExecConfig } from "../../src/ci/exec/config.js";
 import { isSecretEnvName, pickEnv } from "../../src/ci/exec/env.js";
@@ -220,6 +223,45 @@ describe("exec tool", () => {
     expect(runner.mock.calls[0][0]).toMatchObject({ timeoutMs: 120_000 });
   });
 
+  it("caps the call at the remaining wall-clock budget", async () => {
+    const runner = vi.fn().mockResolvedValue({
+      exitCode: 0,
+      stdout: "",
+      stderr: "",
+      stdoutTruncated: false,
+      stderrTruncated: false,
+      timedOut: false,
+    });
+    const config = resolveExecConfig({
+      PI_REVIEWER_EXEC: "true",
+      PI_REVIEWER_EXEC_WALL_BUDGET_MS: "30000",
+    });
+    const [tool] = createExecTools(config, {
+      cwd: "/ws",
+      state: { calls: 0, wallMs: 20_000 },
+      runner: runner as any,
+    });
+    await tool.execute("id", { command: "echo hi" } as any);
+    expect(runner.mock.calls[0][0]).toMatchObject({ timeoutMs: 10_000 });
+  });
+
+  it("rejects calls below the per-call floor instead of launching doomed runs", async () => {
+    const runner = vi.fn();
+    const config = resolveExecConfig({
+      PI_REVIEWER_EXEC: "true",
+      PI_REVIEWER_EXEC_WALL_BUDGET_MS: "30000",
+    });
+    const [tool] = createExecTools(config, {
+      cwd: "/ws",
+      state: { calls: 0, wallMs: 29_500 },
+      runner: runner as any,
+    });
+    await expect(tool.execute("id", { command: "echo hi" } as any)).rejects.toThrow(
+      "wall-clock budget exhausted",
+    );
+    expect(runner).not.toHaveBeenCalled();
+  });
+
   it("enforces the per-review call budget", async () => {
     const config = resolveExecConfig({ PI_REVIEWER_EXEC: "true", PI_REVIEWER_EXEC_MAX_CALLS: "1" });
     const state = { calls: 1, wallMs: 0 };
@@ -333,7 +375,9 @@ describe("sandbox backends", () => {
     expect(run).toHaveBeenCalledOnce();
     const request = run.mock.calls[0][0];
     expect(request.network).toEqual({ egress: { default: "deny" } });
-    expect(request.filesystem.readwritePaths).toEqual(expect.arrayContaining([workspace]));
+    // Scratch lives inside the workspace: no host path is readable or
+    // writable through temp files.
+    expect(request.filesystem.readwritePaths).toEqual([workspace]);
     expect(request.filesystem.readonlyPaths).toEqual(
       expect.arrayContaining([expect.stringContaining(".git")]),
     );
@@ -348,16 +392,42 @@ describe("sandbox backends", () => {
     });
   });
 
+  it("points MXC temp env at workspace scratch and cleans it up", async () => {
+    vi.stubEnv("TEMP", "/host/temp");
+    const workspace = mkdtempSync(path.join(tmpdir(), "pi-exec-test-"));
+    const run = vi.fn().mockResolvedValue({ stdout: "", stderr: "", exitCode: 0 });
+    try {
+      const backend = new MxcBackend(() => ({ run }));
+      await backend.run({
+        workspace,
+        workdir: ".",
+        command: "pytest -q",
+        timeoutMs: 1000,
+        maxStreamBytes: 64,
+      } as any);
+      const request = run.mock.calls[0][0];
+      const scratch = path.join(workspace, ".pi-exec-tmp");
+      expect(request.environment.TMP).toBe(scratch);
+      expect(request.environment.TEMP).toBe(scratch);
+      expect(request.filesystem.readwritePaths).toEqual([workspace]);
+      expect(existsSync(scratch)).toBe(false);
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+      vi.unstubAllEnvs();
+    }
+  });
+
   it("fail-closed backend never executes", async () => {
     await expect(new FailClosedBackend("nope").run({} as any)).rejects.toThrow(
       "code execution unavailable",
     );
   });
 
-  it("grants the host temp dir on MXC for scratch-file parity", async () => {
-    vi.stubEnv("TEMP", "/tmp/mxc-test-temp");
+  it("never inherits the host temp dir into MXC policy", async () => {
+    vi.stubEnv("TEMP", "/host/temp");
+    vi.stubEnv("TMP", "/host/tmp");
+    const run = vi.fn().mockResolvedValue({ stdout: "", stderr: "", exitCode: 0 });
     try {
-      const run = vi.fn().mockResolvedValue({ stdout: "", stderr: "", exitCode: 0 });
       const backend = new MxcBackend(() => ({ run }));
       await backend.run({
         workspace: process.cwd(),
@@ -366,9 +436,10 @@ describe("sandbox backends", () => {
         timeoutMs: 1000,
         maxStreamBytes: 64,
       } as any);
-      expect(run.mock.calls[0][0].filesystem.readwritePaths).toEqual(
-        expect.arrayContaining([process.cwd(), "/tmp/mxc-test-temp"]),
-      );
+      const request = run.mock.calls[0][0];
+      expect(request.filesystem.readwritePaths).toEqual([process.cwd()]);
+      expect(request.environment.TMP).not.toBe("/host/tmp");
+      expect(request.environment.TEMP).not.toBe("/host/temp");
     } finally {
       vi.unstubAllEnvs();
     }

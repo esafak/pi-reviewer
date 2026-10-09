@@ -84,7 +84,18 @@ export function createExecTools(
         throw new Error(`code_exec budget exhausted: ${config.maxCalls} calls per review`);
       if (state.wallMs >= config.wallBudgetMs)
         throw new Error("code_exec wall-clock budget exhausted for this review");
-      const timeoutMs = Math.min(params.timeoutMs ?? config.timeoutMs, config.timeoutMs);
+      const remainingBudget = config.wallBudgetMs - state.wallMs;
+      // Below the per-call floor a launch would die mid-spawn and burn a
+      // budgeted call steering the model to retry; ending the budget instead
+      // steers it to wrap up. Uses the existing rejection (pre-start, so it
+      // consumes nothing).
+      if (remainingBudget < MIN_EXEC_TIMEOUT_MS)
+        throw new Error("code_exec wall-clock budget exhausted for this review");
+      const timeoutMs = Math.min(
+        params.timeoutMs ?? config.timeoutMs,
+        config.timeoutMs,
+        remainingBudget,
+      );
       const workdir = params.workdir ?? ".";
       // Attempts count even when they throw: the bound is on calls per
       // review, and failed attempts still cost loop turns and wall time.

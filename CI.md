@@ -428,6 +428,7 @@ each call an incremental rebuild rather than a cold one:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: 24

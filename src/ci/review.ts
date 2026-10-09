@@ -553,6 +553,9 @@ export async function review(options: ReviewOptions): Promise<void> {
         ...searchTools,
         ...registryTools,
         ...githubResearchTools,
+        // Same comment-only exec gate as baseTools: without this the agent
+        // receives the code_exec policy but cannot call the tool.
+        ...execTools,
         reviewTool,
       ];
       agent.streamFunction = models.streamSimple.bind(models);
