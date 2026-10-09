@@ -42,7 +42,7 @@ describe.runIf(!!backend)("live sandbox backend", () => {
       timeoutMs: 20_000,
       maxStreamBytes: 4096,
     } as never);
-    expect(result.exitCode).toBe(3);
+    expect(result.exitCode, `sandbox stderr: ${result.stderr}`).toBe(3);
     expect(result.stdout).toContain("out");
     expect(result.stderr).toContain("err");
     expect(result.timedOut).toBe(false);
@@ -57,7 +57,7 @@ describe.runIf(!!backend)("live sandbox backend", () => {
       timeoutMs: 20_000,
       maxStreamBytes: 4096,
     } as never);
-    expect(result.exitCode).toBe(0);
+    expect(result.exitCode, `sandbox stderr: ${result.stderr}`).toBe(0);
     expect(result.stdout).toContain("sub");
   });
 
@@ -72,7 +72,7 @@ describe.runIf(!!backend)("live sandbox backend", () => {
         timeoutMs: 3000,
         maxStreamBytes: 4096,
       } as never);
-      expect(result.timedOut).toBe(true);
+      expect(result.timedOut, `sandbox stderr: ${result.stderr}`).toBe(true);
     },
   );
 
@@ -88,10 +88,8 @@ describe.runIf(!!backend)("live sandbox backend", () => {
         timeoutMs: 20_000,
         maxStreamBytes: 4096,
       } as never);
-      expect(gitWrite.exitCode).not.toBe(0);
+      expect(gitWrite.exitCode, `sandbox stderr: ${gitWrite.stderr}`).not.toBe(0);
       expect(gitWrite.stdout).not.toContain("writable");
-      // Connect attempt to a documentation IP: nonzero under --unshare-net,
-      // so a zero here would mean the sandbox has egress (fail-open).
       // Egress canary: must be a real, routable literal IP. Literal so a
       // DNS failure cannot mask egress; routable so fail-open actually
       // connects and the test fails. Do NOT swap in an RFC 5737

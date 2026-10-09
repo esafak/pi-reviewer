@@ -40,6 +40,12 @@ jobs:
           if ! command -v bwrap >/dev/null 2>&1; then
             sudo apt-get update && sudo apt-get install -y bubblewrap
           fi
+          bwrap --version
+          # Prove the sandbox substrate itself works before the contract
+          # tests run: a failure here (e.g. user namespaces restricted on
+          # the runner) would otherwise surface as cryptic exit-code
+          # assertions in every live test.
+          bwrap --unshare-all --unshare-net --bind / / true && echo BWRAP_SUBSTRATE_OK
 
       - name: Run tests
         run: vpr test
