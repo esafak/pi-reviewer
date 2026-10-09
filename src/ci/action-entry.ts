@@ -60,6 +60,20 @@ function isMergeCommit(sha: string, cwd = process.cwd()): boolean {
     return false;
   }
 }
+// An incremental range spanning a merge imports the merged branch history, so
+// the range must fall back to the merge-base diff which holds PR-only changes.
+function rangeContainsMerge(from: string, to: string, cwd = process.cwd()): boolean {
+  try {
+    const count = execFileSync("git", ["rev-list", "--count", "--merges", `${from}..${to}`], {
+      cwd,
+      encoding: "utf8",
+      stdio: ["pipe", "pipe", "pipe"],
+    }).trim();
+    return Number.parseInt(count, 10) > 0;
+  } catch {
+    return false;
+  }
+}
 function gitAuthArgs(): string[] {
   const token = process.env.GITHUB_TOKEN;
   if (!token) return [];
@@ -252,7 +266,12 @@ async function main(): Promise<void> {
   // explicitly before any merge-base, ancestry, or worktree operation.
   ensureCommit(head, `refs/pull/${event.pr}/head`);
   ensureCommit(pr.base.sha, undefined);
-  const mergeHead = event.kind === "synchronize" && isMergeCommit(head);
+  const headIsMerge = event.kind === "synchronize" && isMergeCommit(head);
+  // A merge followed by further pushes leaves a non-merge head over a range
+  // that still imports merged-branch history, so check the whole range.
+  const rangeHasMerge =
+    latest && ancestor(latest.toSha, head) ? rangeContainsMerge(latest.toSha, head) : false;
+  const mergeHead = headIsMerge || rangeHasMerge;
   if (event.targetHead && !ancestor(head, pr.head.sha)) {
     throw new Error("workflow target-head must be an ancestor of the current PR head");
   }

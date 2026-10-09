@@ -28,11 +28,16 @@ const EMPTY_DIFF_ERROR =
 const extraPaths = ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"].filter(Boolean);
 const augmentedPath = [...extraPaths, process.env.PATH ?? ""].join(":");
 
+// Diff output routinely exceeds Node's 1 MiB exec default; truncation to the
+// review budget happens in filterDiff after capture, so capture must succeed.
+const GIT_OUTPUT_MAX_BUFFER = 32 * 1024 * 1024;
+
 function run(command: string, cwd: string): string {
   return execSync(command, {
     cwd,
     encoding: "utf-8",
     env: { ...process.env, PATH: augmentedPath },
+    maxBuffer: GIT_OUTPUT_MAX_BUFFER,
   });
 }
 
@@ -120,6 +125,7 @@ export async function resolveDiff(options: DiffOptions): Promise<DiffResult> {
       cwd,
       encoding: "utf-8",
       env: { ...process.env, PATH: augmentedPath },
+      maxBuffer: GIT_OUTPUT_MAX_BUFFER,
     });
     source = `git diff ${options.fromSha}..${options.toSha}`;
   } else if (typeof options.pr === "number") {

@@ -40,7 +40,7 @@ describe("resolveDiff", () => {
     expect(execFileSyncMock).toHaveBeenCalledWith(
       "git",
       ["diff", "base..head"],
-      expect.objectContaining({ cwd: "/repo" }),
+      expect.objectContaining({ cwd: "/repo", maxBuffer: expect.any(Number) }),
     );
     expect(result.source).toBe("git diff base..head");
   });
