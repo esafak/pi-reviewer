@@ -372,13 +372,18 @@ runs:
         fi
         # Ubuntu 24.04 confines unprivileged user namespaces via AppArmor,
         # which lets bwrap create namespaces but denies the in-namespace
-        # capabilities its loopback setup needs. Relaxed here because the
-        # runner is disposable; persistent hosts should prefer the
-        # bwrap-userns-restrict AppArmor profile instead (see CI.md).
+        # capabilities its loopback setup needs. Relaxed only on disposable
+        # GitHub-hosted runners: persistent self-hosted hosts keep their
+        # posture and get a warning instead (see CI.md for the sysctl or
+        # AppArmor-profile setup they need instead).
         if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ] && \
            [ "$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns)" != "0" ]; then
-          echo "[pi-reviewer] relaxing AppArmor unprivileged-userns restriction for sandboxed exec"
-          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          if [ "${RUNNER_ENVIRONMENT:-}" = "github-hosted" ]; then
+            echo "[pi-reviewer] relaxing AppArmor unprivileged-userns restriction for sandboxed exec"
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          else
+            echo "[pi-reviewer] WARNING: not relaxing kernel.apparmor_restrict_unprivileged_userns on this runner (not GitHub-hosted). Sandboxed exec needs the restriction relaxed or the bwrap-userns-restrict AppArmor profile loaded; see CI.md. code_exec will fail closed until then."
+          fi
         fi
 
     - name: Run review

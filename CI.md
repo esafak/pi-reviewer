@@ -403,11 +403,14 @@ Ubuntu 24.04 confines unprivileged user namespaces via AppArmor
 (`kernel.apparmor_restrict_unprivileged_userns=1`), under which `bwrap`
 creates namespaces but is denied the in-namespace capabilities its loopback
 setup needs (`bwrap: loopback: Failed RTM_NEWADDR`). The action therefore
-relaxes that restriction on the runner before reviewing — safe on disposable
-GitHub-hosted runners, which die with the job. Persistent self-hosted hosts
-should instead load Ubuntu's `bwrap-userns-restrict` AppArmor profile
-(`apparmor-profiles` package) and leave the sysctl alone; without either,
-`code_exec` fails closed with the refusal.
+relaxes that restriction before reviewing — but only on disposable
+GitHub-hosted runners (`RUNNER_ENVIRONMENT=github-hosted`), which die with
+the job. On other runners it prints a warning and leaves the host alone:
+persistent hosts should set the sysctl persistently (`/etc/sysctl.d/`) or,
+preferably, load Ubuntu's `bwrap-userns-restrict` AppArmor profile
+(`apparmor-profiles` package). Without either, `code_exec` still fails
+closed — every call dies in sandbox setup with bwrap's error in the tool
+output, at the cost of one budgeted call each.
 This requirement is Linux/bubblewrap-only: the Apple Container and MXC
 backends isolate differently and are unaffected. If you see
 `bwrap: loopback: Failed RTM_NEWADDR` in CI logs on a custom runner, this
