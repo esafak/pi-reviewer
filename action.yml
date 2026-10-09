@@ -114,6 +114,36 @@ inputs:
     required: false
     default: "false"
 
+  exec:
+    description: "Enable sandboxed code execution via the code_exec tool (fail-closed when no sandbox backend is available on the runner)."
+    required: false
+    default: "false"
+
+  exec-timeout-ms:
+    description: "Per-command exec timeout in milliseconds (1000-120000, default: 120000)."
+    required: false
+    default: "120000"
+
+  exec-max-calls:
+    description: "Maximum sandboxed exec calls per review (1-10, default: 5)."
+    required: false
+    default: "5"
+
+  exec-wall-time-budget-ms:
+    description: "Total wall-clock budget for all sandboxed exec calls in milliseconds (30000-1200000, default: 360000)."
+    required: false
+    default: "360000"
+
+  exec-max-stream-bytes:
+    description: "Per-stream stdout/stderr cap for sandboxed exec in bytes (1024-131072, default: 32768)."
+    required: false
+    default: "32768"
+
+  exec-image:
+    description: "Linux container image for sandboxed exec on macOS (Apple Container backend). Must be pre-pulled and contain bash, coreutils, and your toolchains."
+    required: false
+    default: ""
+
   review-drafts:
     description: "Review draft pull requests (default: false)."
     required: false
@@ -330,6 +360,17 @@ runs:
             fetch --unshallow --no-tags origin
         fi
 
+    - name: Ensure bubblewrap for sandboxed exec
+      if: ${{ inputs.exec == 'true' && runner.os == 'Linux' }}
+      shell: bash
+      run: |
+        if command -v bwrap >/dev/null 2>&1; then
+          echo "[pi-reviewer] bubblewrap available: $(bwrap --version)"
+        else
+          echo "[pi-reviewer] installing bubblewrap for sandboxed exec"
+          sudo apt-get update && sudo apt-get install -y bubblewrap
+        fi
+
     - name: Run review
       shell: bash
       working-directory: ${{ github.workspace }}
@@ -360,6 +401,12 @@ runs:
         PI_REVIEWER_REGISTRY_WALL_TIME_BUDGET_MS: ${{ inputs.registry-wall-time-budget-ms }}
         PI_REVIEWER_SEARCH_REQUIRED: ${{ inputs.search-required }}
         PI_REVIEWER_AI_SEARCH_REQUIRED: ${{ inputs.ai-search-required }}
+        PI_REVIEWER_EXEC: ${{ inputs.exec }}
+        PI_REVIEWER_EXEC_TIMEOUT_MS: ${{ inputs.exec-timeout-ms }}
+        PI_REVIEWER_EXEC_MAX_CALLS: ${{ inputs.exec-max-calls }}
+        PI_REVIEWER_EXEC_WALL_BUDGET_MS: ${{ inputs.exec-wall-time-budget-ms }}
+        PI_REVIEWER_EXEC_MAX_STREAM_BYTES: ${{ inputs.exec-max-stream-bytes }}
+        PI_REVIEWER_EXEC_IMAGE: ${{ inputs.exec-image }}
       run: >-
         "${{ github.action_path }}/node_modules/.bin/tsx"
         "${{ github.action_path }}/src/ci/action-entry.ts"

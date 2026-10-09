@@ -293,6 +293,12 @@ describe("review", () => {
     delete process.env.PI_REVIEWER_GITHUB_SCOPE;
     delete process.env.EXA_API_KEY;
     delete process.env.BRAVE_SEARCH_API_KEY;
+    delete process.env.PI_REVIEWER_EXEC;
+    delete process.env.PI_REVIEWER_EXEC_IMAGE;
+    delete process.env.PI_REVIEWER_EXEC_TIMEOUT_MS;
+    delete process.env.PI_REVIEWER_EXEC_MAX_CALLS;
+    delete process.env.PI_REVIEWER_EXEC_WALL_BUDGET_MS;
+    delete process.env.PI_REVIEWER_EXEC_MAX_STREAM_BYTES;
     // model is mandatory — provide a default for tests that don't exercise it
     process.env.PI_REVIEWER_MODEL = "anthropic/claude-opus-4-6";
   });
@@ -353,6 +359,45 @@ describe("review", () => {
         content: "LGTM",
         cwd: "/repo",
       }),
+    );
+  });
+
+  it("registers code_exec only for enabled CI comment reviews", async () => {
+    process.env.PI_REVIEWER_EXEC = "true";
+    await review({ cwd: "/repo", output: "comment" });
+    expect(AgentMock.mock.calls[0][0].initialState.tools).toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: "code_exec" })]),
+    );
+  });
+
+  it("withholds code_exec for non-comment output even when enabled", async () => {
+    process.env.PI_REVIEWER_EXEC = "true";
+    await review({ cwd: "/repo", output: "terminal" });
+    expect(AgentMock.mock.calls[0][0].initialState.tools).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: "code_exec" })]),
+    );
+  });
+
+  it("withholds code_exec for comment output when not enabled", async () => {
+    await review({ cwd: "/repo", output: "comment" });
+    expect(AgentMock.mock.calls[0][0].initialState.tools).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: "code_exec" })]),
+    );
+  });
+
+  it("injects the code_exec policy into dry-run prompts when enabled", async () => {
+    process.env.PI_REVIEWER_EXEC = "true";
+    const { sink, records } = createMemorySink();
+    await review({ cwd: "/repo", output: "comment", dryRun: true, logger: createLogger({ sink }) });
+    expect(records).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          event: "review.dry_run.system_prompt",
+          fields: expect.objectContaining({
+            prompt: expect.stringContaining("code_exec_policy"),
+          }),
+        }),
+      ]),
     );
   });
 
