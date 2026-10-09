@@ -80,6 +80,12 @@ jobs:
           # ai-search-provider: 'brave' # optional
           # github-research: 'true' # optional, read-only; uses github-token
           # github-scope: 'public' # or 'token-accessible'; defaults to public
+          # exec: 'true' # optional, sandboxed offline code execution (code_exec)
+          # exec-timeout-ms: '120000' # per-command timeout
+          # exec-max-calls: '5' # calls per review
+          # exec-wall-time-budget-ms: '360000' # total exec wall-clock budget
+          # exec-max-stream-bytes: '32768' # per-stream stdout/stderr cap
+          # exec-image: '...' # macOS Apple Container image (pre-pulled)
 `;
 }
 

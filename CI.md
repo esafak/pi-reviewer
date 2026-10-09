@@ -87,6 +87,14 @@ jobs:
           # ai-search-provider: 'brave'
           # github-research: 'true' # optional, read-only GitHub search/read tools
           # github-scope: 'public' # or 'token-accessible'; defaults to public
+          # Optional sandboxed code execution (fail-closed, no network).
+          # The agent gets a `code_exec` tool to run tests/typechecks offline.
+          # exec: 'true'
+          # exec-timeout-ms: '120000'
+          # exec-max-calls: '5'
+          # exec-wall-time-budget-ms: '360000'
+          # exec-max-stream-bytes: '32768'
+          # exec-image: '...' # macOS Apple Container image (pre-pulled)
 ```
 
 ### User-configured MCP servers
@@ -315,6 +323,12 @@ Draft pull requests are skipped by default, including manual dispatch and `/pi-r
 | `registry-wall-time-budget-ms` | no | Total wall-clock budget across all package registry lookups, bounded to 1000-120000 ms (default: 15000) |
 | `search-required` | no | Fail instead of warn when required regular search is unavailable or fails |
 | `ai-search-required` | no | Fail instead of warn when required AI search is unavailable or fails |
+| `exec` | no | Enable sandboxed code execution via the `code_exec` tool (default: `false`). CI comment reviews only; fail-closed when no sandbox backend is available |
+| `exec-timeout-ms` | no | Per-command exec timeout, bounded to 1000-120000 ms (default: 120000) |
+| `exec-max-calls` | no | Maximum sandboxed exec calls per review, bounded from 1 to 10 (default: 5) |
+| `exec-wall-time-budget-ms` | no | Total wall-clock budget across all sandboxed exec calls, bounded to 30000-1200000 ms (default: 360000) |
+| `exec-max-stream-bytes` | no | Per-stream stdout/stderr cap in bytes, bounded to 1024-131072 (default: 32768) |
+| `exec-image` | no | Linux container image for sandboxed exec on macOS (Apple Container backend). Must be pre-pulled and contain bash, coreutils, and your toolchains |
 | `review-drafts` | no | Review draft PRs (default: `false`) |
 | `setup-node` | no | Set up Node 24 via `actions/setup-node` when a compatible Node is not already on `PATH` (default: `true`). Set to `false` to require the runner image to provide Node 24 or newer. |
 | `cache` | no | Cache the pnpm store across runs (default: `true`). Disable on runners where the cache service is unavailable or unwanted. |
@@ -362,6 +376,107 @@ GitHub authentication; cross-repository availability therefore depends on the
 configured token having access to the search results. GitHub API search limits
 apply, including the stricter code-search limit; rate-limit failures are
 advisory and do not fail a review.
+
+## Sandboxed code execution
+
+Opt-in and available only to CI comment reviews. When `exec: 'true'`, the
+reviewer receives a `code_exec` tool that runs shell commands
+inside a sandbox with no network. This is code execution, not a read-only
+lookup: the workspace is writable (so incremental builds survive across
+calls) with `.git` re-mounted read-only, and secrets never enter the sandbox
+environment. stdout and stderr return as separate blocks and separate
+`details` fields, each with its own byte cap and truncation flag, plus the
+exit code and a `Remaining code_exec calls` budget counter.
+
+Backends are selected at runtime through a shared interface, fail-closed when
+none is present:
+
+| Backend | Platform | Mechanism |
+|---|---|---|
+| `bubblewrap` | Linux | `bwrap --unshare-all --unshare-net`, host rootfs bind-mounted read-only; toolchains come from the runner host (no container image on this path) |
+| `apple-container` | macOS arm64 | Apple Containerization `container run` with no network attached and `--no-dns`; toolchains come from `PI_REVIEWER_EXEC_IMAGE` |
+| `mxc` | Windows 11 | Microsoft MXC SDK `processcontainer` backend with deny-egress, workspace writable / `.git` read-only, UI disabled |
+| `none` | anywhere else | never executes; the tool throws `code execution unavailable` so the agent moves on |
+
+The action auto-installs `bubblewrap` on Linux runners when `exec` is enabled.
+Ubuntu 24.04 confines unprivileged user namespaces via AppArmor
+(`kernel.apparmor_restrict_unprivileged_userns=1`), under which `bwrap`
+creates namespaces but is denied the in-namespace capabilities its loopback
+setup needs (`bwrap: loopback: Failed RTM_NEWADDR`). The action therefore
+relaxes that restriction before reviewing — but only on disposable
+GitHub-hosted runners (`RUNNER_ENVIRONMENT=github-hosted`), which die with
+the job. On other runners it prints a warning and leaves the host alone:
+persistent hosts should set the sysctl persistently (`/etc/sysctl.d/`) or,
+preferably, load Ubuntu's `bwrap-userns-restrict` AppArmor profile
+(`apparmor-profiles` package). Without either, `code_exec` still fails
+closed — every call dies in sandbox setup with bwrap's error in the tool
+output, at the cost of one budgeted call each.
+This requirement is Linux/bubblewrap-only: the Apple Container and MXC
+backends isolate differently and are unaffected. If you see
+`bwrap: loopback: Failed RTM_NEWADDR` in CI logs on a custom runner, this
+restriction is the cause.
+On macOS the backend requires the Apple Container `container` CLI plus an
+explicit Linux image with your toolchains, set via `exec-image`. The image
+must be pre-pulled before the review step (an un-pulled image stalls the run
+on registry egress while the deadline burns) and must contain `bash`,
+coreutils (`timeout`), and your toolchains, since the container carries no
+host rootfs unlike bubblewrap. On Windows the MXC SDK ships as a
+regular dependency (installed with the action), so `windows-latest` runners
+work with no extra setup, subject to the
+[Windows OS-version support](https://github.com/microsoft/mxc/blob/main/docs/backends/process-container/os-version-support.md)
+for `processcontainer`:
+
+```yaml
+      - uses: esafak/pi-reviewer@main
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          model: openrouter/openai/gpt-5.4-mini
+          exec: 'true'
+```
+
+There is no registry egress, so dependencies must be pre-installed and
+compiled **before** the reviewer step in the same job. The sandbox reuses the
+workspace (`target/`, `node_modules/`) and read-only toolchain caches, making
+each call an incremental rebuild rather than a cold one:
+
+```yaml
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - uses: esafak/pi-reviewer@main
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          model: openrouter/openai/gpt-5.4-mini
+          exec: 'true'
+```
+
+Rust needs this most: a cold `cargo build` exceeds the per-command timeout,
+so run `cargo fetch && cargo test --no-run` first and cache `target/` plus
+`~/.cargo` (e.g. with `Swatinem/rust-cache`). Inside the sandbox the agent is
+instructed to stay offline:
+
+| Ecosystem | Offline consumption |
+|---|---|
+| Cargo | `cargo test --offline -p <crate> --lib` |
+| npm | `npm test` against pre-installed `node_modules` (`npm ci --offline` if reinstalling) |
+| pip | `pytest -q` against the pre-built venv (`pip install --no-index` if installing) |
+| Go | `GOFLAGS=-mod=mod GOPROXY=off go test ./...` |
+
+The agent is instructed to form a hypothesis from the diff first and verify one
+claim per call with a narrow command; timeouts and truncation errors steer it
+narrower. Budgets are five calls per review by default with a six-minute total
+wall-clock budget.
+Calls run repo-relative (`workdir`, default `"."`); missing or escaping paths
+are rejected before the sandbox spawns. Commands run under `bash` on the
+Linux/macOS backends but under the Windows shell on MXC, so keep them portable
+(`pytest -q`, `npm test`) and avoid shell-specific pipes and redirects.
 
 Repository and code search use the [GitHub REST search API](https://docs.github.com/en/rest/search/search);
 code search requires authentication, indexes only the default branch, and has a
