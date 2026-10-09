@@ -302,8 +302,9 @@ export function selectBatchRange(
   isAncestor?: (from: string, to: string) => boolean,
   mergeHead = false,
 ) {
-  // A merge head imports its second parent's history, so incremental snapshots
-  // from an earlier PR head would treat already-merged base code as new.
+  // A merge in the reviewed range imports its second parent's history, so
+  // incremental snapshots from an earlier PR head would treat already-merged
+  // base code as new.
   if (mergeHead)
     return {
       fromSha: mergeBase,
