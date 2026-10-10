@@ -1,0 +1,35 @@
+# pi-reviewer runner container profile: permits sandbox-construction mounts/userns,
+# retains other container restrictions. Scope is the ARC runner pod only.
+# Minimum platform is Ubuntu 24.04 / kernel 6.8 (AppArmor userns mediation);
+# older parsers reject the `userns` rule. The stock `bwrap-userns-restrict`
+# profile is path-attached to /usr/bin/bwrap and is not usable as a container
+# profile, so this file exists instead. Validate with:
+#   apparmor_parser -Q -T < this file
+profile pi-reviewer-runner flags=(attach_disconnected,mediate_deleted) {
+  #include <abstractions/base>
+
+  capability,
+  file,
+  umount,
+
+  # Sandbox construction is mounts: bwrap remounts / rslave at startup so its
+  # tmpfs/proc/dev/binds never propagate to the host, then performs one mount
+  # per --bind/--ro-bind/--tmpfs/--proc/--dev. Denying mount here fails bwrap
+  # with `Failed to make / slave` before userns/network setup runs.
+  mount,
+  remount,
+  pivot_root,
+
+  # Unprivileged user namespaces already work under most container profiles;
+  # stated explicitly so the intent survives future base-profile changes.
+  userns,
+
+  network,
+  signal,
+  ptrace,
+  unix,
+
+  # Retain the container default's other restrictions (device nodes, sysfs).
+  /dev/** rwk,
+  deny /sys/fs/cgroup/** wklx,
+}

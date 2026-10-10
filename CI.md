@@ -414,7 +414,41 @@ output, at the cost of one budgeted call each.
 This requirement is Linux/bubblewrap-only: the Apple Container and MXC
 backends isolate differently and are unaffected. If you see
 `bwrap: loopback: Failed RTM_NEWADDR` in CI logs on a custom runner, this
-restriction is the cause.
+restriction is the cause. That guidance stays for bare-metal hosts; the next
+section covers a different symptom with a different fix.
+
+### Containerized self-hosted runners (ARC/Kubernetes)
+
+Containerized runners (e.g. ARC runner pods on Kubernetes with the containerd
+runtime) fail differently: `bwrap: Failed to make / slave: Permission denied`,
+at startup before any loopback setup. bwrap unconditionally remounts `/` as
+rslave so its tmpfs/proc/dev/binds never propagate to the host; the
+container's own AppArmor profile (`cri-containerd.apparmor.d` /
+`docker-default`, containing `deny mount`) denies it. A seccomp-only container
+produces the same line with `Operation not permitted` instead — check the errno
+wording and optional AppArmor `DENIED` audit lines to tell them apart.
+
+Confirm with: `cat /proc/self/attr/current` (a confined name, not
+`unconfined`), `bwrap --unshare-all --unshare-net --ro-bind / / true`
+(reproduces the slave error), and the split of `unshare --user
+--map-root-user true` succeeding while mount propagation is denied.
+
+Host-level remedies do not apply here: the container profile is set by the
+pod/runtime and unreachable from any job step, and the stock
+`bwrap-userns-restrict` profile is path-attached to `/usr/bin/bwrap`, not
+usable as a container profile. `securityContext.appArmorProfile: Unconfined`
+and `capabilities.add: ["SYS_ADMIN"]` are dead ends (the former resolves to
+`unprivileged_userns` under the userns restriction; AppArmor mediates `mount`
+regardless of capabilities). For seccomp-denied mounts the knob is
+`securityContext.seccompProfile`, not an AppArmor profile.
+
+Apply the ready-to-use profile in `assets/apparmor/` (equivalent to the containerd default with `deny mount` removed and `userns` added; minimum Ubuntu 24.04 / kernel 6.8): load it into
+each node's host policy first (see `daemonset.yaml` — pods referencing a
+profile that isn't loaded fail to start), then reference it from the runner pod
+via `securityContext.appArmorProfile: { type: Localhost, localhostProfile:
+pi-reviewer-runner }` (K8s 1.31+), or the
+`container.apparmor.security.beta.kubernetes.io/<container>:
+localhost/pi-reviewer-runner` annotation on older clusters.
 On macOS the backend requires the Apple Container `container` CLI plus an
 explicit Linux image with your toolchains, set via `exec-image`. The image
 must be pre-pulled before the review step (an un-pulled image stalls the run

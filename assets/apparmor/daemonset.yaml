@@ -1,0 +1,42 @@
+# Loads pi-reviewer-runner into each node's host AppArmor policy. Pods can only
+# reference already-loaded profiles, so this DaemonSet (or an equivalent node
+# image change) must precede the runner pod's securityContext.
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: pi-reviewer-apparmor-loader
+  namespace: kube-system
+spec:
+  selector:
+    matchLabels:
+      name: pi-reviewer-apparmor-loader
+  template:
+    metadata:
+      labels:
+        name: pi-reviewer-apparmor-loader
+    spec:
+      containers:
+        - name: loader
+          image: ubuntu:24.04
+          securityContext:
+            privileged: true
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              cp /profile/pi-reviewer-runner /etc/apparmor.d/pi-reviewer-runner
+              apparmor_parser -r /etc/apparmor.d/pi-reviewer-runner
+              sleep infinity
+          volumeMounts:
+            - name: profile
+              mountPath: /profile
+      volumes:
+        - name: profile
+          configMap:
+            name: pi-reviewer-apparmor
+---
+# Store the profile text with e.g.:
+#   kubectl create configmap pi-reviewer-apparmor -n kube-system \
+#     --from-file=pi-reviewer-runner=assets/apparmor/pi-reviewer-runner
+# Verify on a node with: aa-status | grep pi-reviewer-runner

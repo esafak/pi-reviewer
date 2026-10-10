@@ -23,6 +23,7 @@ import {
   truncateBytes,
 } from "../../src/ci/exec/runner.js";
 import { createExecTools, execSchema } from "../../src/ci/exec/tool.js";
+import { diagnoseBwrapFailure, readApparmorProfile } from "../../src/ci/exec/diagnose.js";
 
 const { spawnMock } = vi.hoisted(() => ({ spawnMock: vi.fn() }));
 vi.mock("node:child_process", async (importActual) => {
@@ -500,6 +501,81 @@ describe("env scrub", () => {
     } finally {
       vi.unstubAllEnvs();
     }
+  });
+});
+
+describe("confined-runtime diagnosis", () => {
+  it("strips the enforce suffix and never throws", () => {
+    expect(readApparmorProfile(() => "cri-containerd.apparmor.d (enforce)")).toBe(
+      "cri-containerd.apparmor.d",
+    );
+    expect(readApparmorProfile(() => "unconfined")).toBe("unconfined");
+    expect(readApparmorProfile(() => "unprivileged_userns (enforce)")).toBe("unprivileged_userns");
+    expect(readApparmorProfile(() => "")).toBeUndefined();
+    expect(diagnoseBwrapFailure("bwrap: Failed to make / slave", undefined)?.kind).toBe(
+      "apparmor-confined",
+    );
+    expect(
+      readApparmorProfile(() => {
+        throw new Error("no proc");
+      }),
+    ).toBeUndefined();
+  });
+
+  it("classifies the slave failure by errno and keeps host remedies out", () => {
+    const apparmor = diagnoseBwrapFailure(
+      "bwrap: Failed to make / slave: Permission denied",
+      "cri-containerd.apparmor.d",
+    );
+    expect(apparmor?.kind).toBe("apparmor-confined");
+    expect(apparmor?.hint).toContain("pod-level AppArmor profile");
+    for (const banned of [
+      "sysctl",
+      "apparmor_restrict_unprivileged_userns",
+      "bwrap-userns-restrict",
+    ])
+      expect(apparmor?.hint).not.toContain(banned);
+    const seccomp = diagnoseBwrapFailure(
+      "bwrap: Failed to make / slave: Operation not permitted",
+      "cri-containerd.apparmor.d",
+    );
+    expect(seccomp?.kind).toBe("seccomp-denied");
+    expect(seccomp?.hint).toContain("securityContext.seccompProfile");
+    for (const banned of ["sysctl", "bwrap-userns-restrict"])
+      expect(seccomp?.hint).not.toContain(banned);
+    expect(
+      diagnoseBwrapFailure("bwrap: Can't find source path: /x", "cri-containerd.apparmor.d"),
+    ).toBeUndefined();
+  });
+
+  it("renders the diagnosis in the trusted block and details with streams untouched", async () => {
+    const backend = {
+      name: "bubblewrap",
+      isAvailable: () => true,
+      run: async () => ({
+        exitCode: 1,
+        stdout: "",
+        stderr: "bwrap: Failed to make / slave: Permission denied",
+        stdoutTruncated: false,
+        stderrTruncated: false,
+        timedOut: false,
+        diagnosis: {
+          kind: "apparmor-confined" as const,
+          profile: "cri-containerd.apparmor.d",
+          hint: "containerized runner: configure a pod-level AppArmor profile",
+        },
+      }),
+      unavailableReason: () => undefined,
+    };
+    const [tool] = createExecTools(resolveExecConfig({ PI_REVIEWER_EXEC: "true" }), {
+      cwd: "/ws",
+      backend: backend as any,
+    });
+    const result = await tool.execute("id", { command: "echo hi" } as any);
+    expect(result.content).toHaveLength(3);
+    expect(result.content[0].text).toContain("pod-level AppArmor profile");
+    expect(result.content[1].text).toBe("[stdout]\n(empty)");
+    expect(result.details.diagnosis.kind).toBe("apparmor-confined");
   });
 });
 
