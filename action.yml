@@ -403,10 +403,9 @@ runs:
         # and userns-creation denials are excluded here because the sysctl
         # block above already owns them (remediation on github-hosted, warning
         # on self-hosted); warning again would double-fire or cry wolf right
-        # after a successful relaxation. bwrap's userns-denial wording has changed
-        # across releases; every observed wording shares the prefix "permissions to
-        # create" (0.9: "…to creating new namespace", 0.12: "…to create a new
-        # namespace"), so the match uses the prefix, not any one release's sentence.
+        # after a successful relaxation. bwrap's userns-denial wording differs
+        # across releases, so the match uses the shared case-insensitive prefix
+        # "permissions to create" rather than any one release's sentence.
         if [ "$probe_rc" -ne 0 ] && ! printf '%s' "$probe_stderr" | grep -q 'RTM_NEWADDR' && ! printf '%s' "$probe_stderr" | grep -qi 'permissions to create'; then
           first_line=$(printf '%s' "$probe_stderr" | head -n 1)
           echo "[pi-reviewer] WARNING: bubblewrap probe failed (${first_line:-exit $probe_rc}); see CI.md Sandboxed code execution. code_exec will fail closed until then."
