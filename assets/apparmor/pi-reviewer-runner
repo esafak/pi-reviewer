@@ -1,11 +1,14 @@
 # pi-reviewer runner container profile: permits sandbox-construction mounts/userns,
-# retains other container restrictions. Scope is the ARC runner pod only.
+# keeps proc/sys write denies. Scope is the ARC runner pod only.
 # Minimum platform is Ubuntu 24.04 / kernel 6.8 (AppArmor userns mediation);
 # older parsers reject the `userns` rule. The stock `bwrap-userns-restrict`
 # profile is path-attached to /usr/bin/bwrap and is not usable as a container
-# profile, so this file exists instead. Validate with:
+# profile, so this file exists instead. This is a minimal profile, not a
+# line-for-line derivative of cri-containerd.apparmor.d: diff it against your
+# runtime default before use. Validate with:
 #   apparmor_parser -Q -T < this file
 profile pi-reviewer-runner flags=(attach_disconnected,mediate_deleted) {
+  #include <tunables/global>
   #include <abstractions/base>
 
   capability,
@@ -25,11 +28,20 @@ profile pi-reviewer-runner flags=(attach_disconnected,mediate_deleted) {
   userns,
 
   network,
-  signal,
-  ptrace,
   unix,
 
-  # Retain the container default's other restrictions (device nodes, sysfs).
-  /dev/** rwk,
-  deny /sys/fs/cgroup/** wklx,
+  # Scoped signaling: sandbox children signal each other, and the runtime
+  # (unconfined) can still deliver SIGTERM so pods stop gracefully.
+  # Unconditional `signal,` / `ptrace,` would let the reviewed container
+  # signal or trace host peers.
+  signal (send,receive) peer=pi-reviewer-runner,
+  signal (receive) peer=unconfined,
+  ptrace peer=pi-reviewer-runner,
+
+  # Proc/sys write denies carried over from the container runtime default.
+  deny @{PROC}/* w,
+  deny @{PROC}/{mem,kmem,kcore} rwklx,
+  deny @{PROC}/sysrq-trigger rwklx,
+  deny @{PROC}/sys/** wklx,
+  deny /sys/** wklx,
 }

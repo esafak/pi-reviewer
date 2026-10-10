@@ -442,7 +442,9 @@ and `capabilities.add: ["SYS_ADMIN"]` are dead ends (the former resolves to
 regardless of capabilities). For seccomp-denied mounts the knob is
 `securityContext.seccompProfile`, not an AppArmor profile.
 
-Apply the ready-to-use profile in `assets/apparmor/` (equivalent to the containerd default with `deny mount` removed and `userns` added; minimum Ubuntu 24.04 / kernel 6.8): load it into
+Apply the ready-to-use profile in `assets/apparmor/` (a minimal profile permitting
+mount/userns with proc/sys write denies retained — diff it against your runtime
+default before use; minimum Ubuntu 24.04 / kernel 6.8): load it into
 each node's host policy first (see `daemonset.yaml` — pods referencing a
 profile that isn't loaded fail to start), then reference it from the runner pod
 via `securityContext.appArmorProfile: { type: Localhost, localhostProfile:

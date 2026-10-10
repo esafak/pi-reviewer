@@ -103,9 +103,10 @@ describe("GitHub Action Vite+ setup", () => {
     expect(warning).toContain("pod-level");
     expect(warning).not.toContain("sysctl");
     expect(warning).not.toContain("bwrap-userns-restrict");
-    // The generic fallback must not fire on the RTM signature the sysctl
-    // block already owns (github-hosted relaxation would warn falsely).
+    // The generic fallback must not fire on signatures the sysctl block
+    // already owns (github-hosted relaxation would warn falsely).
     expect(action).toContain("grep -q 'RTM_NEWADDR'");
+    expect(action).toContain("grep -qi 'permissions to create'");
     // The github-hosted sysctl relaxation stays for the bare-metal path.
     expect(action).toContain('RUNNER_ENVIRONMENT:-}" = "github-hosted"');
   });
