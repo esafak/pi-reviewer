@@ -1,0 +1,34 @@
+CI.md
+  h_ea91e2db23540f 417-451
+action.yml
+  h_ea91e2db23540f 379-390,400-408
+assets/apparmor/README.md
+  h_ea91e2db23540f 1-17
+assets/apparmor/daemonset.yaml
+  h_ea91e2db23540f 1-42
+assets/apparmor/pi-reviewer-runner
+  h_ea91e2db23540f 1-35
+src/ci/exec/backend.ts
+  h_ea91e2db23540f 17,39-49
+src/ci/exec/diagnose.ts
+  h_ea91e2db23540f 1-52
+src/ci/exec/runner.ts
+  h_ea91e2db23540f 6,68-71
+src/ci/exec/tool.ts
+  h_ea91e2db23540f 115-124,128-130,138,159
+tests/ci/action.test.ts
+  h_ea91e2db23540f 95-112
+tests/ci/exec.test.ts
+  h_ea91e2db23540f 26,507-581
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "7ff85d08aba62255d91d6737fc27aad5e20cfdf2",
+  "prompts": {},
+  "humans": {
+    "h_ea91e2db23540f": {
+      "author": "Emre Şafak <3928300+esafak@users.noreply.github.com>"
+    }
+  }
+}
