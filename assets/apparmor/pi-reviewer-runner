@@ -1,0 +1,52 @@
+# pi-reviewer runner container profile: permits sandbox-construction mounts/userns,
+# keeps proc/sys write denies. Scope is the ARC runner pod only.
+# Minimum platform is Ubuntu 24.04 / kernel 6.8 (AppArmor userns mediation);
+# older parsers reject the `userns` rule. The stock `bwrap-userns-restrict`
+# profile is path-attached to /usr/bin/bwrap and is not usable as a container
+# profile, so this file exists instead. This is a minimal profile, not a
+# line-for-line derivative of cri-containerd.apparmor.d: diff it against your
+# runtime default before use. Note it is slightly stricter there: unlike the
+# containerd default it also denies writes to /proc/sys/kernel/shm*, so a
+# workload that tunes shm needs an exception. Validate with:
+#   apparmor_parser -Q -T < this file
+# Variable-definition includes live at the top level, above the profile body:
+# tunables define the @{PROC} variables used below, and the parser rejects
+# assignments inside a profile block.
+#include <tunables/global>
+profile pi-reviewer-runner flags=(attach_disconnected,mediate_deleted) {
+  #include <abstractions/base>
+
+  capability,
+  file,
+  umount,
+
+  # Sandbox construction is mounts: bwrap remounts / rslave at startup so its
+  # tmpfs/proc/dev/binds never propagate to the host, then performs one mount
+  # per --bind/--ro-bind/--tmpfs/--proc/--dev. Denying mount here fails bwrap
+  # with `Failed to make / slave` before userns/network setup runs.
+  mount,
+  remount,
+  pivot_root,
+
+  # Unprivileged user namespaces already work under most container profiles;
+  # stated explicitly so the intent survives future base-profile changes.
+  userns,
+
+  network,
+  unix,
+
+  # Scoped signaling: sandbox children signal each other, and the runtime
+  # (unconfined) can still deliver SIGTERM so pods stop gracefully.
+  # Unconditional `signal,` / `ptrace,` would let the reviewed container
+  # signal or trace host peers.
+  signal (send,receive) peer=pi-reviewer-runner,
+  signal (receive) peer=unconfined,
+  ptrace peer=pi-reviewer-runner,
+
+  # Proc/sys write denies carried over from the container runtime default.
+  deny @{PROC}/* w,
+  deny @{PROC}/{mem,kmem,kcore} rwklx,
+  deny @{PROC}/sysrq-trigger rwklx,
+  deny @{PROC}/sys/** wklx,
+  deny /sys/** wklx,
+}

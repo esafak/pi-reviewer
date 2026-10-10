@@ -92,6 +92,25 @@ describe("GitHub Action Vite+ setup", () => {
     expect(() => YAML.parse(action)).not.toThrow();
   });
 
+  it("detects confined runtimes without pointing at host remedies", async () => {
+    const action = await readFile(path.join(process.cwd(), "action.yml"), "utf8");
+    expect(action).toContain("Failed to make / slave");
+    expect(action).toContain("confined runtime detected");
+    expect(action).toContain("CI.md Containerized self-hosted runners");
+    expect(action).toContain("--ro-bind / / true");
+    const warning =
+      action.match(/\[pi-reviewer\] WARNING: confined runtime detected[^\n]*/)?.[0] ?? "";
+    expect(warning).toContain("pod-level");
+    expect(warning).not.toContain("sysctl");
+    expect(warning).not.toContain("bwrap-userns-restrict");
+    // The generic fallback must not fire on signatures the sysctl block
+    // already owns (github-hosted relaxation would warn falsely).
+    expect(action).toContain("grep -q 'RTM_NEWADDR'");
+    expect(action).toContain("grep -qi 'permissions to create'");
+    // The github-hosted sysctl relaxation stays for the bare-metal path.
+    expect(action).toContain('RUNNER_ENVIRONMENT:-}" = "github-hosted"');
+  });
+
   it("keeps the checked-in UI build artifact usable by the UI template", async () => {
     const template = await readFile(path.join(process.cwd(), "src/core/ui/template.ts"), "utf8");
     const artifact = await readFile(path.join(process.cwd(), "dist-ui/index.html"), "utf8");

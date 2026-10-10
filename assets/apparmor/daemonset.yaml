@@ -1,0 +1,59 @@
+# Loads pi-reviewer-runner into each node's host AppArmor policy. Pods can only
+# reference already-loaded profiles, so this DaemonSet (or an equivalent node
+# image change) must precede the runner pod's securityContext.
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: pi-reviewer-apparmor-loader
+  namespace: kube-system
+spec:
+  selector:
+    matchLabels:
+      name: pi-reviewer-apparmor-loader
+  template:
+    metadata:
+      labels:
+        name: pi-reviewer-apparmor-loader
+    spec:
+      containers:
+        - name: loader
+          image: ubuntu:24.04
+          securityContext:
+            privileged: true
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              # The stock ubuntu image ships no apparmor_parser; without it the
+              # profile silently never loads and referencing pods fail to start.
+              if ! command -v apparmor_parser >/dev/null 2>&1; then
+                apt-get update && apt-get install -y apparmor
+              fi
+              cp /profile/pi-reviewer-runner /etc/apparmor.d/pi-reviewer-runner
+              apparmor_parser -r /etc/apparmor.d/pi-reviewer-runner
+              # Keeps the DaemonSet pod Running; the loaded profile persists in
+              # the kernel regardless. This loader is privileged by necessity
+              # (it writes host policy) and is opt-in: apply only on node pools
+              # that run the ARC runners.
+              sleep infinity
+          volumeMounts:
+            - name: profile
+              mountPath: /profile
+            - name: apparmorfs
+              # Policy loading writes the securityfs .load interfaces; a
+              # container's fresh sysfs never carries the host's apparmorfs, so
+              # the node's securityfs must be mounted in explicitly.
+              mountPath: /sys/kernel/security
+      volumes:
+        - name: profile
+          configMap:
+            name: pi-reviewer-apparmor
+        - name: apparmorfs
+          hostPath:
+            path: /sys/kernel/security
+            type: Directory
+# Store the profile text with e.g.:
+#   kubectl create configmap pi-reviewer-apparmor -n kube-system \
+#     --from-file=pi-reviewer-runner=assets/apparmor/pi-reviewer-runner
+# Verify on a node with: aa-status | grep pi-reviewer-runner

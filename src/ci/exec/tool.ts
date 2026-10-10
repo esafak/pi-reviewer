@@ -112,9 +112,22 @@ export function createExecTools(
           timeoutMs,
           maxStreamBytes: config.maxStreamBytes,
         });
+        if (result.diagnosis) {
+          log.warn(
+            "code_exec.confined-runtime",
+            "Sandboxed exec blocked by container confinement",
+            {
+              kind: result.diagnosis.kind,
+              profile: (result.diagnosis.profile ?? "unknown").slice(0, 120),
+            },
+          );
+        }
         const remaining = config.maxCalls - state.calls - 1;
         const stdoutLabel = result.stdoutTruncated ? " (truncated)" : "";
         const stderrLabel = result.stderrTruncated ? " (truncated)" : "";
+        const statusLine =
+          `exit ${result.exitCode} (timed out: ${result.timedOut}, cwd: ${workdir})\nRemaining code_exec calls: ${remaining}.` +
+          (result.diagnosis ? `\n${result.diagnosis.hint}` : "");
         return {
           // Trusted status lines live in their own block: command output is
           // untrusted data and must never share a block where it could spoof
@@ -122,7 +135,7 @@ export function createExecTools(
           content: [
             {
               type: "text",
-              text: `exit ${result.exitCode} (timed out: ${result.timedOut}, cwd: ${workdir})\nRemaining code_exec calls: ${remaining}.`,
+              text: statusLine,
             },
             {
               type: "text",
@@ -143,6 +156,7 @@ export function createExecTools(
             stderrTruncated: result.stderrTruncated,
             timedOut: result.timedOut,
             remainingCalls: remaining,
+            ...(result.diagnosis ? { diagnosis: result.diagnosis } : {}),
           },
         };
       } catch (error) {

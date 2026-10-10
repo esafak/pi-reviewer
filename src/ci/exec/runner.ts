@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 
 import { isSecretEnvName, pickEnv } from "./env.js";
+import type { BwrapDiagnosis } from "./diagnose.js";
 
 // Secrets never enter the sandbox. Everything else is denied by default and
 // only locale/toolchain variables pass through; the guest HOME is a scratch
@@ -64,6 +65,10 @@ export interface SandboxResult {
   stdoutTruncated: boolean;
   stderrTruncated: boolean;
   timedOut: boolean;
+  // Confined-runtime diagnosis travels beside the streams so trusted guidance
+  // never shares a block with untrusted command output and never consumes
+  // the per-stream byte budget.
+  diagnosis?: BwrapDiagnosis;
 }
 
 export function resolveWorkdir(workspace: string, workdir: string): string {

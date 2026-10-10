@@ -376,6 +376,18 @@ runs:
         # GitHub-hosted runners: persistent self-hosted hosts keep their
         # posture and get a warning instead (see CI.md for the sysctl or
         # AppArmor-profile setup they need instead).
+        # A confined container runtime (profile set by the pod/runtime,
+        # unreachable from any job step) denies bwrap's mount-namespace setup
+        # before userns/network setup runs. That signature must stay identical
+        # to the BWRAP_SLAVE_ERROR match in src/ci/exec/diagnose.ts; the
+        # probe below is read-only (--ro-bind / /) with --proc/--dev omitted
+        # because the propagation remount precedes all argv mounts.
+        probe_rc=0
+        probe_stderr=$(bwrap --unshare-all --unshare-net --ro-bind / / true 2>&1) || probe_rc=$?
+        if printf '%s' "$probe_stderr" | grep -q 'Failed to make / slave'; then
+          echo "[pi-reviewer] WARNING: confined runtime detected (bwrap: Failed to make / slave). Bubblewrap cannot create its mount namespace under the container's security profile; configure a pod-level security profile (AppArmor or seccomp — see CI.md Containerized self-hosted runners). code_exec will fail closed until then."
+          exit 0
+        fi
         if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ] && \
            [ "$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns)" != "0" ]; then
           if [ "${RUNNER_ENVIRONMENT:-}" = "github-hosted" ]; then
@@ -384,6 +396,19 @@ runs:
           else
             echo "[pi-reviewer] WARNING: not relaxing kernel.apparmor_restrict_unprivileged_userns on this runner (not GitHub-hosted). Sandboxed exec needs the restriction relaxed or the bwrap-userns-restrict AppArmor profile loaded; see CI.md. code_exec will fail closed until then."
           fi
+        fi
+        # Any other probe failure (broken install, kernel without userns, host
+        # seccomp) stays warn-only: setup must not block reviews that never
+        # call code_exec, but operators need a setup-stage signal. RTM_NEWADDR
+        # and userns-creation denials are excluded here because the sysctl
+        # block above already owns them (remediation on github-hosted, warning
+        # on self-hosted); warning again would double-fire or cry wolf right
+        # after a successful relaxation. bwrap's userns-denial wording differs
+        # across releases, so the match uses the shared case-insensitive prefix
+        # "permissions to create" rather than any one release's sentence.
+        if [ "$probe_rc" -ne 0 ] && ! printf '%s' "$probe_stderr" | grep -q 'RTM_NEWADDR' && ! printf '%s' "$probe_stderr" | grep -qi 'permissions to create'; then
+          first_line=$(printf '%s' "$probe_stderr" | head -n 1)
+          echo "[pi-reviewer] WARNING: bubblewrap probe failed (${first_line:-exit $probe_rc}); see CI.md Sandboxed code execution. code_exec will fail closed until then."
         fi
 
     - name: Run review
