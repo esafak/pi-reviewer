@@ -5,10 +5,15 @@
 # profile is path-attached to /usr/bin/bwrap and is not usable as a container
 # profile, so this file exists instead. This is a minimal profile, not a
 # line-for-line derivative of cri-containerd.apparmor.d: diff it against your
-# runtime default before use. Validate with:
+# runtime default before use. Note it is slightly stricter there: unlike the
+# containerd default it also denies writes to /proc/sys/kernel/shm*, so a
+# workload that tunes shm needs an exception. Validate with:
 #   apparmor_parser -Q -T < this file
+# Variable-definition includes live at the top level, above the profile body:
+# tunables define the @{PROC} variables used below, and the parser rejects
+# assignments inside a profile block.
+#include <tunables/global>
 profile pi-reviewer-runner flags=(attach_disconnected,mediate_deleted) {
-  #include <tunables/global>
   #include <abstractions/base>
 
   capability,
