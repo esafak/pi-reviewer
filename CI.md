@@ -107,6 +107,10 @@ does not exist on the default branch, the review fails rather than falling back
 to PR-controlled content. MCP tools are not enabled for local runs, replies,
 dry-runs, or non-comment output.
 
+The config path is arbitrary: `.github/mcp.json` below is only an example name.
+The action passes the file to the adapter in memory, so it is unrelated to the
+adapter's own `mcp-adapter.json` file discovery.
+
 ```yaml
       - uses: esafak/pi-reviewer@main
         with:
