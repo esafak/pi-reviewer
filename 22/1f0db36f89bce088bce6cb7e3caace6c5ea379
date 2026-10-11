@@ -1,0 +1,28 @@
+CI.md
+  h_ea91e2db23540f 401-402,414-421,453-470
+action.yml
+  h_ea91e2db23540f 378-382,395,398-432
+src/ci/exec/backend.ts
+  h_ea91e2db23540f 17-22,46-60
+src/ci/exec/diagnose.ts
+  h_ea91e2db23540f 3-4,6-9,18,43-51,59-66,68
+src/ci/exec/runner.ts
+  h_ea91e2db23540f 7,9-14,112-117,151-164,223-227,229-271,274-292
+src/ci/exec/tool.ts
+  h_ea91e2db23540f 116-124
+tests/ci/action.test.ts
+  h_ea91e2db23540f 114-122
+tests/ci/exec.test.ts
+  h_ea91e2db23540f 22,27-31,157-175,575-587,726-821
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "221f0db36f89bce088bce6cb7e3caace6c5ea379",
+  "prompts": {},
+  "humans": {
+    "h_ea91e2db23540f": {
+      "author": "Emre Şafak <3928300+esafak@users.noreply.github.com>"
+    }
+  }
+}
