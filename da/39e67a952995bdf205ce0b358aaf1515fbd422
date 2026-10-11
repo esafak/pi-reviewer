@@ -1,0 +1,14 @@
+.github/workflows/test.yml
+  h_ea91e2db23540f 6-10,12-16
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "da39e67a952995bdf205ce0b358aaf1515fbd422",
+  "prompts": {},
+  "humans": {
+    "h_ea91e2db23540f": {
+      "author": "Emre Şafak <3928300+esafak@users.noreply.github.com>"
+    }
+  }
+}
