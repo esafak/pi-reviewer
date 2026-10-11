@@ -1,0 +1,16 @@
+CI.md
+  h_ea91e2db23540f 462-466
+src/ci/exec/runner.ts
+  h_ea91e2db23540f 14-16,159-161
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "c9ca3b0b8a8259cf92ca1eb804975efe0d1c9e91",
+  "prompts": {},
+  "humans": {
+    "h_ea91e2db23540f": {
+      "author": "Emre Şafak <3928300+esafak@users.noreply.github.com>"
+    }
+  }
+}
