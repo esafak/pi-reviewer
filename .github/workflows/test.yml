@@ -3,7 +3,17 @@ name: Tests
 on:
   push:
     branches: [main, "renovate/**"]
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+      - "assets/**"
+      - ".github/mcp.json"
   pull_request:
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+      - "assets/**"
+      - ".github/mcp.json"
   workflow_dispatch:
 
 permissions:
