@@ -375,7 +375,11 @@ runs:
         # capabilities its loopback setup needs. Relaxed only on disposable
         # GitHub-hosted runners: persistent self-hosted hosts keep their
         # posture and get a warning instead (see CI.md for the sysctl or
-        # AppArmor-profile setup they need instead).
+        # AppArmor-profile setup they need instead). The sysctl only restricts
+        # unconfined processes; a containerized runner confined by any pod or
+        # runtime profile (any label other than unconfined) is outside its
+        # scope, so the sysctl block below is skipped when confinement is
+        # observed via /proc/self/attr/current.
         # A confined container runtime (profile set by the pod/runtime,
         # unreachable from any job step) denies bwrap's mount-namespace setup
         # before userns/network setup runs. That signature must stay identical
@@ -388,14 +392,44 @@ runs:
           echo "[pi-reviewer] WARNING: confined runtime detected (bwrap: Failed to make / slave). Bubblewrap cannot create its mount namespace under the container's security profile; configure a pod-level security profile (AppArmor or seccomp — see CI.md Containerized self-hosted runners). code_exec will fail closed until then."
           exit 0
         fi
+        apparmor_label=$(cat /proc/self/attr/current 2>/dev/null || echo "unknown")
         if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ] && \
            [ "$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns)" != "0" ]; then
-          if [ "${RUNNER_ENVIRONMENT:-}" = "github-hosted" ]; then
-            echo "[pi-reviewer] relaxing AppArmor unprivileged-userns restriction for sandboxed exec"
-            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-          else
-            echo "[pi-reviewer] WARNING: not relaxing kernel.apparmor_restrict_unprivileged_userns on this runner (not GitHub-hosted). Sandboxed exec needs the restriction relaxed or the bwrap-userns-restrict AppArmor profile loaded; see CI.md. code_exec will fail closed until then."
-          fi
+          case "$apparmor_label" in
+            unconfined*|unknown|"")
+              # Prefer the probe over the sysctl value: a succeeding probe
+              # means a suitable profile is already loaded (or the kernel
+              # does not enforce), so neither relaxation nor a warning is
+              # needed. Only a probe showing the userns restriction owns a
+              # sysctl warning; other failures fall through to the generic
+              # probe warning below.
+              if printf '%s' "$probe_stderr" | grep -q 'RTM_NEWADDR' || printf '%s' "$probe_stderr" | grep -qi 'permissions to create'; then
+                if [ "${RUNNER_ENVIRONMENT:-}" = "github-hosted" ]; then
+                  echo "[pi-reviewer] relaxing AppArmor unprivileged-userns restriction for sandboxed exec"
+                  sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+                else
+                  probe_first=$(printf '%s' "$probe_stderr" | head -n 1)
+                  echo "[pi-reviewer] WARNING: not relaxing kernel.apparmor_restrict_unprivileged_userns on this runner (not GitHub-hosted, label: ${apparmor_label:-unknown}, probe exit ${probe_rc}: ${probe_first:-ok}). Sandboxed exec needs the restriction relaxed or the bwrap-userns-restrict AppArmor profile loaded; see CI.md. code_exec will fail closed until then."
+                fi
+              fi
+              ;;
+            *)
+              # Confined by a container profile: unprivileged user namespaces
+              # already work here, so the sysctl needs no warning.
+              ;;
+          esac
+        fi
+        # Nested-userns proc probe: a fresh procfs mount inside a nested user
+        # namespace fails with EPERM even when mount is allowed (kernel
+        # namespace restriction, not AppArmor). That signature must stay identical
+        # to the BWRAP_PROC_ERROR match in src/ci/exec/diagnose.ts. The runner
+        # retries with a read-only reuse of /proc, so this stays informational
+        # and never fails closed.
+        proc_rc=0
+        proc_stderr=$(bwrap --unshare-user --unshare-pid --proc /proc --ro-bind / / true 2>&1) || proc_rc=$?
+        if printf '%s' "$proc_stderr" | grep -q "Can't mount proc"; then
+          proc_first=$(printf '%s' "$proc_stderr" | head -n 1)
+          echo "[pi-reviewer] INFO: nested user namespace cannot mount a fresh procfs (${proc_first:-exit $proc_rc}); the runner retries sandboxed exec with a read-only reuse of /proc (PID isolation retained, pod process table readable). No action required; see CI.md Containerized self-hosted runners."
         fi
         # Any other probe failure (broken install, kernel without userns, host
         # seccomp) stays warn-only: setup must not block reviews that never

@@ -113,14 +113,15 @@ export function createExecTools(
           maxStreamBytes: config.maxStreamBytes,
         });
         if (result.diagnosis) {
-          log.warn(
-            "code_exec.confined-runtime",
-            "Sandboxed exec blocked by container confinement",
-            {
-              kind: result.diagnosis.kind,
-              profile: (result.diagnosis.profile ?? "unknown").slice(0, 120),
-            },
-          );
+          log.warn("code_exec.confined-runtime", "Sandboxed exec setup denied", {
+            kind: result.diagnosis.kind,
+            profile: (result.diagnosis.profile ?? "unknown").slice(0, 120),
+            // bwrap's raw stderr and exit code travel in the tool result;
+            // the log keeps the exit code and a head of stderr so operators
+            // can diagnose without replaying the call.
+            exitCode: result.exitCode,
+            stderr: result.stderr.slice(0, 240),
+          });
         }
         const remaining = config.maxCalls - state.calls - 1;
         const stdoutLabel = result.stdoutTruncated ? " (truncated)" : "";

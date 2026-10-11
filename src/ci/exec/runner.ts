@@ -4,10 +4,16 @@ import path from "node:path";
 
 import { isSecretEnvName, pickEnv } from "./env.js";
 import type { BwrapDiagnosis } from "./diagnose.js";
+import { BWRAP_PROC_ERROR } from "./diagnose.js";
 
-// Secrets never enter the sandbox. Everything else is denied by default and
-// only locale/toolchain variables pass through; the guest HOME is a scratch
-// tmpfs so per-run caches work without persisting or touching the real home.
+// Secrets never enter the sandbox environment. Everything else is denied by
+// default and only locale/toolchain variables pass through; the guest HOME
+// is a scratch tmpfs so per-run caches work without persisting or touching
+// the real home. Exception: on containerized runners the procfs fallback
+// reuses the host's /proc read-only, so the sandbox can read the pod's
+// process table. Command lines are world-readable by design; /proc/PID
+// environ is ptrace-gated (denied for non-descendants at ptrace_scope 1
+// and above, readable if the host sets 0).
 const PASSTHROUGH_ENV = [
   "PATH",
   "LANG",
@@ -105,7 +111,12 @@ function sandboxEnv(extraEnv: Record<string, string> = {}): Record<string, strin
   return env;
 }
 
-export function buildBwrapArgs(request: SandboxRequest): string[] {
+export type BwrapProcMode = "proc" | "bind";
+
+export function buildBwrapArgs(
+  request: SandboxRequest,
+  procMode: BwrapProcMode = "proc",
+): string[] {
   const resolved = resolveWorkdir(request.workspace, request.workdir);
   const home = process.env.HOME ?? "/root";
   const exists = request.exists ?? existsSync;
@@ -139,7 +150,21 @@ export function buildBwrapArgs(request: SandboxRequest): string[] {
   args.push("--bind", request.workspace, request.workspace);
   const dotGit = path.join(request.workspace, ".git");
   if (exists(dotGit)) args.push("--ro-bind", dotGit, dotGit);
-  args.push("--proc", "/proc", "--dev", "/dev");
+  // A fresh procfs mount fails inside a nested user namespace (containerized
+  // runners): the kernel denies fresh procfs instantiation there with EPERM
+  // while tmpfs mounts and bind-reuse succeed, independent of LSM state. The
+  // default keeps --proc for strict isolation on hosts where it works;
+  // runSandboxed retries once reusing the existing /proc read-only, keeping
+  // PID isolation. Trade-off: the sandbox then reads the pod's process
+  // table — command lines are world-readable, while environ stays
+  // ptrace-gated as above — accepted because the alternative is no
+  // code_exec at all on such runners.
+  if (procMode === "bind") {
+    args.push("--ro-bind", "/proc", "/proc");
+  } else {
+    args.push("--proc", "/proc");
+  }
+  args.push("--dev", "/dev");
   args.push("--setenv", "HOME", SANDBOX_HOME);
   args.push("--chdir", resolved, "--", "bash", "-c", request.command);
   return args;
@@ -198,55 +223,74 @@ export function runSandboxed(request: SandboxRequest): Promise<SandboxResult> {
   if (!(request.exists ?? existsSync)(resolved))
     return Promise.reject(new Error(`workdir "${request.workdir}" does not exist`));
 
-  const args = buildBwrapArgs(request);
-  return new Promise<SandboxResult>((resolve, reject) => {
-    const child = spawn(bwrap, args, {
-      env: sandboxEnv(request.extraEnv),
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    const cap = request.maxStreamBytes;
-    const stdout = collectCapped(cap);
-    const stderr = collectCapped(cap);
-    let settled = false;
-
-    const timer = setTimeout(() => {
-      if (settled) return;
-      settled = true;
-      child.kill("SIGKILL");
-      const out = stdout.result();
-      const err = stderr.result();
-      resolve({
-        exitCode: 124,
-        stdout: out.text,
-        stderr: err.text,
-        stdoutTruncated: out.truncated,
-        stderrTruncated: err.truncated,
-        timedOut: true,
+  const spawnOnce = (args: string[]): Promise<SandboxResult> =>
+    new Promise<SandboxResult>((resolve, reject) => {
+      const child = spawn(bwrap, args, {
+        env: sandboxEnv(request.extraEnv),
+        stdio: ["ignore", "pipe", "pipe"],
       });
-    }, request.timeoutMs);
+      const cap = request.maxStreamBytes;
+      const stdout = collectCapped(cap);
+      const stderr = collectCapped(cap);
+      let settled = false;
 
-    child.stdout.on("data", (chunk: Buffer) => stdout.push(chunk));
-    child.stderr.on("data", (chunk: Buffer) => stderr.push(chunk));
-    child.on("error", (error) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      reject(error);
-    });
-    child.on("close", (code) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      const out = stdout.result();
-      const err = stderr.result();
-      resolve({
-        exitCode: code ?? 1,
-        stdout: out.text,
-        stderr: err.text,
-        stdoutTruncated: out.truncated,
-        stderrTruncated: err.truncated,
-        timedOut: false,
+      const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        child.kill("SIGKILL");
+        const out = stdout.result();
+        const err = stderr.result();
+        resolve({
+          exitCode: 124,
+          stdout: out.text,
+          stderr: err.text,
+          stdoutTruncated: out.truncated,
+          stderrTruncated: err.truncated,
+          timedOut: true,
+        });
+      }, request.timeoutMs);
+
+      child.stdout.on("data", (chunk: Buffer) => stdout.push(chunk));
+      child.stderr.on("data", (chunk: Buffer) => stderr.push(chunk));
+      child.on("error", (error) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        reject(error);
+      });
+      child.on("close", (code) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        const out = stdout.result();
+        const err = stderr.result();
+        resolve({
+          exitCode: code ?? 1,
+          stdout: out.text,
+          stderr: err.text,
+          stdoutTruncated: out.truncated,
+          stderrTruncated: err.truncated,
+          timedOut: false,
+        });
       });
     });
-  });
+
+  // Prefer a fresh procfs mount for strict isolation; a nested user namespace
+  // denies fresh procfs instantiation with EPERM, so retry once reusing the
+  // existing /proc read-only. The retry keeps --unshare-pid (PID isolation)
+  // and only shares the /proc view. The retry consumes a second full
+  // timeoutMs, but proc failures die in setup within milliseconds. The
+  // bwrap-error prefix keeps sandboxed command output from spoofing the
+  // retry: only bwrap's own setup error triggers it.
+  return (async () => {
+    const first = await spawnOnce(buildBwrapArgs(request, "proc"));
+    if (
+      first.exitCode !== 0 &&
+      !first.timedOut &&
+      first.stderr.includes(`bwrap: ${BWRAP_PROC_ERROR}`)
+    ) {
+      return spawnOnce(buildBwrapArgs(request, "bind"));
+    }
+    return first;
+  })();
 }

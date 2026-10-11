@@ -19,11 +19,16 @@ import {
   collectCapped,
   isBubblewrapAvailable,
   resolveWorkdir,
+  runSandboxed,
   SANDBOX_HOME,
   truncateBytes,
 } from "../../src/ci/exec/runner.js";
 import { createExecTools, execSchema } from "../../src/ci/exec/tool.js";
-import { diagnoseBwrapFailure, readApparmorProfile } from "../../src/ci/exec/diagnose.js";
+import {
+  BWRAP_PROC_ERROR,
+  diagnoseBwrapFailure,
+  readApparmorProfile,
+} from "../../src/ci/exec/diagnose.js";
 
 const { spawnMock } = vi.hoisted(() => ({ spawnMock: vi.fn() }));
 vi.mock("node:child_process", async (importActual) => {
@@ -148,6 +153,25 @@ describe("exec runner", () => {
     } finally {
       vi.unstubAllEnvs();
     }
+  });
+
+  it("keeps a fresh procfs by default and reuses /proc read-only in bind mode", () => {
+    const base = {
+      workspace: "/ws",
+      workdir: ".",
+      command: "echo hi",
+      timeoutMs: 120_000,
+      maxStreamBytes: 1024,
+      exists: () => false,
+    };
+    const procArgs = buildBwrapArgs(base);
+    const procIndex = procArgs.indexOf("--proc");
+    expect(procIndex).toBeGreaterThanOrEqual(0);
+    expect(procArgs[procIndex + 1]).toBe("/proc");
+    const bindArgs = buildBwrapArgs(base, "bind");
+    expect(bindArgs).not.toContain("--proc");
+    const idx = bindArgs.indexOf("/proc");
+    expect(bindArgs.slice(idx - 1, idx + 2)).toEqual(["--ro-bind", "/proc", "/proc"]);
   });
 });
 
@@ -548,6 +572,19 @@ describe("confined-runtime diagnosis", () => {
     ).toBeUndefined();
   });
 
+  it("classifies the nested-userns proc failure without host remedies", () => {
+    const diagnosis = diagnoseBwrapFailure(
+      "bwrap: Can't mount proc on /newroot/proc: Operation not permitted",
+      "my-container-profile",
+    );
+    expect(diagnosis?.kind).toBe("proc-mount-denied");
+    expect(diagnosis?.profile).toBe("my-container-profile");
+    expect(diagnosis?.hint).toContain("CI.md");
+    for (const banned of ["sysctl", "bwrap-userns-restrict"])
+      expect(diagnosis?.hint).not.toContain(banned);
+    expect(BWRAP_PROC_ERROR).toBe("Can't mount proc");
+  });
+
   it("renders the diagnosis in the trusted block and details with streams untouched", async () => {
     const backend = {
       name: "bubblewrap",
@@ -681,6 +718,102 @@ describe("apple container backend", () => {
       expect(result).toMatchObject({ timedOut: true, exitCode: 124 });
       const rmCall = spawnMock.mock.calls.find((call) => (call[1] as string[])[0] === "rm");
       expect(rmCall?.[1]).toEqual(["rm", "--force", expect.stringMatching(/^pi-exec-/)]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("bwrap proc fallback", () => {
+  const workspace = process.cwd();
+
+  beforeEach(() => {
+    spawnMock.mockReset();
+  });
+
+  function baseRequest() {
+    return {
+      workspace,
+      workdir: ".",
+      command: "echo hi",
+      timeoutMs: 5000,
+      maxStreamBytes: 4096,
+      platform: "linux" as const,
+      exists: () => true,
+    } as any;
+  }
+
+  // The mocked spawn delivers no stream data by default, so failures carry
+  // their stderr explicitly before the close event.
+  function childWithStderr(stderrText: string, code: number | null): FakeChild {
+    const child = fakeChild();
+    const stderrHandlers: Array<(chunk: Buffer) => void> = [];
+    (child.stderr.on as ReturnType<typeof vi.fn>).mockImplementation(
+      (event: string, cb: (chunk: Buffer) => void) => {
+        if (event === "data") stderrHandlers.push(cb);
+      },
+    );
+    queueMicrotask(() => {
+      for (const cb of stderrHandlers) cb(Buffer.from(stderrText));
+      child.emit("close", code);
+    });
+    return child;
+  }
+
+  it("retries once with a read-only /proc reuse on the proc-mount failure", async () => {
+    spawnMock
+      .mockImplementationOnce(
+        () =>
+          childWithStderr(
+            "bwrap: Can't mount proc on /newroot/proc: Operation not permitted",
+            1,
+          ) as never,
+      )
+      .mockImplementationOnce(() => autoClosingChild(0) as never);
+    const result = await runSandboxed(baseRequest());
+    expect(spawnMock).toHaveBeenCalledTimes(2);
+    const firstArgs = spawnMock.mock.calls[0][1] as string[];
+    const secondArgs = spawnMock.mock.calls[1][1] as string[];
+    expect(firstArgs).toContain("--proc");
+    expect(secondArgs).not.toContain("--proc");
+    const idx = secondArgs.indexOf("/proc");
+    expect(secondArgs.slice(idx - 1, idx + 2)).toEqual(["--ro-bind", "/proc", "/proc"]);
+    expect(result).toMatchObject({ exitCode: 0, timedOut: false });
+  });
+
+  it("does not retry successful or unrelated failures", async () => {
+    spawnMock.mockImplementationOnce(() => autoClosingChild(0) as never);
+    const ok = await runSandboxed(baseRequest());
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+    expect(ok.exitCode).toBe(0);
+
+    spawnMock.mockReset();
+    spawnMock.mockImplementationOnce(
+      () => childWithStderr("bwrap: Can't find source path: /x", 1) as never,
+    );
+    const failed = await runSandboxed(baseRequest());
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+    expect(failed).toMatchObject({ exitCode: 1, timedOut: false });
+    expect(failed.stderr).toContain("Can't find source path");
+  });
+
+  it("does not retry unprefixed command output mentioning the signature", async () => {
+    spawnMock.mockImplementationOnce(() => childWithStderr("Can't mount proc", 1) as never);
+    const result = await runSandboxed(baseRequest());
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+    expect(result.exitCode).toBe(1);
+  });
+
+  it("does not retry after a timeout", async () => {
+    vi.useFakeTimers();
+    try {
+      const hanging = fakeChild();
+      spawnMock.mockImplementation(() => hanging as never);
+      const pending = runSandboxed({ ...baseRequest(), timeoutMs: 1000 });
+      await vi.advanceTimersByTimeAsync(1000);
+      const result = await pending;
+      expect(result).toMatchObject({ timedOut: true, exitCode: 124 });
+      expect(spawnMock).toHaveBeenCalledTimes(1);
     } finally {
       vi.useRealTimers();
     }

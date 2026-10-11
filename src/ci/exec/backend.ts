@@ -14,7 +14,12 @@ import {
   type SandboxRequest,
   type SandboxResult,
 } from "./runner.js";
-import { BWRAP_SLAVE_ERROR, diagnoseBwrapFailure, readApparmorProfile } from "./diagnose.js";
+import {
+  BWRAP_PROC_ERROR,
+  BWRAP_SLAVE_ERROR,
+  diagnoseBwrapFailure,
+  readApparmorProfile,
+} from "./diagnose.js";
 
 // Every backend upholds the same contract or refuses: no network, writes
 // confined to the workspace, scrubbed env, per-stream output caps, and
@@ -38,11 +43,21 @@ export class BubblewrapBackend implements SandboxBackend {
   }
   async run(request: SandboxRequest): Promise<SandboxResult> {
     const result = await runSandboxed(request);
-    // Annotate deterministic mount-namespace denials without touching the
-    // streams: the pod/runtime profile is fixed for the job's lifetime, so a
-    // per-call hint in the trusted block beats a per-call opaque error.
-    // Signature first (pure string match); the procfs read runs only on match.
-    if (result.exitCode !== 0 && !result.diagnosis && result.stderr.includes(BWRAP_SLAVE_ERROR)) {
+    // Annotate deterministic setup denials without touching the streams: the
+    // pod/runtime profile is fixed for the job's lifetime, so a per-call hint
+    // in the trusted block beats a per-call opaque error. The runner already
+    // retried a proc-mount failure with a read-only /proc reuse, so a
+    // surviving proc signature means the fallback also failed. bwrap's
+    // stderr stays in its own block with the exit code, so the hint never
+    // hides the raw error.
+    // Signature first (pure string match, bwrap-prefixed so sandboxed
+    // command output cannot spoof it); the procfs read runs only on match.
+    if (
+      result.exitCode !== 0 &&
+      !result.diagnosis &&
+      (result.stderr.includes(`bwrap: ${BWRAP_SLAVE_ERROR}`) ||
+        result.stderr.includes(`bwrap: ${BWRAP_PROC_ERROR}`))
+    ) {
       const diagnosis = diagnoseBwrapFailure(result.stderr, readApparmorProfile());
       if (diagnosis) return { ...result, diagnosis };
     }
