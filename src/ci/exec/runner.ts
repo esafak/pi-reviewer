@@ -11,7 +11,9 @@ import { BWRAP_PROC_ERROR } from "./diagnose.js";
 // is a scratch tmpfs so per-run caches work without persisting or touching
 // the real home. Exception: on containerized runners the procfs fallback
 // reuses the host's /proc read-only, so the sandbox can read the pod's
-// process table (including same-uid command lines and environments).
+// process table. Command lines are world-readable by design; /proc/PID
+// environ is ptrace-gated (denied for non-descendants at ptrace_scope 1
+// and above, readable if the host sets 0).
 const PASSTHROUGH_ENV = [
   "PATH",
   "LANG",
@@ -154,8 +156,9 @@ export function buildBwrapArgs(
   // default keeps --proc for strict isolation on hosts where it works;
   // runSandboxed retries once reusing the existing /proc read-only, keeping
   // PID isolation. Trade-off: the sandbox then reads the pod's process
-  // table, including same-uid command lines and environments — accepted
-  // because the alternative is no code_exec at all on such runners.
+  // table — command lines are world-readable, while environ stays
+  // ptrace-gated as above — accepted because the alternative is no
+  // code_exec at all on such runners.
   if (procMode === "bind") {
     args.push("--ro-bind", "/proc", "/proc");
   } else {

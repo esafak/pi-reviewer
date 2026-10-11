@@ -459,9 +459,11 @@ namespace restriction independent of LSM state — no AppArmor or manifest
 change fixes it. The runner handles it by retrying once with `--ro-bind
 /proc /proc` (reusing the existing mount read-only instead of creating one)
 while keeping `--unshare-pid`, so PID isolation is retained. Trade-off: the
-sandbox can read the pod's process table, including same-uid command lines
-and environments, so treat the sandbox as egress-denied but not
-secret-isolated from same-uid pod processes. Reproduce with `bwrap --ro-bind
+sandbox can read the pod's process table — command lines are world-readable
+by design, while /proc/PID environ is ptrace-gated (denied for
+non-descendants at ptrace_scope 1 and above, readable if the host sets 0) —
+so treat the sandbox as egress-denied but not secret-isolated from same-uid
+pod processes. Reproduce with `bwrap --ro-bind
 / / --dev /dev --proc /proc --tmpfs /tmp --unshare-user --unshare-pid true`
 (fails) versus the same invocation with `--ro-bind /proc /proc` (succeeds),
 or `unshare -Urm sh -c 'mount -t proc proc <dir>'` (fails) versus `mount -t
