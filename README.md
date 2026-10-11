@@ -41,7 +41,7 @@ Before starting the agent, pi-reviewer fetches everything over SSH in parallel: 
 
 ### MCP context sources
 
-The reviewer does not include provider-specific MCP integrations. To use DeepWiki or another MCP server locally, install [`pi-mcp-adapter`](https://github.com/nicobailon/pi-mcp-adapter) in Pi and add the server to your MCP config. For example, the public DeepWiki server requires no authentication:
+The reviewer does not include provider-specific MCP integrations. To use DeepWiki or another MCP server locally, install [`pi-mcp-adapter`](https://github.com/nicobailon/pi-mcp-adapter) in Pi and add the server to your adapter config (`~/.pi/agent/mcp-adapter.json` for every project, or `.pi/mcp-adapter.json` for one project). For example, the public DeepWiki server requires no authentication:
 
 ```json
 {
