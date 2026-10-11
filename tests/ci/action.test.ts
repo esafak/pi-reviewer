@@ -111,6 +111,15 @@ describe("GitHub Action Vite+ setup", () => {
     expect(action).toContain('RUNNER_ENVIRONMENT:-}" = "github-hosted"');
   });
 
+  it("reports the nested-userns proc fallback as info without failing closed", async () => {
+    const action = await readFile(path.join(process.cwd(), "action.yml"), "utf8");
+    expect(action).toContain('grep -q "Can\'t mount proc"');
+    const info = action.match(/\[pi-reviewer\] INFO: nested user namespace[^\n]*/)?.[0] ?? "";
+    expect(info).toContain("No action required");
+    expect(info).not.toContain("WARNING");
+    expect(info).not.toContain("fail closed");
+  });
+
   it("keeps the checked-in UI build artifact usable by the UI template", async () => {
     const template = await readFile(path.join(process.cwd(), "src/core/ui/template.ts"), "utf8");
     const artifact = await readFile(path.join(process.cwd(), "dist-ui/index.html"), "utf8");

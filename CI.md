@@ -398,6 +398,8 @@ none is present:
 | `mxc` | Windows 11 | Microsoft MXC SDK `processcontainer` backend with deny-egress, workspace writable / `.git` read-only, UI disabled |
 | `none` | anywhere else | never executes; the tool throws `code execution unavailable` so the agent moves on |
 
+> Note: only Linux (bubblewrap) sandboxing has been tested. macOS and Windows backends require user feedback.
+
 The action auto-installs `bubblewrap` on Linux runners when `exec` is enabled.
 Ubuntu 24.04 confines unprivileged user namespaces via AppArmor
 (`kernel.apparmor_restrict_unprivileged_userns=1`), under which `bwrap`
@@ -409,8 +411,14 @@ the job. On other runners it prints a warning and leaves the host alone:
 persistent hosts should set the sysctl persistently (`/etc/sysctl.d/`) or,
 preferably, load Ubuntu's `bwrap-userns-restrict` AppArmor profile
 (`apparmor-profiles` package). Without either, `code_exec` still fails
-closed — every call dies in sandbox setup with bwrap's error in the tool
-output, at the cost of one budgeted call each.
+closed — every call dies in sandbox setup with bwrap's error (stderr plus
+exit code) in the tool output, at the cost of one budgeted call each.
+The sysctl only restricts unconfined processes. A runner already confined by
+a container profile (any `/proc/self/attr/current` label other than
+`unconfined`) is outside its scope — `unshare -U -r true` succeeds there
+regardless of the sysctl value — so the setup step skips the sysctl warning
+when confinement is observed and prefers its `bwrap` probes over inferring
+capability from the sysctl.
 This requirement is Linux/bubblewrap-only: the Apple Container and MXC
 backends isolate differently and are unaffected. If you see
 `bwrap: loopback: Failed RTM_NEWADDR` in CI logs on a custom runner, this
@@ -441,6 +449,24 @@ and `capabilities.add: ["SYS_ADMIN"]` are dead ends (the former resolves to
 `unprivileged_userns` under the userns restriction; AppArmor mediates `mount`
 regardless of capabilities). For seccomp-denied mounts the knob is
 `securityContext.seccompProfile`, not an AppArmor profile.
+
+With a mounting profile in place, a second container-only failure can appear:
+`bwrap: Can't mount proc on /newroot/proc: Operation not permitted`. The
+kernel denies fresh procfs instantiation from inside a nested user namespace
+with `EPERM`: under the same profile tmpfs mounts succeed while proc mounts
+fail, and `--proc` succeeds without a nested user namespace, so this is a
+namespace restriction independent of LSM state — no AppArmor or manifest
+change fixes it. The runner handles it by retrying once with `--ro-bind
+/proc /proc` (reusing the existing mount read-only instead of creating one)
+while keeping `--unshare-pid`, so PID isolation is retained. Trade-off: the
+sandbox can read the pod's process table, including same-uid command lines
+and environments, so treat the sandbox as egress-denied but not
+secret-isolated from same-uid pod processes. Reproduce with `bwrap --ro-bind
+/ / --dev /dev --proc /proc --tmpfs /tmp --unshare-user --unshare-pid true`
+(fails) versus the same invocation with `--ro-bind /proc /proc` (succeeds),
+or `unshare -Urm sh -c 'mount -t proc proc <dir>'` (fails) versus `mount -t
+tmpfs` (succeeds). On VM runners `--proc` keeps working because the process
+starts outside any nested user namespace.
 
 Apply the ready-to-use profile in `assets/apparmor/` (a minimal profile permitting
 mount/userns with proc/sys write denies retained — diff it against your runtime
