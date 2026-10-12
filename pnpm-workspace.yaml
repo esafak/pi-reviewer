@@ -4,9 +4,9 @@ allowBuilds:
   protobufjs: true
 strictDepBuilds: false
 catalog:
-  vite: npm:@voidzero-dev/vite-plus-core@0.3.3
+  vite: npm:@voidzero-dev/vite-plus-core@1.0.0
   vitest: 5.0.2
-  vite-plus: 0.3.3
+  vite-plus: 1.0.0
 overrides:
   vite@*: "catalog:"
   vitest@*: "catalog:"
