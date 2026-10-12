@@ -9,7 +9,7 @@ HK_MISE = "1"
 
 [tasks.lint]
 description = "Lint the project with Vite+"
-run = ["vp lint", "pnpm exec tsx scripts/lint-graphql.ts"]
+run = "vpr lint"
 
 [tasks."lint:renovate"]
 description = "Validate Renovate configuration"
@@ -17,7 +17,7 @@ run = "renovate-config-validator --strict"
 
 [tasks.test]
 description = "Run the test suite with Vite+"
-run = "vp test"
+run = "vpr test"
 
 [tasks.fmt]
 description = "Format the project with Vite+"

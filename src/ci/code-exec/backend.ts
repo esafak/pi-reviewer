@@ -81,7 +81,8 @@ export function isAppleContainerAvailable(
 ): boolean {
   if ((opts.platform ?? process.platform) !== "darwin") return false;
   if ((opts.arch ?? process.arch) !== "arm64") return false;
-  const candidate = opts.containerPath ?? process.env.PI_REVIEWER_EXEC_CONTAINER_BIN ?? "container";
+  const candidate =
+    opts.containerPath ?? process.env.PI_REVIEWER_CODE_EXEC_CONTAINER_BIN ?? "container";
   const exists = opts.exists ?? existsSync;
   if (path.isAbsolute(candidate)) return exists(candidate);
   const dirs = (process.env.PATH ?? "/usr/bin:/bin").split(":");
@@ -90,7 +91,7 @@ export function isAppleContainerAvailable(
 
 export class AppleContainerBackend implements SandboxBackend {
   readonly name = "apple-container";
-  constructor(private readonly image = process.env.PI_REVIEWER_EXEC_IMAGE) {}
+  constructor(private readonly image = process.env.PI_REVIEWER_CODE_EXEC_IMAGE) {}
   isAvailable(): boolean {
     return isAppleContainerAvailable();
   }
@@ -104,13 +105,13 @@ export class AppleContainerBackend implements SandboxBackend {
     if (!this.image)
       return Promise.reject(
         new Error(
-          "code execution unavailable: set PI_REVIEWER_EXEC_IMAGE to a pre-pulled Linux image with bash, coreutils, and your toolchains",
+          "code execution unavailable: set PI_REVIEWER_CODE_EXEC_IMAGE to a pre-pulled Linux image with bash, coreutils, and your toolchains",
         ),
       );
     // A named container lets the timeout path reap the workload: killing the
     // CLI client alone leaves the VM-side container running with workspace
     // write access, so expiry also issues `container rm --force`.
-    const name = `pi-exec-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`;
+    const name = `pi-code-exec-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`;
     let resolved: string;
     try {
       resolved = resolveWorkdir(request.workspace, request.workdir);
@@ -122,7 +123,7 @@ export class AppleContainerBackend implements SandboxBackend {
       return Promise.reject(new Error(`workdir "${request.workdir}" does not exist`));
     if (!request.command.trim()) return Promise.reject(new Error("command must be non-empty"));
 
-    const containerBin = process.env.PI_REVIEWER_EXEC_CONTAINER_BIN ?? "container";
+    const containerBin = process.env.PI_REVIEWER_CODE_EXEC_CONTAINER_BIN ?? "container";
     // `--network none` attaches no network (omitting the flag would join the
     // default vmnet network with outbound NAT). The workspace mounts writable;
     // .git is shadow-mounted read-only afterwards for bubblewrap parity.
@@ -307,7 +308,7 @@ export class MxcBackend implements SandboxBackend {
     // disabled, default environment inheritance off with an explicit
     // scrubbed environment. Sandbox scratch lives inside the workspace so
     // no host path is readable or writable through temp files.
-    const scratchDir = path.join(request.workspace, ".pi-exec-tmp");
+    const scratchDir = path.join(request.workspace, ".pi-code-exec-tmp");
     try {
       mkdirSync(scratchDir, { recursive: true });
     } catch {

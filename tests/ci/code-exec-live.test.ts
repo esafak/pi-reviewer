@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { resolveBackend, type SandboxBackend } from "../../src/ci/exec/backend.js";
+import { resolveBackend, type SandboxBackend } from "../../src/ci/code-exec/backend.js";
 
 // Live contract suite: runs real sandboxes through whichever backend fits
 // the host (bubblewrap on Linux CI, Apple Container on macOS with an image,
@@ -14,7 +14,8 @@ function liveBackend(): SandboxBackend | undefined {
   if (backend.name === "none") return undefined;
   // The Apple backend needs an explicit pre-pulled image; without one the
   // run would fail on configuration, not on the contract under test.
-  if (backend.name === "apple-container" && !process.env.PI_REVIEWER_EXEC_IMAGE) return undefined;
+  if (backend.name === "apple-container" && !process.env.PI_REVIEWER_CODE_EXEC_IMAGE)
+    return undefined;
   return backend;
 }
 
@@ -25,7 +26,7 @@ describe.runIf(!!backend)("live sandbox backend", () => {
   const name = backend?.name ?? "none";
 
   beforeEach(() => {
-    workspace = mkdtempSync(path.join(tmpdir(), "pi-exec-live-"));
+    workspace = mkdtempSync(path.join(tmpdir(), "pi-code-exec-live-"));
   });
 
   afterEach(() => {

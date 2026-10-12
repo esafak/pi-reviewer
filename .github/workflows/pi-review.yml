@@ -116,7 +116,7 @@ jobs:
           github-scope: ${{ vars.PI_REVIEWER_GITHUB_SCOPE }}
           ai-search-provider: ${{ vars.PI_REVIEWER_AI_SEARCH_PROVIDER }}
           search-provider: ${{ vars.PI_REVIEWER_SEARCH_PROVIDER }}
-          github-research: 'true'
+          gh: 'true'
           ai-search: 'true'
           web-search: 'true'
           mcp-config-file: ${{ (github.event_name == 'issue_comment' || github.event_name == 'workflow_dispatch') && '.github/mcp.json' || '' }}

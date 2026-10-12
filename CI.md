@@ -85,16 +85,17 @@ jobs:
           # search-provider: 'brave'
           # ai-search: 'true'
           # ai-search-provider: 'brave'
-          # github-research: 'true' # optional, read-only GitHub search/read tools
+          # gh: 'false' # disable gh-backed GitHub research
+          # setup-gh: 'true' # install GitHub CLI only when absent
           # github-scope: 'public' # or 'token-accessible'; defaults to public
           # Optional sandboxed code execution (fail-closed, no network).
           # The agent gets a `code_exec` tool to run tests/typechecks offline.
-          # exec: 'true'
-          # exec-timeout-ms: '120000'
-          # exec-max-calls: '5'
-          # exec-wall-time-budget-ms: '360000'
-          # exec-max-stream-bytes: '32768'
-          # exec-image: '...' # macOS Apple Container image (pre-pulled)
+          # code-exec: 'true'
+          # code-exec-timeout-ms: '120000'
+          # code-exec-max-calls: '5'
+          # code-exec-wall-time-budget-ms: '360000'
+          # code-exec-max-stream-bytes: '32768'
+          # code-exec-image: '...' # macOS Apple Container image (pre-pulled)
 ```
 
 ### User-configured MCP servers
@@ -316,7 +317,8 @@ Draft pull requests are skipped by default, including manual dispatch and `/pi-r
 | `search-provider` | no | `exa`, `brave`, or `duckduckgo`; explicit provider selection, no fallback. May also be set as `PI_REVIEWER_SEARCH_PROVIDER` in the caller workflow environment. |
 | `ai-search` | no | Enable separate provider-grounded AI search (default: false) |
 | `ai-search-provider` | no | `exa` or `brave`; requires the provider key. May also be set as `PI_REVIEWER_AI_SEARCH_PROVIDER` in the caller workflow environment. |
-| `github-research` | no | Enable read-only GitHub search/read tools (default: `false`). Uses the existing `github-token` input. |
+| `gh` | no | Enable gh-backed read-only GitHub research tools (default: `true`) |
+| `setup-gh` | no | Install GitHub CLI only when absent (default: `true`). |
 | `github-scope` | no | `public` (default) or `token-accessible`; the latter can expose every repository readable by the configured token. May also be set as `PI_REVIEWER_GITHUB_SCOPE` in the caller workflow environment when the input is omitted. |
 | `search-max-queries` | no | Regular search query budget, bounded from 1 to 10 (default: 3) |
 | `ai-search-max-queries` | no | AI search query budget, bounded from 1 to 3 (default: 1) |
@@ -327,12 +329,12 @@ Draft pull requests are skipped by default, including manual dispatch and `/pi-r
 | `registry-wall-time-budget-ms` | no | Total wall-clock budget across all package registry lookups, bounded to 1000-120000 ms (default: 15000) |
 | `search-required` | no | Fail instead of warn when required regular search is unavailable or fails |
 | `ai-search-required` | no | Fail instead of warn when required AI search is unavailable or fails |
-| `exec` | no | Enable sandboxed code execution via the `code_exec` tool (default: `false`). CI comment reviews only; fail-closed when no sandbox backend is available |
-| `exec-timeout-ms` | no | Per-command exec timeout, bounded to 1000-120000 ms (default: 120000) |
-| `exec-max-calls` | no | Maximum sandboxed exec calls per review, bounded from 1 to 10 (default: 5) |
-| `exec-wall-time-budget-ms` | no | Total wall-clock budget across all sandboxed exec calls, bounded to 30000-1200000 ms (default: 360000) |
-| `exec-max-stream-bytes` | no | Per-stream stdout/stderr cap in bytes, bounded to 1024-131072 (default: 32768) |
-| `exec-image` | no | Linux container image for sandboxed exec on macOS (Apple Container backend). Must be pre-pulled and contain bash, coreutils, and your toolchains |
+| `code-exec` | no | Enable sandboxed code execution via the `code_exec` tool (default: `false`). CI comment reviews only; fail-closed when no sandbox backend is available |
+| `code-exec-timeout-ms` | no | Per-command code-exec timeout, bounded to 1000-120000 ms (default: 120000) |
+| `code-exec-max-calls` | no | Maximum sandboxed code-exec calls per review, bounded from 1 to 10 (default: 5) |
+| `code-exec-wall-time-budget-ms` | no | Total wall-clock budget across all sandboxed code-exec calls, bounded to 30000-1200000 ms (default: 360000) |
+| `code-exec-max-stream-bytes` | no | Per-stream stdout/stderr cap in bytes, bounded to 1024-131072 (default: 32768) |
+| `code-exec-image` | no | Linux container image for sandboxed exec on macOS (Apple Container backend). Must be pre-pulled and contain bash, coreutils, and your toolchains |
 | `review-drafts` | no | Review draft PRs (default: `false`) |
 | `setup-node` | no | Set up Node 24 via `actions/setup-node` when a compatible Node is not already on `PATH` (default: `true`). Set to `false` to require the runner image to provide Node 24 or newer. |
 | `cache` | no | Cache the pnpm store across runs (default: `true`). Disable on runners where the cache service is unavailable or unwanted. |
@@ -366,12 +368,22 @@ projection and 15 KiB aggregate metadata budget (reserving framing within the
 8 KiB per-result and 16 KiB aggregate model-facing tool-content caps). Registry
 failures are advisory and do not fail the review.
 
-GitHub research is opt-in and available only to CI comment reviews. When enabled,
-the reviewer receives bounded `github_search` and `github_read` tools for
-repositories, code, pull requests, issues, Discussions, and repository files.
+GitHub research uses the installed GitHub CLI and is enabled by default when a
+token is available, only in CI comment reviews. Set `gh: 'false'` to disable it.
+The `Ensure gh CLI` action step probes with `command -v` and installs on Linux
+only when missing; failure is warn-only. On macOS/Windows install via `setup-gh-cli`.
+The transport uses argument arrays with read-only commands and GET-only `gh api`.
+Results are limited to 7 KiB each/15 KiB total, eight requests and 15 seconds
+total (five seconds per request). `github-scope` controls visibility: `public`
+filters private repositories, while `token-accessible` allows token-readable
+resources. Missing token or CLI warns and review continues.
+
+The reviewer receives bounded `github_search` and `github_read` tools for
+repositories, code, pull requests, issues, runs, workflows, releases, repository
+files, discussions, and PR checks/status/diffs.
 The tools use the existing `github-token`; the token's permissions determine
 which resources are available. `github-scope` defaults to `public` and rejects
-private or unverifiable repositories even when the token can read them.
+private repositories even when the token can read them.
 `token-accessible` explicitly permits any resources that the configured token
 can read. Search and read results are bounded, untrusted advisory context, not
 instructions or formal citations in the posted review. Search queries must not
@@ -383,7 +395,7 @@ advisory and do not fail a review.
 
 ## Sandboxed code execution
 
-Opt-in and available only to CI comment reviews. When `exec: 'true'`, the
+Opt-in and available only to CI comment reviews. When `code-exec: 'true'`, the
 reviewer receives a `code_exec` tool that runs shell commands
 inside a sandbox with no network. This is code execution, not a read-only
 lookup: the workspace is writable (so incremental builds survive across
@@ -398,13 +410,13 @@ none is present:
 | Backend | Platform | Mechanism |
 |---|---|---|
 | `bubblewrap` | Linux | `bwrap --unshare-all --unshare-net`, host rootfs bind-mounted read-only; toolchains come from the runner host (no container image on this path) |
-| `apple-container` | macOS arm64 | Apple Containerization `container run` with no network attached and `--no-dns`; toolchains come from `PI_REVIEWER_EXEC_IMAGE` |
+| `apple-container` | macOS arm64 | Apple Containerization `container run` with no network attached and `--no-dns`; toolchains come from `PI_REVIEWER_CODE_EXEC_IMAGE` |
 | `mxc` | Windows 11 | Microsoft MXC SDK `processcontainer` backend with deny-egress, workspace writable / `.git` read-only, UI disabled |
 | `none` | anywhere else | never executes; the tool throws `code execution unavailable` so the agent moves on |
 
 > Note: only Linux (bubblewrap) sandboxing has been tested. macOS and Windows backends require user feedback.
 
-The action auto-installs `bubblewrap` on Linux runners when `exec` is enabled.
+The action auto-installs `bubblewrap` on Linux runners when `code-exec` is enabled.
 Ubuntu 24.04 confines unprivileged user namespaces via AppArmor
 (`kernel.apparmor_restrict_unprivileged_userns=1`), under which `bwrap`
 creates namespaces but is denied the in-namespace capabilities its loopback
@@ -484,7 +496,7 @@ pi-reviewer-runner }` (K8s 1.31+), or the
 `container.apparmor.security.beta.kubernetes.io/<container>:
 localhost/pi-reviewer-runner` annotation on older clusters.
 On macOS the backend requires the Apple Container `container` CLI plus an
-explicit Linux image with your toolchains, set via `exec-image`. The image
+explicit Linux image with your toolchains, set via `code-exec-image`. The image
 must be pre-pulled before the review step (an un-pulled image stalls the run
 on registry egress while the deadline burns) and must contain `bash`,
 coreutils (`timeout`), and your toolchains, since the container carries no
@@ -499,7 +511,7 @@ for `processcontainer`:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           model: openrouter/openai/gpt-5.4-mini
-          exec: 'true'
+          code-exec: 'true'
 ```
 
 There is no registry egress, so dependencies must be pre-installed and
@@ -522,7 +534,7 @@ each call an incremental rebuild rather than a cold one:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           model: openrouter/openai/gpt-5.4-mini
-          exec: 'true'
+          code-exec: 'true'
 ```
 
 Rust needs this most: a cold `cargo build` exceeds the per-command timeout,
@@ -546,14 +558,13 @@ are rejected before the sandbox spawns. Commands run under `bash` on the
 Linux/macOS backends but under the Windows shell on MXC, so keep them portable
 (`pytest -q`, `npm test`) and avoid shell-specific pipes and redirects.
 
-Repository and code search use the [GitHub REST search API](https://docs.github.com/en/rest/search/search);
-code search requires authentication, indexes only the default branch, and has a
-10-request-per-minute search limit. Issues, pull requests, and Discussions use
-fixed, schema-validated read-only GraphQL queries; the GraphQL documents are
-checked against GitHub's schema during lint. File and specific PR/issue reads use
-fixed REST endpoints. The current API contract references are the [REST
-specification](https://docs.github.com/en/rest) and [GraphQL
-schema](https://docs.github.com/en/graphql/reference).
+GitHub research uses bounded `gh` read commands and GET-only `gh api` calls via
+argument arrays (no shell). Search supports repositories, code, pull requests,
+and issues; Discussions can be read by repository and number through the REST
+API, but are not searchable through this transport. Public scope checks
+repository visibility before returning results. Per-result, aggregate, request,
+and wall-clock budgets bound all CLI output and calls. The current API contract
+references the [GitHub REST specification](https://docs.github.com/en/rest).
 
 ## Doc context
 

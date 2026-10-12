@@ -16,7 +16,7 @@ export const DEFAULT_WALL_BUDGET_MS = 360_000;
 export const MIN_WALL_BUDGET_MS = 30_000;
 export const MAX_WALL_BUDGET_MS = 1_200_000;
 
-export interface ExecConfig {
+export interface CodeExecConfig {
   enabled: boolean;
   timeoutMs: number;
   maxStreamBytes: number;
@@ -39,29 +39,29 @@ function parseIntInRange(
   return Math.max(min, Math.min(max, value));
 }
 
-export function parseMaxCalls(raw: string | undefined): number {
+export function parseCodeExecMaxCalls(raw: string | undefined): number {
   return parseIntInRange(raw, DEFAULT_MAX_CALLS, MIN_MAX_CALLS, MAX_MAX_CALLS);
 }
 
-export function resolveExecConfig(env: NodeJS.ProcessEnv = process.env): ExecConfig {
-  const enabled = env.PI_REVIEWER_EXEC === "true";
+export function resolveCodeExecConfig(env: NodeJS.ProcessEnv = process.env): CodeExecConfig {
+  const enabled = env.PI_REVIEWER_CODE_EXEC === "true";
   return {
     enabled,
     timeoutMs: parseIntInRange(
-      env.PI_REVIEWER_EXEC_TIMEOUT_MS,
+      env.PI_REVIEWER_CODE_EXEC_TIMEOUT_MS,
       DEFAULT_EXEC_TIMEOUT_MS,
       MIN_EXEC_TIMEOUT_MS,
       MAX_EXEC_TIMEOUT_MS,
     ),
     maxStreamBytes: parseIntInRange(
-      env.PI_REVIEWER_EXEC_MAX_STREAM_BYTES,
+      env.PI_REVIEWER_CODE_EXEC_MAX_STREAM_BYTES,
       DEFAULT_MAX_STREAM_BYTES,
       MIN_MAX_STREAM_BYTES,
       MAX_MAX_STREAM_BYTES,
     ),
-    maxCalls: parseMaxCalls(env.PI_REVIEWER_EXEC_MAX_CALLS),
+    maxCalls: parseCodeExecMaxCalls(env.PI_REVIEWER_CODE_EXEC_MAX_CALLS),
     wallBudgetMs: parseIntInRange(
-      env.PI_REVIEWER_EXEC_WALL_BUDGET_MS,
+      env.PI_REVIEWER_CODE_EXEC_WALL_BUDGET_MS,
       DEFAULT_WALL_BUDGET_MS,
       MIN_WALL_BUDGET_MS,
       MAX_WALL_BUDGET_MS,

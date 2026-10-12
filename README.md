@@ -188,7 +188,7 @@ treats package data as untrusted. See [CI.md](./CI.md) for network and budget
 details.
 
 CI comment reviews can further opt in to sandboxed code execution via the
-`code_exec` tool (`exec: 'true'`). Commands run offline with no network in
+`code_exec` tool (`code-exec: 'true'`). Commands run offline with no network in
 bubblewrap on Linux, Apple Container on macOS, or MXC on Windows,
 fail-closed otherwise, with
 stdout and stderr returned separately. See [CI.md](./CI.md) for backends,

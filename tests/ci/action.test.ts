@@ -42,12 +42,22 @@ describe("GitHub Action Vite+ setup", () => {
     );
   });
 
-  it("maps GitHub research action inputs to the CI environment", async () => {
+  it("maps GitHub research scope and enablement action inputs to the CI environment", async () => {
     const action = await readFile(path.join(process.cwd(), "action.yml"), "utf8");
-    expect(action).toContain("PI_REVIEWER_GITHUB_RESEARCH: ${{ inputs.github-research }}");
+    expect(action).toContain("PI_REVIEWER_GH: ${{ inputs.gh }}");
     expect(action).toContain(
       "PI_REVIEWER_GITHUB_SCOPE: ${{ inputs.github-scope || env.PI_REVIEWER_GITHUB_SCOPE }}",
     );
+  });
+
+  it("enables read-only gh by default and probes installation separately", async () => {
+    const action = await readFile(path.join(process.cwd(), "action.yml"), "utf8");
+    expect(action).toContain("gh:");
+    expect(action).toContain('default: "true"');
+    expect(action).toContain("PI_REVIEWER_GH: ${{ inputs.gh }}");
+    expect(action).toContain("if: ${{ inputs.setup-gh == 'true' && inputs.gh == 'true' }}");
+    expect(action).not.toContain("PI_REVIEWER_SETUP_GH");
+    expect(action).toContain("command -v gh");
   });
 
   it("maps the package registry wall-time budget input to the CI environment", async () => {
@@ -57,6 +67,25 @@ describe("GitHub Action Vite+ setup", () => {
     expect(action).toContain(
       "PI_REVIEWER_REGISTRY_WALL_TIME_BUDGET_MS: ${{ inputs.registry-wall-time-budget-ms }}",
     );
+  });
+
+  it("maps the renamed code-exec inputs and installer gate", async () => {
+    const action = await readFile(path.join(process.cwd(), "action.yml"), "utf8");
+    for (const input of [
+      "code-exec",
+      "code-exec-timeout-ms",
+      "code-exec-max-calls",
+      "code-exec-wall-time-budget-ms",
+      "code-exec-max-stream-bytes",
+      "code-exec-image",
+    ])
+      expect(action).toContain(`${input}:`);
+    expect(action).toContain("PI_REVIEWER_CODE_EXEC: ${{ inputs.code-exec }}");
+    expect(action).toContain(
+      "PI_REVIEWER_CODE_EXEC_TIMEOUT_MS: ${{ inputs.code-exec-timeout-ms }}",
+    );
+    expect(action).toContain("inputs.code-exec == 'true'");
+    expect(action).not.toContain("inputs.exec");
   });
 
   it("maps the optional MCP config path to the CI environment", async () => {
