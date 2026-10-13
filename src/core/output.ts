@@ -1154,7 +1154,9 @@ function formatForGitHub(
     Pick<OutputOptions, "repo" | "baseCommitId" | "evidence" | "summaryEnabled" | "isFirstReview">,
 ): string {
   const lines = ["## Pi Reviewer", ""];
-  if (shouldRenderPrSummary(result, provenance))
+  // Footer advertises regeneration, so it renders iff the block does (see buildReviewBody).
+  const showSummary = shouldRenderPrSummary(result, provenance);
+  if (showSummary)
     lines.push(
       renderPrSummary(
         result.pr_summary!,
@@ -1201,7 +1203,7 @@ function formatForGitHub(
     provenance.evidence,
   );
   if (sources) lines.push("", sources);
-  if (provenance.summaryEnabled && provenance.isFirstReview) lines.push("", COMMAND_HINT_FOOTER);
+  if (showSummary) lines.push("", COMMAND_HINT_FOOTER);
 
   const body = lines.join("\n");
   return body;
@@ -1378,7 +1380,10 @@ function buildReviewBody(
     Pick<OutputOptions, "repo" | "baseCommitId" | "evidence" | "summaryEnabled" | "isFirstReview">,
 ): string {
   const lines: string[] = [];
-  if (shouldRenderPrSummary(result, provenance))
+  // The footer advertises summary regeneration, so it renders if and only if
+  // the block renders: a consumed slot with no summary must not promise one.
+  const showSummary = shouldRenderPrSummary(result, provenance);
+  if (showSummary)
     lines.push(
       renderPrSummary(
         result.pr_summary!,
@@ -1427,7 +1432,7 @@ function buildReviewBody(
     provenance.evidence,
   );
   if (sources) lines.push("", sources);
-  if (provenance.summaryEnabled && provenance.isFirstReview) lines.push("", COMMAND_HINT_FOOTER);
+  if (showSummary) lines.push("", COMMAND_HINT_FOOTER);
   const body = lines.join("\n");
   return body;
 }

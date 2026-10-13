@@ -1392,6 +1392,28 @@ printf("first\\nsecond")
     ).not.toContain("```mermaid");
   });
 
+  it("omits block and footer when the model omits the overview", async () => {
+    const fetchMock = okFetch();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await sendOutput({
+      target: "comment",
+      content: JSON.stringify({ summary: "Findings without overview", comments: [] }),
+      githubToken: "token123",
+      prNumber: 42,
+      repo: "owner/repo",
+      reactOnNoFindings: false,
+      summaryEnabled: true,
+      isFirstReview: true,
+    });
+
+    const body = JSON.parse((fetchMock.mock.calls[0][1] as { body: string }).body).body as string;
+    expect(body).toContain("Findings without overview");
+    expect(body).not.toContain("<details>");
+    expect(body).not.toContain("/pi-summary");
+    expect(body).not.toContain("/pi-review");
+  });
+
   it("omits the summary block when the gate flags are off", async () => {
     for (const options of [
       { summaryEnabled: false, isFirstReview: true },

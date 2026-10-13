@@ -307,7 +307,6 @@ Draft pull requests are skipped by default, including manual dispatch and `/pi-r
 CI comment reviews post a collapsed PR summary on the PR's first review with a body. The block explains What changed, the inferred Why, and Risks/edge cases, and includes a GFM Mermaid diagram (`flowchart TD` for structure, `sequenceDiagram` for call order) only when the diff introduces or alters a multi-component interaction — a new subsystem, a cross-file flow, or a changed state machine. Localized changes (single-file fixes, renames, config/dependency bumps, docs-only diffs) omit the diagram. The toggle is labeled with the reviewed range (e.g. `Summary · abc1234..def5678`) and starts collapsed so findings stay first.
 
 Summaries are enabled by default and CI-only (local, SSH, and file outputs never include them). Opt out per workflow:
-
 ```yaml
       - uses: esafak/pi-reviewer@main
         with:
@@ -318,7 +317,9 @@ Summaries are enabled by default and CI-only (local, SSH, and file outputs never
 
 Emit-once cadence: only the first bodied review carries the summary; later pushes post findings-only and never rewrite it automatically. Marker-only reaction reviews do not consume the slot — if the first batch fell back to a reaction, a later batch still posts the first summary. When summaries are disabled, review bodies are byte-identical to before this feature and the reaction fast-path is unchanged. A zero-findings first batch with a summary posts the summary body instead of reacting.
 
-The skipped-files notice (when the diff exceeds the size limit) stays in the findings summary, not the PR overview. The first review ends with a server-rendered fine-print footer naming the available commands; it is never model-generated.
+The skipped-files notice (when the diff exceeds the size limit) stays in the findings summary, not the PR overview. A review carrying a summary ends with a server-rendered fine-print footer naming the available commands; it is never model-generated, and it renders if and only if the summary block does — so a first review whose overview the model omitted carries neither.
+
+Diagrams render with GitHub's default Mermaid theme; per-diagram theme directives are stripped by GitHub and must not be emitted. If a diagram shows "Unable to render rich display" with a chunk-load error, that is GitHub's renderer bundle failing to load in the viewer — unrelated to the diagram source, which is validated before posting. Refreshing the page resolves it; the prose carries the full content either way.
 
 To refresh the summary after the PR evolves, comment `/pi-summary` in the PR conversation tab (top-level comment, not an inline thread reply). It carries the same contract as `/pi-review`: non-bot `OWNER`, `MEMBER`, or `COLLABORATOR` only, and it never runs on forks or drafts skipped by `review-drafts`. The command recomputes the summary over the whole diff (`merge-base` to head, never the incremental batch range) and updates the first bodied review — or the fallback issue comment — in place, replacing only the summary block and leaving batch markers and body-finding markers untouched. The run is head-checked like finding reconciliation: if the head moves during generation, nothing is mutated. Findings from the regeneration pass are discarded, so it can never file inline comments on old commits. Each invocation costs a full review pass.
 
