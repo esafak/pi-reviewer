@@ -3,6 +3,24 @@ import path from "node:path";
 
 const MAX_MCP_CONFIG_BYTES = 256 * 1024;
 
+// Repo-location variables git exports into hook processes (notably GIT_DIR)
+// would redirect these repoRoot-scoped commands at the hook's repository,
+// so every git invocation below runs with them removed.
+export const GIT_LOCATION_ENV_VARS = [
+  "GIT_DIR",
+  "GIT_WORK_TREE",
+  "GIT_PREFIX",
+  "GIT_INDEX_FILE",
+  "GIT_NAMESPACE",
+  "GIT_COMMON_DIR",
+] as const;
+
+function gitEnv(): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+  for (const key of GIT_LOCATION_ENV_VARS) delete env[key];
+  return env;
+}
+
 export interface CiMcpConfig {
   mcpServers: Record<string, Record<string, unknown>>;
   settings?: Record<string, unknown>;
@@ -120,6 +138,7 @@ export function resolveDefaultBranchSha(
     execFileSync("git", ["check-ref-format", "--branch", trimmed], {
       cwd: repoRoot,
       stdio: "ignore",
+      env: gitEnv(),
     });
   } catch {
     throw new Error("Cannot load MCP config: invalid repository default branch");
@@ -130,12 +149,13 @@ export function resolveDefaultBranchSha(
     execFileSync(
       "git",
       [...gitAuthArgs, "fetch", "--no-tags", "origin", `+refs/heads/${trimmed}:${remoteRef}`],
-      { cwd: repoRoot, stdio: "ignore" },
+      { cwd: repoRoot, stdio: "ignore", env: gitEnv() },
     );
     return execFileSync("git", ["rev-parse", "--verify", `${remoteRef}^{commit}`], {
       cwd: repoRoot,
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
+      env: gitEnv(),
     }).trim();
   } catch {
     throw new Error("Could not resolve the repository default branch for MCP config");
@@ -174,6 +194,7 @@ export function loadMcpConfigFromBase(
       encoding: "utf8",
       maxBuffer: MAX_MCP_CONFIG_BYTES,
       stdio: ["ignore", "pipe", "ignore"],
+      env: gitEnv(),
     });
   } catch (error) {
     if (isRecord(error) && error.code === "ENOBUFS")
