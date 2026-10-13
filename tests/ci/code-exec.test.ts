@@ -3,8 +3,8 @@ import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { parseMaxCalls, resolveExecConfig } from "../../src/ci/exec/config.js";
-import { isSecretEnvName, pickEnv } from "../../src/ci/exec/env.js";
+import { parseCodeExecMaxCalls, resolveCodeExecConfig } from "../../src/ci/code-exec/config.js";
+import { isSecretEnvName, pickEnv } from "../../src/ci/code-exec/env.js";
 import {
   AppleContainerBackend,
   BubblewrapBackend,
@@ -13,7 +13,7 @@ import {
   isMxcAvailable,
   MxcBackend,
   resolveBackend,
-} from "../../src/ci/exec/backend.js";
+} from "../../src/ci/code-exec/backend.js";
 import {
   buildBwrapArgs,
   collectCapped,
@@ -22,13 +22,13 @@ import {
   runSandboxed,
   SANDBOX_HOME,
   truncateBytes,
-} from "../../src/ci/exec/runner.js";
-import { createExecTools, execSchema } from "../../src/ci/exec/tool.js";
+} from "../../src/ci/code-exec/runner.js";
+import { createCodeExecTools, codeExecSchema } from "../../src/ci/code-exec/tool.js";
 import {
   BWRAP_PROC_ERROR,
   diagnoseBwrapFailure,
   readApparmorProfile,
-} from "../../src/ci/exec/diagnose.js";
+} from "../../src/ci/code-exec/diagnose.js";
 
 const { spawnMock } = vi.hoisted(() => ({ spawnMock: vi.fn() }));
 vi.mock("node:child_process", async (importActual) => {
@@ -71,9 +71,9 @@ function autoClosingChild(code: number | null = 0): FakeChild {
   return child;
 }
 
-describe("exec config", () => {
+describe("code-exec config", () => {
   it("defaults to disabled with 120s timeout and call budgets", () => {
-    const config = resolveExecConfig({});
+    const config = resolveCodeExecConfig({});
     expect(config.enabled).toBe(false);
     expect(config.timeoutMs).toBe(120_000);
     expect(config.maxCalls).toBe(5);
@@ -81,21 +81,21 @@ describe("exec config", () => {
   });
 
   it("parses timeout/call budgets with safe bounds", () => {
-    const config = resolveExecConfig({
-      PI_REVIEWER_EXEC: "true",
-      PI_REVIEWER_EXEC_TIMEOUT_MS: "999999",
-      PI_REVIEWER_EXEC_MAX_CALLS: "99",
-      PI_REVIEWER_EXEC_WALL_BUDGET_MS: "1",
+    const config = resolveCodeExecConfig({
+      PI_REVIEWER_CODE_EXEC: "true",
+      PI_REVIEWER_CODE_EXEC_TIMEOUT_MS: "999999",
+      PI_REVIEWER_CODE_EXEC_MAX_CALLS: "99",
+      PI_REVIEWER_CODE_EXEC_WALL_BUDGET_MS: "1",
     });
     expect(config.enabled).toBe(true);
     expect(config.timeoutMs).toBe(120_000);
     expect(config.maxCalls).toBe(10);
     expect(config.wallBudgetMs).toBe(30_000);
-    expect(parseMaxCalls("invalid")).toBe(5);
+    expect(parseCodeExecMaxCalls("invalid")).toBe(5);
   });
 });
 
-describe("exec runner", () => {
+describe("code-exec runner", () => {
   it("resolves repo-relative workdirs and rejects escapes", () => {
     expect(resolveWorkdir("/ws", ".")).toBe("/ws");
     expect(resolveWorkdir("/ws", "packages/ui")).toBe("/ws/packages/ui");
@@ -175,9 +175,9 @@ describe("exec runner", () => {
   });
 });
 
-describe("exec tool", () => {
+describe("code-exec tool", () => {
   it("is named code_exec so the model treats it as code execution", () => {
-    const [tool] = createExecTools(resolveExecConfig({ PI_REVIEWER_EXEC: "true" }), {
+    const [tool] = createCodeExecTools(resolveCodeExecConfig({ PI_REVIEWER_CODE_EXEC: "true" }), {
       cwd: "/ws",
     });
     expect(tool.name).toBe("code_exec");
@@ -186,15 +186,15 @@ describe("exec tool", () => {
   });
 
   it("exposes a flat schema and stays disabled unless opted in", () => {
-    expect((execSchema as any).additionalProperties).toBe(false);
-    expect(Object.keys((execSchema as any).properties)).toEqual([
+    expect((codeExecSchema as any).additionalProperties).toBe(false);
+    expect(Object.keys((codeExecSchema as any).properties)).toEqual([
       "command",
       "workdir",
       "timeoutMs",
     ]);
-    expect(createExecTools(resolveExecConfig({}))).toHaveLength(0);
+    expect(createCodeExecTools(resolveCodeExecConfig({}))).toHaveLength(0);
     expect(
-      createExecTools(resolveExecConfig({ PI_REVIEWER_EXEC: "true" }), { cwd: "/ws" }),
+      createCodeExecTools(resolveCodeExecConfig({ PI_REVIEWER_CODE_EXEC: "true" }), { cwd: "/ws" }),
     ).toHaveLength(1);
   });
 
@@ -207,7 +207,7 @@ describe("exec tool", () => {
       stderrTruncated: true,
       timedOut: false,
     });
-    const [tool] = createExecTools(resolveExecConfig({ PI_REVIEWER_EXEC: "true" }), {
+    const [tool] = createCodeExecTools(resolveCodeExecConfig({ PI_REVIEWER_CODE_EXEC: "true" }), {
       cwd: "/ws",
       runner: runner as any,
     });
@@ -240,7 +240,7 @@ describe("exec tool", () => {
       stderrTruncated: false,
       timedOut: false,
     });
-    const [tool] = createExecTools(resolveExecConfig({ PI_REVIEWER_EXEC: "true" }), {
+    const [tool] = createCodeExecTools(resolveCodeExecConfig({ PI_REVIEWER_CODE_EXEC: "true" }), {
       cwd: "/ws",
       runner: runner as any,
     });
@@ -257,11 +257,11 @@ describe("exec tool", () => {
       stderrTruncated: false,
       timedOut: false,
     });
-    const config = resolveExecConfig({
-      PI_REVIEWER_EXEC: "true",
-      PI_REVIEWER_EXEC_WALL_BUDGET_MS: "30000",
+    const config = resolveCodeExecConfig({
+      PI_REVIEWER_CODE_EXEC: "true",
+      PI_REVIEWER_CODE_EXEC_WALL_BUDGET_MS: "30000",
     });
-    const [tool] = createExecTools(config, {
+    const [tool] = createCodeExecTools(config, {
       cwd: "/ws",
       state: { calls: 0, wallMs: 20_000 },
       runner: runner as any,
@@ -272,11 +272,11 @@ describe("exec tool", () => {
 
   it("rejects calls below the per-call floor instead of launching doomed runs", async () => {
     const runner = vi.fn();
-    const config = resolveExecConfig({
-      PI_REVIEWER_EXEC: "true",
-      PI_REVIEWER_EXEC_WALL_BUDGET_MS: "30000",
+    const config = resolveCodeExecConfig({
+      PI_REVIEWER_CODE_EXEC: "true",
+      PI_REVIEWER_CODE_EXEC_WALL_BUDGET_MS: "30000",
     });
-    const [tool] = createExecTools(config, {
+    const [tool] = createCodeExecTools(config, {
       cwd: "/ws",
       state: { calls: 0, wallMs: 29_500 },
       runner: runner as any,
@@ -288,9 +288,12 @@ describe("exec tool", () => {
   });
 
   it("enforces the per-review call budget", async () => {
-    const config = resolveExecConfig({ PI_REVIEWER_EXEC: "true", PI_REVIEWER_EXEC_MAX_CALLS: "1" });
+    const config = resolveCodeExecConfig({
+      PI_REVIEWER_CODE_EXEC: "true",
+      PI_REVIEWER_CODE_EXEC_MAX_CALLS: "1",
+    });
     const state = { calls: 1, wallMs: 0 };
-    const [tool] = createExecTools(config, { cwd: "/ws", state });
+    const [tool] = createCodeExecTools(config, { cwd: "/ws", state });
     await expect(tool.execute("id", { command: "echo hi" } as any)).rejects.toThrow(
       "budget exhausted",
     );
@@ -298,9 +301,12 @@ describe("exec tool", () => {
 
   it("counts failed attempts against the call budget", async () => {
     const runner = vi.fn().mockRejectedValue(new Error("boom"));
-    const config = resolveExecConfig({ PI_REVIEWER_EXEC: "true", PI_REVIEWER_EXEC_MAX_CALLS: "1" });
+    const config = resolveCodeExecConfig({
+      PI_REVIEWER_CODE_EXEC: "true",
+      PI_REVIEWER_CODE_EXEC_MAX_CALLS: "1",
+    });
     const state = { calls: 0, wallMs: 0 };
-    const [tool] = createExecTools(config, { cwd: "/ws", state, runner: runner as any });
+    const [tool] = createCodeExecTools(config, { cwd: "/ws", state, runner: runner as any });
     await expect(tool.execute("id", { command: "echo hi" } as any)).rejects.toThrow("boom");
     await expect(tool.execute("id", { command: "echo hi" } as any)).rejects.toThrow(
       "budget exhausted",
@@ -309,19 +315,19 @@ describe("exec tool", () => {
   });
 
   it("enforces the wall-clock budget", async () => {
-    const config = resolveExecConfig({
-      PI_REVIEWER_EXEC: "true",
-      PI_REVIEWER_EXEC_WALL_BUDGET_MS: "30000",
+    const config = resolveCodeExecConfig({
+      PI_REVIEWER_CODE_EXEC: "true",
+      PI_REVIEWER_CODE_EXEC_WALL_BUDGET_MS: "30000",
     });
     const state = { calls: 0, wallMs: 30_000 };
-    const [tool] = createExecTools(config, { cwd: "/ws", state });
+    const [tool] = createCodeExecTools(config, { cwd: "/ws", state });
     await expect(tool.execute("id", { command: "echo hi" } as any)).rejects.toThrow(
       "wall-clock budget exhausted",
     );
   });
 
   it("refuses to run when the backend is unavailable instead of downgrading", async () => {
-    const [tool] = createExecTools(resolveExecConfig({ PI_REVIEWER_EXEC: "true" }), {
+    const [tool] = createCodeExecTools(resolveCodeExecConfig({ PI_REVIEWER_CODE_EXEC: "true" }), {
       cwd: "/ws",
       backend: new FailClosedBackend("test refusal"),
     });
@@ -422,7 +428,7 @@ describe("sandbox backends", () => {
     // would otherwise poison the mkdtemp parent on hosts without TMPDIR.
     const parent = tmpdir();
     vi.stubEnv("TEMP", "/host/temp");
-    const workspace = mkdtempSync(path.join(parent, "pi-exec-test-"));
+    const workspace = mkdtempSync(path.join(parent, "pi-code-exec-test-"));
     const run = vi.fn().mockResolvedValue({ stdout: "", stderr: "", exitCode: 0 });
     try {
       const backend = new MxcBackend(() => ({ run }));
@@ -434,7 +440,7 @@ describe("sandbox backends", () => {
         maxStreamBytes: 64,
       } as any);
       const request = run.mock.calls[0][0];
-      const scratch = path.join(workspace, ".pi-exec-tmp");
+      const scratch = path.join(workspace, ".pi-code-exec-tmp");
       expect(request.environment.TMP).toBe(scratch);
       expect(request.environment.TEMP).toBe(scratch);
       expect(request.filesystem.readwritePaths).toEqual([workspace]);
@@ -604,7 +610,7 @@ describe("confined-runtime diagnosis", () => {
       }),
       unavailableReason: () => undefined,
     };
-    const [tool] = createExecTools(resolveExecConfig({ PI_REVIEWER_EXEC: "true" }), {
+    const [tool] = createCodeExecTools(resolveCodeExecConfig({ PI_REVIEWER_CODE_EXEC: "true" }), {
       cwd: "/ws",
       backend: backend as any,
     });
@@ -678,7 +684,7 @@ describe("apple container backend", () => {
     expect(bin).toBe("container");
     expect(args).toEqual(expect.arrayContaining(["--network", "none", "--no-dns", "--rm"]));
     const nameIndex = args.indexOf("--name");
-    expect(args[nameIndex + 1]).toMatch(/^pi-exec-/);
+    expect(args[nameIndex + 1]).toMatch(/^pi-code-exec-/);
     // Inner coreutils timeout is the real deadline (client kill cannot stop
     // the VM-side workload).
     const timeoutIndex = args.indexOf("timeout");
@@ -717,7 +723,7 @@ describe("apple container backend", () => {
       expect(hanging.kill).toHaveBeenCalled();
       expect(result).toMatchObject({ timedOut: true, exitCode: 124 });
       const rmCall = spawnMock.mock.calls.find((call) => (call[1] as string[])[0] === "rm");
-      expect(rmCall?.[1]).toEqual(["rm", "--force", expect.stringMatching(/^pi-exec-/)]);
+      expect(rmCall?.[1]).toEqual(["rm", "--force", expect.stringMatching(/^pi-code-exec-/)]);
     } finally {
       vi.useRealTimers();
     }

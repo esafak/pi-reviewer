@@ -289,16 +289,16 @@ describe("review", () => {
     delete process.env.PI_REVIEWER_AI_SEARCH;
     delete process.env.PI_REVIEWER_AI_SEARCH_PROVIDER;
     delete process.env.PI_REVIEWER_AI_SEARCH_REQUIRED;
-    delete process.env.PI_REVIEWER_GITHUB_RESEARCH;
+    delete process.env.PI_REVIEWER_GH;
     delete process.env.PI_REVIEWER_GITHUB_SCOPE;
     delete process.env.EXA_API_KEY;
     delete process.env.BRAVE_SEARCH_API_KEY;
-    delete process.env.PI_REVIEWER_EXEC;
-    delete process.env.PI_REVIEWER_EXEC_IMAGE;
-    delete process.env.PI_REVIEWER_EXEC_TIMEOUT_MS;
-    delete process.env.PI_REVIEWER_EXEC_MAX_CALLS;
-    delete process.env.PI_REVIEWER_EXEC_WALL_BUDGET_MS;
-    delete process.env.PI_REVIEWER_EXEC_MAX_STREAM_BYTES;
+    delete process.env.PI_REVIEWER_CODE_EXEC;
+    delete process.env.PI_REVIEWER_CODE_EXEC_IMAGE;
+    delete process.env.PI_REVIEWER_CODE_EXEC_TIMEOUT_MS;
+    delete process.env.PI_REVIEWER_CODE_EXEC_MAX_CALLS;
+    delete process.env.PI_REVIEWER_CODE_EXEC_WALL_BUDGET_MS;
+    delete process.env.PI_REVIEWER_CODE_EXEC_MAX_STREAM_BYTES;
     // model is mandatory — provide a default for tests that don't exercise it
     process.env.PI_REVIEWER_MODEL = "anthropic/claude-opus-4-6";
   });
@@ -363,7 +363,7 @@ describe("review", () => {
   });
 
   it("registers code_exec only for enabled CI comment reviews", async () => {
-    process.env.PI_REVIEWER_EXEC = "true";
+    process.env.PI_REVIEWER_CODE_EXEC = "true";
     await review({ cwd: "/repo", output: "comment" });
     expect(AgentMock.mock.calls[0][0].initialState.tools).toEqual(
       expect.arrayContaining([expect.objectContaining({ name: "code_exec" })]),
@@ -371,7 +371,7 @@ describe("review", () => {
   });
 
   it("withholds code_exec for non-comment output even when enabled", async () => {
-    process.env.PI_REVIEWER_EXEC = "true";
+    process.env.PI_REVIEWER_CODE_EXEC = "true";
     await review({ cwd: "/repo", output: "terminal" });
     expect(AgentMock.mock.calls[0][0].initialState.tools).not.toEqual(
       expect.arrayContaining([expect.objectContaining({ name: "code_exec" })]),
@@ -386,7 +386,7 @@ describe("review", () => {
   });
 
   it("injects the code_exec policy into dry-run prompts when enabled", async () => {
-    process.env.PI_REVIEWER_EXEC = "true";
+    process.env.PI_REVIEWER_CODE_EXEC = "true";
     const { sink, records } = createMemorySink();
     await review({ cwd: "/repo", output: "comment", dryRun: true, logger: createLogger({ sink }) });
     expect(records).toEqual(
@@ -476,7 +476,7 @@ describe("review", () => {
   });
 
   it("keeps code_exec in the final MCP agent tools when enabled", async () => {
-    process.env.PI_REVIEWER_EXEC = "true";
+    process.env.PI_REVIEWER_CODE_EXEC = "true";
     const mcpConfig: CiMcpConfig = {
       mcpServers: { docs: { url: "https://mcp.example/mcp" } },
     };
@@ -892,7 +892,7 @@ describe("review", () => {
       expect.arrayContaining([expect.objectContaining({ name: "package_lookup" })]),
     );
     expect(state.systemPrompt).toContain("<package_registry_policy>");
-    expect(state.tools).not.toEqual(
+    expect(state.tools).toEqual(
       expect.arrayContaining([expect.objectContaining({ name: "github_search" })]),
     );
     expect(state.tools).not.toEqual(
@@ -911,7 +911,7 @@ describe("review", () => {
 
   it("registers GitHub research tools only for enabled CI comment reviews", async () => {
     process.env.GITHUB_ACTIONS = "true";
-    process.env.PI_REVIEWER_GITHUB_RESEARCH = "true";
+    process.env.PI_REVIEWER_GH = "true";
     process.env.PI_REVIEWER_GITHUB_SCOPE = "public";
 
     await review({ cwd: "/repo", pr: 42, githubToken: "token", repo: "owner/repo" });
@@ -928,7 +928,7 @@ describe("review", () => {
   });
 
   it("does not register GitHub research for local output even when configured", async () => {
-    process.env.PI_REVIEWER_GITHUB_RESEARCH = "true";
+    process.env.PI_REVIEWER_GH = "true";
 
     await review({ cwd: "/repo", githubToken: "token" });
 

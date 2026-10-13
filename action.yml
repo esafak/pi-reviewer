@@ -7,6 +7,17 @@ inputs:
     description: "GitHub token to post PR comments and, if enabled, access GitHub research resources within its permissions."
     required: true
 
+  gh:
+    description: "Enable the read-only gh tool in CI comment mode (default: true). Set false to disable."
+    required: false
+    default: "true"
+
+  setup-gh:
+    description: "Install GitHub CLI when missing on Linux (default: true; install failures are warnings only)."
+    required: false
+    default: "true"
+
+
   pi-api-key:
     description: "Optional API key for the chosen model's provider. Used as the explicit key, overriding per-provider environment variables."
     required: false
@@ -59,11 +70,6 @@ inputs:
     required: false
     default: ""
 
-  github-research:
-    description: "Enable bounded read-only GitHub research tools for CI reviews (default: false)."
-    required: false
-    default: "false"
-
   github-scope:
     description: "GitHub research repository scope: public or token-accessible (default: public)."
     required: false
@@ -114,33 +120,33 @@ inputs:
     required: false
     default: "false"
 
-  exec:
+  code-exec:
     description: "Enable sandboxed code execution via the code_exec tool (fail-closed when no sandbox backend is available on the runner)."
     required: false
     default: "false"
 
-  exec-timeout-ms:
-    description: "Per-command exec timeout in milliseconds (1000-120000, default: 120000)."
+  code-exec-timeout-ms:
+    description: "Per-command code-exec timeout in milliseconds (1000-120000, default: 120000)."
     required: false
     default: "120000"
 
-  exec-max-calls:
-    description: "Maximum sandboxed exec calls per review (1-10, default: 5)."
+  code-exec-max-calls:
+    description: "Maximum sandboxed code-exec calls per review (1-10, default: 5)."
     required: false
     default: "5"
 
-  exec-wall-time-budget-ms:
-    description: "Total wall-clock budget for all sandboxed exec calls in milliseconds (30000-1200000, default: 360000)."
+  code-exec-wall-time-budget-ms:
+    description: "Total wall-clock budget for sandboxed code-exec calls in milliseconds (30000-1200000, default: 360000)."
     required: false
     default: "360000"
 
-  exec-max-stream-bytes:
-    description: "Per-stream stdout/stderr cap for sandboxed exec in bytes (1024-131072, default: 32768)."
+  code-exec-max-stream-bytes:
+    description: "Per-stream stdout/stderr cap for sandboxed code-exec in bytes (1024-131072, default: 32768)."
     required: false
     default: "32768"
 
-  exec-image:
-    description: "Linux container image for sandboxed exec on macOS (Apple Container backend). Must be pre-pulled and contain bash, coreutils, and your toolchains."
+  code-exec-image:
+    description: "Linux container image for sandboxed code-exec on macOS (Apple Container backend). Must be pre-pulled and contain bash, coreutils, and your toolchains."
     required: false
     default: ""
 
@@ -360,8 +366,8 @@ runs:
             fetch --unshallow --no-tags origin
         fi
 
-    - name: Ensure bubblewrap for sandboxed exec
-      if: ${{ inputs.exec == 'true' && runner.os == 'Linux' }}
+    - name: Ensure bubblewrap for sandboxed code-exec
+      if: ${{ inputs.code-exec == 'true' && runner.os == 'Linux' }}
       shell: bash
       run: |
         if command -v bwrap >/dev/null 2>&1; then
@@ -370,6 +376,7 @@ runs:
           echo "[pi-reviewer] installing bubblewrap for sandboxed exec"
           sudo apt-get update && sudo apt-get install -y bubblewrap
         fi
+
         # Ubuntu 24.04 confines unprivileged user namespaces via AppArmor,
         # which lets bwrap create namespaces but denies the in-namespace
         # capabilities its loopback setup needs. Relaxed only on disposable
@@ -383,7 +390,7 @@ runs:
         # A confined container runtime (profile set by the pod/runtime,
         # unreachable from any job step) denies bwrap's mount-namespace setup
         # before userns/network setup runs. That signature must stay identical
-        # to the BWRAP_SLAVE_ERROR match in src/ci/exec/diagnose.ts; the
+        # to the BWRAP_SLAVE_ERROR match in src/ci/code-exec/diagnose.ts; the
         # probe below is read-only (--ro-bind / /) with --proc/--dev omitted
         # because the propagation remount precedes all argv mounts.
         probe_rc=0
@@ -422,7 +429,7 @@ runs:
         # Nested-userns proc probe: a fresh procfs mount inside a nested user
         # namespace fails with EPERM even when mount is allowed (kernel
         # namespace restriction, not AppArmor). That signature must stay identical
-        # to the BWRAP_PROC_ERROR match in src/ci/exec/diagnose.ts. The runner
+        # to the BWRAP_PROC_ERROR match in src/ci/code-exec/diagnose.ts. The runner
         # retries with a read-only reuse of /proc, so this stays informational
         # and never fails closed.
         proc_rc=0
@@ -445,6 +452,19 @@ runs:
           echo "[pi-reviewer] WARNING: bubblewrap probe failed (${first_line:-exit $probe_rc}); see CI.md Sandboxed code execution. code_exec will fail closed until then."
         fi
 
+    - name: Ensure gh CLI
+      if: ${{ inputs.setup-gh == 'true' && inputs.gh == 'true' }}
+      shell: bash
+      run: |
+        if command -v gh >/dev/null 2>&1; then
+          echo "[pi-reviewer] gh CLI available"
+        elif [ "$RUNNER_OS" = "Linux" ]; then
+          echo "[pi-reviewer] installing gh CLI"
+          sudo apt-get update && sudo apt-get install -y gh || echo "::warning::[pi-reviewer] gh installation failed; read-only gh tool will be unavailable"
+        else
+          echo "::warning::[pi-reviewer] gh CLI missing; install it with setup-gh-cli for this runner"
+        fi
+
     - name: Run review
       shell: bash
       working-directory: ${{ github.workspace }}
@@ -464,8 +484,8 @@ runs:
         PI_REVIEWER_SEARCH_PROVIDER: ${{ inputs.search-provider || env.PI_REVIEWER_SEARCH_PROVIDER }}
         PI_REVIEWER_AI_SEARCH: ${{ inputs.ai-search }}
         PI_REVIEWER_AI_SEARCH_PROVIDER: ${{ inputs.ai-search-provider || env.PI_REVIEWER_AI_SEARCH_PROVIDER }}
-        PI_REVIEWER_GITHUB_RESEARCH: ${{ inputs.github-research }}
         PI_REVIEWER_GITHUB_SCOPE: ${{ inputs.github-scope || env.PI_REVIEWER_GITHUB_SCOPE }}
+        PI_REVIEWER_GH: ${{ inputs.gh }}
         PI_REVIEWER_SEARCH_MAX_QUERIES: ${{ inputs.search-max-queries }}
         PI_REVIEWER_AI_SEARCH_MAX_QUERIES: ${{ inputs.ai-search-max-queries }}
         PI_REVIEWER_SEARCH_MAX_RESULTS: ${{ inputs.search-max-results }}
@@ -475,12 +495,12 @@ runs:
         PI_REVIEWER_REGISTRY_WALL_TIME_BUDGET_MS: ${{ inputs.registry-wall-time-budget-ms }}
         PI_REVIEWER_SEARCH_REQUIRED: ${{ inputs.search-required }}
         PI_REVIEWER_AI_SEARCH_REQUIRED: ${{ inputs.ai-search-required }}
-        PI_REVIEWER_EXEC: ${{ inputs.exec }}
-        PI_REVIEWER_EXEC_TIMEOUT_MS: ${{ inputs.exec-timeout-ms }}
-        PI_REVIEWER_EXEC_MAX_CALLS: ${{ inputs.exec-max-calls }}
-        PI_REVIEWER_EXEC_WALL_BUDGET_MS: ${{ inputs.exec-wall-time-budget-ms }}
-        PI_REVIEWER_EXEC_MAX_STREAM_BYTES: ${{ inputs.exec-max-stream-bytes }}
-        PI_REVIEWER_EXEC_IMAGE: ${{ inputs.exec-image }}
+        PI_REVIEWER_CODE_EXEC: ${{ inputs.code-exec }}
+        PI_REVIEWER_CODE_EXEC_TIMEOUT_MS: ${{ inputs.code-exec-timeout-ms }}
+        PI_REVIEWER_CODE_EXEC_MAX_CALLS: ${{ inputs.code-exec-max-calls }}
+        PI_REVIEWER_CODE_EXEC_WALL_BUDGET_MS: ${{ inputs.code-exec-wall-time-budget-ms }}
+        PI_REVIEWER_CODE_EXEC_MAX_STREAM_BYTES: ${{ inputs.code-exec-max-stream-bytes }}
+        PI_REVIEWER_CODE_EXEC_IMAGE: ${{ inputs.code-exec-image }}
       run: >-
         "${{ github.action_path }}/node_modules/.bin/tsx"
         "${{ github.action_path }}/src/ci/action-entry.ts"
