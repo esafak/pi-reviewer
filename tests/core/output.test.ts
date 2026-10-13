@@ -611,6 +611,55 @@ describe("parseAgentResponse", () => {
     expect(rejected.rejectionDetail?.candidateSource).toBe("fenced-block");
   });
 
+  it("reports escaped-attempt failures in raw coordinates", () => {
+    // Raw newline plus a later trailing comma: the raw attempt fails at the
+    // newline while the escaped attempt reaches the comma, so the translated
+    // escaped position wins and must index the raw candidate.
+    const candidate = `{"summary": "line one\nline two", "comments": [],}`;
+    const rejected = parseAgentResponseWithStatus(candidate);
+    expect(rejected.parsed).toBe(false);
+    expect(rejected.rejectionReason).toBe("malformed JSON");
+    const detail = rejected.rejectionDetail;
+    // The brace scanner extracts the same closed object, so the identical
+    // input ties with full-text and json-object wins the tie-break.
+    expect(detail?.candidateSource).toBe("json-object");
+    expect(detail?.candidateLength).toBe(candidate.length);
+    // The post-tolerance error (trailing comma) is past the raw newline, and
+    // the position indexes the raw candidate so the excerpt window stays consistent.
+    expect(detail?.errorPosition).toBeGreaterThan(candidate.indexOf("\n"));
+    expect(detail?.errorPosition).toBeLessThanOrEqual(candidate.length);
+    expect(detail?.error).toContain(`at position ${detail?.errorPosition}`);
+    if (detail?.errorPosition !== undefined && detail.excerpt) {
+      const window = candidate.slice(
+        Math.max(0, detail.errorPosition - 60),
+        Math.min(candidate.length, detail.errorPosition + 60),
+      );
+      for (const token of window.split(/\s+/).filter((part) => part.length > 4)) {
+        expect(detail.excerpt).toContain(token.slice(0, 4));
+      }
+    }
+  });
+
+  it("maps escaped end-of-input back to the raw length", () => {
+    // Interior newline plus an unterminated string: the raw attempt fails at
+    // the newline while the escaped attempt runs to end-of-input, exercising
+    // the end-sentinel translation back to raw coordinates.
+    const candidate = `{"summary": "line one\nline two`;
+    const rejected = parseAgentResponseWithStatus(candidate);
+    expect(rejected.parsed).toBe(false);
+    expect(rejected.rejectionReason).toBe("malformed JSON");
+    expect(rejected.rejectionDetail?.candidateLength).toBe(candidate.length);
+    expect(rejected.rejectionDetail?.errorPosition).toBe(candidate.length);
+  });
+
+  it("lands past dropped control characters in raw coordinates", () => {
+    const candidate = '{"summary": "xy", "comments": [],}';
+    const rejected = parseAgentResponseWithStatus(candidate);
+    expect(rejected.parsed).toBe(false);
+    expect(rejected.rejectionReason).toBe("malformed JSON");
+    expect(rejected.rejectionDetail?.errorPosition).toBeGreaterThan(candidate.indexOf("y"));
+  });
+
   it("parses JSON wrapped in markdown code fences", () => {
     const json = JSON.stringify({ summary: "looks good", comments: [] });
     const result = parseAgentResponse("```json\n" + json + "\n```");

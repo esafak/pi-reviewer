@@ -765,38 +765,68 @@ function tryParseJSONDetailed(raw: string): {
   error?: string;
   errorPosition?: number;
 } {
+  // Build the control-char-tolerant variant alongside an escaped->raw
+  // code-unit map, so a winning escaped-attempt position translates back
+  // to raw-candidate coordinates and excerpt slicing stays consistent.
   let escaped = "";
+  const owner: number[] = [];
   let inString = false;
   let escape = false;
-  for (const c of raw) {
-    const code = c.charCodeAt(0);
+  for (let i = 0; i < raw.length; i++) {
+    const c = raw[i];
+    const code = raw.charCodeAt(i);
     if (escape) {
       escaped += c;
+      owner.push(i);
       escape = false;
     } else if (c === "\\" && inString) {
       escaped += c;
+      owner.push(i);
       escape = true;
     } else if (c === '"') {
       escaped += c;
+      owner.push(i);
       inString = !inString;
-    } else if (inString && c === "\n") escaped += "\\n";
-    else if (inString && c === "\r") escaped += "\\r";
-    else if (inString && c === "\t") escaped += "\\t";
-    else if (inString && code >= 0 && code <= 0x1f) continue;
-    else escaped += c;
+    } else if (inString && c === "\n") {
+      escaped += "\\n";
+      owner.push(i, i);
+    } else if (inString && c === "\r") {
+      escaped += "\\r";
+      owner.push(i, i);
+    } else if (inString && c === "\t") {
+      escaped += "\\t";
+      owner.push(i, i);
+    } else if (inString && code >= 0 && code <= 0x1f) continue;
+    else {
+      escaped += c;
+      owner.push(i);
+    }
   }
+  owner[escaped.length] = raw.length;
 
-  const attempts = [attemptJsonParse(raw)];
-  if (escaped !== raw) attempts.push(attemptJsonParse(escaped));
-  for (const attempt of attempts) {
-    if (attempt.parsed) return { parsed: attempt.parsed };
+  const rawAttempt = attemptJsonParse(raw);
+  if (rawAttempt.parsed) return { parsed: rawAttempt.parsed };
+  if (escaped === raw) {
+    return { parsed: null, error: rawAttempt.error, errorPosition: rawAttempt.errorPosition };
   }
-  // Report the attempt that made the most progress into the candidate.
-  let best = attempts[0];
-  for (const attempt of attempts.slice(1)) {
-    if ((attempt.errorPosition ?? -1) > (best.errorPosition ?? -1)) best = attempt;
+  const escapedAttempt = attemptJsonParse(escaped);
+  if (escapedAttempt.parsed) return { parsed: escapedAttempt.parsed };
+  // Report the attempt that made the most progress into the candidate,
+  // comparing on raw coordinates so the excerpt window stays consistent.
+  const translatedPosition =
+    escapedAttempt.errorPosition === undefined
+      ? undefined
+      : (owner[Math.max(0, Math.min(escapedAttempt.errorPosition, escaped.length))] ?? raw.length);
+  const rawProgress = rawAttempt.errorPosition ?? -1;
+  const escapedProgress = translatedPosition ?? -1;
+  if (escapedProgress > rawProgress) {
+    const error =
+      translatedPosition !== undefined && escapedAttempt.error
+        ? escapedAttempt.error.replace(/at position \d+/i, `at position ${translatedPosition}`)
+        : escapedAttempt.error;
+    return { parsed: null, error, errorPosition: translatedPosition };
   }
-  return { parsed: null, error: best.error, errorPosition: best.errorPosition };
+  return { parsed: null, error: rawAttempt.error, errorPosition: rawAttempt.errorPosition };
 }
 
 export function parseAgentResponseWithStatus(
