@@ -271,6 +271,7 @@ describe("buildJSONSystemPrompt — PR summary policy", () => {
 
     expect(prompt).toContain("<pr_summary_policy>");
     expect(prompt).toContain("pr_summary");
+    expect(prompt).toContain("strictly to the findings verdict");
     expect(prompt).toContain("sequenceDiagram");
     expect(prompt).toContain("flowchart TD");
     expect(prompt).not.toContain("Do not emit pr_summary or pr_diagram fields.");
