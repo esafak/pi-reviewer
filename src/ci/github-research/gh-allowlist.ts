@@ -256,7 +256,7 @@ export function validateGhArgs(args: string[]): string | undefined {
       };
       if (enumValues[flag] && !enumValues[flag]!.includes(value!))
         return `Invalid value for ${flag}`;
-      if (flag === "--attempt" && (!/^[1-9][0-9]{0,2}$/.test(value!) || Number(value) > 1000))
+      if (flag === "--attempt" && (!/^[1-9][0-9]{0,3}$/.test(value!) || Number(value) > 1000))
         return "Run attempt is invalid";
       if (
         flag === "--branch" &&

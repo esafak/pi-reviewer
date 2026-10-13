@@ -3,7 +3,6 @@ import { Type, type Static } from "@earendil-works/pi-ai";
 import {
   createGitHubResearchClient,
   enrichmentsByKind,
-  type GitHubReadKind,
   type GitHubResearchClient,
   type GitHubSearchKind,
   type ReadParams,

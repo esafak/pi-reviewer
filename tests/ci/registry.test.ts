@@ -6,6 +6,7 @@ import {
   MAX_WALL_TIME_BUDGET_MS,
   MIN_WALL_TIME_BUDGET_MS,
   resolveRegistryWallTimeBudgetMs,
+  truncateUtf8WithMarker,
 } from "../../src/ci/registry/helpers.js";
 import {
   createRegistryProvider,
@@ -387,5 +388,18 @@ describe("registry client and tool", () => {
     const result = await tool.execute("id", { ecosystem: "python", name: "example" } as any);
     expect(result.content[0]).toMatchObject({ text: expect.stringContaining("byte limit") });
     expect(new TextEncoder().encode(result.content[0].text).byteLength).toBeLessThan(8 * 1024);
+  });
+  it("truncates UTF-8 on a codepoint boundary and stays within the byte cap", () => {
+    const input = "a".repeat(3) + "😀" + "tail".repeat(10);
+    const cap = Buffer.byteLength("\n[truncated]") + 5;
+    for (const value of [input, Buffer.from(input)]) {
+      const truncated = truncateUtf8WithMarker(value, cap);
+      expect(truncated).toContain("[truncated]");
+      expect(truncated).not.toContain("�");
+      expect(Buffer.byteLength(truncated)).toBeLessThanOrEqual(cap);
+    }
+    expect(() => truncateUtf8WithMarker("large", Buffer.byteLength("\n[truncated]"))).toThrow(
+      RangeError,
+    );
   });
 });

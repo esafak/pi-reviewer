@@ -364,6 +364,42 @@ describe("gh-backed GitHub research", () => {
       ).rejects.toBeInstanceOf(Error);
     }
   });
+  it("parses failed run JSON when only exit-status is requested", async () => {
+    const run = vi.fn().mockRejectedValue(
+      Object.assign(new Error("run failed"), {
+        code: 1,
+        stdout: JSON.stringify({ databaseId: 12, conclusion: "failure", status: "completed" }),
+      }),
+    );
+    const result = await createGitHubResearchClient(
+      "t",
+      "token-accessible",
+      Date.now,
+      run as never,
+    ).read({
+      kind: "run",
+      owner: "o",
+      repo: "r",
+      number: 12,
+      exit_status: true,
+    });
+    expect(run.mock.calls[0]![1]).toEqual([
+      "run",
+      "view",
+      "12",
+      "--repo",
+      "o/r",
+      "--exit-status",
+      "--json",
+      "databaseId,name,status,conclusion,url,headBranch,headSha",
+    ]);
+    expect(result.result).toMatchObject({ databaseId: 12, conclusion: "failure" });
+  });
+  it("accepts run attempts only from 1 through 1000 in the argv allowlist", () => {
+    for (const value of ["999", "1000"])
+      expect(validateGhArgs(["run", "view", "12", "--attempt", value])).toBeUndefined();
+    expect(validateGhArgs(["run", "view", "12", "--attempt", "1001"])).toContain("attempt");
+  });
   it("maps read enrichments, truncates string and array comments, and caps logs", async () => {
     const forPr = (comments: unknown) =>
       vi.fn().mockResolvedValue({ stdout: JSON.stringify({ comments }) });

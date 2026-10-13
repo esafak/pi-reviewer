@@ -1,4 +1,4 @@
-import { hasControlCharacters } from "../registry/helpers.js";
+import { hasControlCharacters, truncateUtf8WithMarker } from "../registry/helpers.js";
 import {
   createGhRunner,
   GH_TIMEOUT_MS,
@@ -242,12 +242,6 @@ const safeFailure = (e: unknown) =>
     .join("")
     .replace(/(?:token|authorization|bearer)\s*[:=]?\s*\S+/gi, "[redacted]")
     .slice(0, 240);
-const truncateContent = (value: string, cap = 4 * 1024) => {
-  const bytes = Buffer.from(value);
-  if (bytes.length <= cap) return value;
-  const marker = "\n[truncated]";
-  return `${bytes.subarray(0, cap - Buffer.byteLength(marker)).toString("utf8")}${marker}`;
-};
 const record = (s: string): unknown => {
   try {
     return JSON.parse(s);
@@ -564,7 +558,7 @@ export function createGitHubResearchClient(
           ...(p.attempt !== undefined ? ["--attempt", String(p.attempt)] : []),
           ...(!p.log ? ["--json", "databaseId,name,status,conclusion,url,headBranch,headSha"] : []),
         ];
-        result = p.log ? truncateContent(await call(args)) : await bounded(args);
+        result = p.log ? truncateUtf8WithMarker(await call(args), 4 * 1024) : await bounded(args);
       } else if (p.kind === "workflow")
         result = await bounded([
           "api",
@@ -591,9 +585,10 @@ export function createGitHubResearchClient(
       } else throw new Error("Unsupported GitHub read kind");
       if (p.comments && result && typeof result === "object") {
         const row = result as Record<string, unknown>;
-        if (typeof row.comments === "string") row.comments = truncateContent(row.comments);
+        if (typeof row.comments === "string")
+          row.comments = truncateUtf8WithMarker(row.comments, 4 * 1024);
         else if (Array.isArray(row.comments))
-          row.comments = truncateContent(JSON.stringify(row.comments));
+          row.comments = truncateUtf8WithMarker(JSON.stringify(row.comments), 4 * 1024);
       }
       const text = typeof result === "string" ? result : JSON.stringify(result);
       if (Buffer.byteLength(text) > MAX_GITHUB_RESULT_BYTES)
