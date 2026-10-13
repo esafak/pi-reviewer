@@ -1,0 +1,16 @@
+src/core/output.ts
+  h_330e75a16c7ef4 768-770,772,775-777,780,784,788,790-803,805,807-810,812-827,829
+tests/core/output.test.ts
+  h_330e75a16c7ef4 614-662
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "9094f7eb58dd6eccd6f263cdeee291fae2d5787b",
+  "prompts": {},
+  "humans": {
+    "h_330e75a16c7ef4": {
+      "author": "Test <test@example.com>"
+    }
+  }
+}
