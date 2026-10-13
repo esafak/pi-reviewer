@@ -73,16 +73,35 @@ export interface FindingUpdate {
   explanation: string;
 }
 
+export interface FallbackParseDiagnostic {
+  /** Which candidate the diagnostic describes; "none" when no candidate existed. */
+  candidateSource: "full-text" | "fenced-block" | "json-object" | "none";
+  /** Start offset of the candidate in the original text. */
+  candidateIndex: number;
+  /** Length of the candidate in characters. */
+  candidateLength: number;
+  /** Total number of candidates attempted. */
+  candidateCount: number;
+  /** Sanitized JSON.parse error message (control chars stripped, truncated). */
+  error?: string;
+  /** Character offset of the parse failure within the candidate, when known. */
+  errorPosition?: number;
+  /** Bounded, redacted snippet around the failure; never the full response. */
+  excerpt?: string;
+}
+
 export interface ParsedAgentResponse {
   result: ReviewResult;
   /** True only when the response contained a valid review-shaped JSON object. */
   parsed: boolean;
-  /** Safe diagnostic for a rejected text fallback; never contains model content. */
+  /** Safe diagnostic for a rejected text fallback; reason itself never contains model content. */
   rejectionReason?:
     | "malformed JSON"
     | "invalid summary"
     | "invalid comments"
     | "invalid finding_updates";
+  /** Structured parse diagnostic for a malformed-JSON rejection; excerpt is bounded and redacted. */
+  rejectionDetail?: FallbackParseDiagnostic;
 }
 
 export interface OutputOptions {
@@ -578,6 +597,7 @@ function isReviewComment(value: unknown): value is ReviewComment {
 interface Candidate {
   content: string;
   index: number;
+  source: "full-text" | "fenced-block" | "json-object";
 }
 
 /**
@@ -594,7 +614,7 @@ function extractAllFencedBlocks(text: string): Candidate[] {
   const re = /```(?:json)?\s*([\s\S]*?)```/gi;
   let m: RegExpExecArray | null;
   while ((m = re.exec(text)) !== null) {
-    blocks.push({ content: m[1].trim(), index: m.index });
+    blocks.push({ content: m[1].trim(), index: m.index, source: "fenced-block" });
   }
   return blocks;
 }
@@ -638,7 +658,7 @@ function extractAllJsonObjects(text: string): Candidate[] {
       if (depth > 0) {
         depth--;
         if (depth === 0 && start !== -1) {
-          objects.push({ content: text.slice(start, i + 1), index: start });
+          objects.push({ content: text.slice(start, i + 1), index: start, source: "json-object" });
           start = -1;
         }
       }
@@ -647,7 +667,104 @@ function extractAllJsonObjects(text: string): Candidate[] {
   return objects;
 }
 
-function tryParseJSON(raw: string): Record<string, unknown> | null {
+const MAX_DIAGNOSTIC_ERROR_LENGTH = 120;
+const MAX_DIAGNOSTIC_EXCERPT_LENGTH = 160;
+const DIAGNOSTIC_EXCERPT_RADIUS = 60;
+
+function sanitizeParseErrorMessage(message: string): string {
+  const cleaned = [...message]
+    .map((char) => {
+      const code = char.charCodeAt(0);
+      return code < 0x20 || code === 0x7f ? " " : char;
+    })
+    .join("")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, MAX_DIAGNOSTIC_ERROR_LENGTH);
+  return cleaned || "parse error";
+}
+
+function extractJsonErrorPosition(message: string, inputLength: number): number | undefined {
+  const positionMatch = message.match(/at position (\d+)/i);
+  if (positionMatch) {
+    const position = Number.parseInt(positionMatch[1], 10);
+    if (Number.isFinite(position)) return Math.min(position, inputLength);
+  }
+  if (/unexpected end of json input/i.test(message)) return inputLength;
+  const lineColumnMatch = message.match(/line (\d+) column (\d+)/i);
+  if (lineColumnMatch) {
+    const line = Number.parseInt(lineColumnMatch[1], 10);
+    const column = Number.parseInt(lineColumnMatch[2], 10);
+    if (Number.isFinite(line) && Number.isFinite(column)) return undefined;
+  }
+  return undefined;
+}
+
+function sanitizeDiagnosticExcerpt(content: string, errorPosition?: number): string {
+  if (content.length === 0) return "";
+  const position = errorPosition ?? 0;
+  const clamped = Math.max(0, Math.min(position, content.length));
+  const start = Math.max(0, clamped - DIAGNOSTIC_EXCERPT_RADIUS);
+  const end = Math.min(content.length, clamped + DIAGNOSTIC_EXCERPT_RADIUS);
+  const window = content.slice(start, end);
+  const singleLine = [...window]
+    .map((char) => {
+      const code = char.charCodeAt(0);
+      return code < 0x20 || code === 0x7f ? " " : char;
+    })
+    .join("")
+    .replace(/\s+/g, " ")
+    .trim();
+  // Redact secret-like runs without revealing their value; the excerpt
+  // stays structural (surrounding JSON punctuation) rather than credential content.
+  const redacted = singleLine
+    .replace(/(sk-|ghp_|gho_|github_pat_|xox[bap]-)[A-Za-z0-9_\-+/=]{8,}/gi, "[redacted]")
+    .replace(/[A-Za-z0-9_\-+/=]{20,}/g, "[redacted]");
+  if (redacted.length <= MAX_DIAGNOSTIC_EXCERPT_LENGTH) return redacted;
+  return `${redacted.slice(0, MAX_DIAGNOSTIC_EXCERPT_LENGTH)}…`;
+}
+
+/** Single-line, secret-safe summary for the rejection warning; never the full response. */
+export function formatFallbackDiagnostic(detail?: FallbackParseDiagnostic): string {
+  if (!detail || detail.candidateSource === "none") return "no JSON candidate found";
+  const parts = [
+    `candidate=${detail.candidateSource}`,
+    `index=${detail.candidateIndex}`,
+    `length=${detail.candidateLength}`,
+    `candidates=${detail.candidateCount}`,
+  ];
+  if (detail.error) parts.push(`error=${detail.error}`);
+  if (detail.errorPosition !== undefined) parts.push(`position=${detail.errorPosition}`);
+  if (detail.excerpt) parts.push(`excerpt=${detail.excerpt}`);
+  return parts.join(" ");
+}
+
+interface JsonParseAttempt {
+  parsed?: Record<string, unknown>;
+  error?: string;
+  errorPosition?: number;
+}
+
+function attemptJsonParse(input: string): JsonParseAttempt {
+  try {
+    const parsed = JSON.parse(input);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed))
+      return { parsed: parsed as Record<string, unknown> };
+    return { error: "parsed value is not an object", errorPosition: 0 };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      error: sanitizeParseErrorMessage(message),
+      errorPosition: extractJsonErrorPosition(message, input.length),
+    };
+  }
+}
+
+function tryParseJSONDetailed(raw: string): {
+  parsed: Record<string, unknown> | null;
+  error?: string;
+  errorPosition?: number;
+} {
   let escaped = "";
   let inString = false;
   let escape = false;
@@ -669,16 +786,17 @@ function tryParseJSON(raw: string): Record<string, unknown> | null {
     else escaped += c;
   }
 
-  for (const candidate of [raw, escaped]) {
-    try {
-      const parsed = JSON.parse(candidate);
-      if (parsed && typeof parsed === "object" && !Array.isArray(parsed))
-        return parsed as Record<string, unknown>;
-    } catch {
-      // not valid JSON
-    }
+  const attempts = [attemptJsonParse(raw)];
+  if (escaped !== raw) attempts.push(attemptJsonParse(escaped));
+  for (const attempt of attempts) {
+    if (attempt.parsed) return { parsed: attempt.parsed };
   }
-  return null;
+  // Report the attempt that made the most progress into the candidate.
+  let best = attempts[0];
+  for (const attempt of attempts.slice(1)) {
+    if ((attempt.errorPosition ?? -1) > (best.errorPosition ?? -1)) best = attempt;
+  }
+  return { parsed: null, error: best.error, errorPosition: best.errorPosition };
 }
 
 export function parseAgentResponseWithStatus(
@@ -699,7 +817,7 @@ export function parseAgentResponseWithStatus(
   // stealing the win from the real review (comments.every() is vacuously true
   // for []).
   const candidates: Candidate[] = [
-    { content: text.trim(), index: 0 },
+    { content: text.trim(), index: 0, source: "full-text" },
     ...extractAllFencedBlocks(text),
     ...extractAllJsonObjects(text),
   ];
@@ -709,9 +827,48 @@ export function parseAgentResponseWithStatus(
   let resultWithComments: ReviewResult | null = null;
   let resultAny: ReviewResult | null = null;
   let rejectionReason: ParsedAgentResponse["rejectionReason"] = "malformed JSON";
+  // Best parse failure for the malformed-JSON diagnostic: furthest progress
+  // wins, so a near-valid review beats wrapper prose that fails at offset 0.
+  let bestFailure:
+    | {
+        error?: string;
+        errorPosition?: number;
+        source: Candidate["source"];
+        index: number;
+        length: number;
+      }
+    | undefined;
+  const sourcePriority: Record<Candidate["source"], number> = {
+    "full-text": 0,
+    "json-object": 1,
+    "fenced-block": 2,
+  };
 
-  for (const { content } of candidates) {
-    const parsed = tryParseJSON(content);
+  for (const { content, index, source } of candidates) {
+    const attempt = tryParseJSONDetailed(content);
+    const parsed = attempt.parsed;
+    // Empty candidates carry no signal; skipping them keeps an empty fence
+    // from outranking a position-less full-text failure.
+    if (!parsed && content.length > 0) {
+      const progress = attempt.errorPosition ?? -1;
+      const current = bestFailure ? (bestFailure.errorPosition ?? -1) : -2;
+      if (
+        progress > current ||
+        (progress === current &&
+          (bestFailure === undefined ||
+            sourcePriority[source] > sourcePriority[bestFailure.source] ||
+            (sourcePriority[source] === sourcePriority[bestFailure.source] &&
+              index >= bestFailure.index)))
+      ) {
+        bestFailure = {
+          error: attempt.error,
+          errorPosition: attempt.errorPosition,
+          source,
+          index,
+          length: content.length,
+        };
+      }
+    }
     if (parsed) {
       rejectionReason =
         typeof parsed.summary !== "string"
@@ -761,7 +918,47 @@ export function parseAgentResponseWithStatus(
   const result = resultWithComments ?? resultAny;
   if (result) return { result, parsed: true };
 
-  return { result: { summary: text, comments: [] }, parsed: false, rejectionReason };
+  if (rejectionReason !== "malformed JSON") {
+    return { result: { summary: text, comments: [] }, parsed: false, rejectionReason };
+  }
+  if (!bestFailure) {
+    const fullText = candidates.find((candidate) => candidate.source === "full-text");
+    return {
+      result: { summary: text, comments: [] },
+      parsed: false,
+      rejectionReason,
+      rejectionDetail: {
+        candidateSource: fullText ? "full-text" : "none",
+        candidateIndex: fullText?.index ?? 0,
+        candidateLength: fullText?.content.length ?? 0,
+        candidateCount: candidates.length,
+      },
+    };
+  }
+  const failingContent =
+    candidates.find(
+      (candidate) =>
+        candidate.source === bestFailure.source &&
+        candidate.index === bestFailure.index &&
+        candidate.content.length === bestFailure.length,
+    )?.content ?? "";
+  const rejectionDetail: FallbackParseDiagnostic = {
+    candidateSource: bestFailure.source,
+    candidateIndex: bestFailure.index,
+    candidateLength: bestFailure.length,
+    candidateCount: candidates.length,
+    ...(bestFailure.error ? { error: bestFailure.error } : {}),
+    ...(bestFailure.errorPosition !== undefined
+      ? { errorPosition: bestFailure.errorPosition }
+      : {}),
+    excerpt: sanitizeDiagnosticExcerpt(failingContent, bestFailure.errorPosition),
+  };
+  return {
+    result: { summary: text, comments: [] },
+    parsed: false,
+    rejectionReason,
+    rejectionDetail,
+  };
 }
 
 /** Stable identity used to avoid reposting the same finding in a batch. */
@@ -1090,9 +1287,12 @@ export async function sendOutput(options: OutputOptions): Promise<OutputMetadata
     }
 
     if (!parsedResponse.parsed) {
-      console.warn(
-        `[pi-reviewer] rejected text fallback: ${parsedResponse.rejectionReason ?? "invalid structured review"}`,
-      );
+      const reason = parsedResponse.rejectionReason ?? "invalid structured review";
+      const diagnostic =
+        parsedResponse.rejectionReason === "malformed JSON" && parsedResponse.rejectionDetail
+          ? ` (${formatFallbackDiagnostic(parsedResponse.rejectionDetail)})`
+          : "";
+      console.warn(`[pi-reviewer] rejected text fallback: ${reason}${diagnostic}`);
       throw new Error(
         "Agent output was not a valid structured review; refusing to post raw model output",
       );

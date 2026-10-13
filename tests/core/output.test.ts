@@ -547,18 +547,68 @@ describe("parseAgentResponse", () => {
     expect(response.rejectionReason).toBe("invalid comments");
   });
 
-  it("marks invalid JSON as unparsed", () => {
-    expect(parseAgentResponseWithStatus("not-json")).toEqual({
-      result: { summary: "not-json", comments: [] },
-      parsed: false,
-      rejectionReason: "malformed JSON",
+  it("marks invalid JSON as unparsed with a safe diagnostic", () => {
+    const rejected = parseAgentResponseWithStatus("not-json");
+    expect(rejected.result).toEqual({ summary: "not-json", comments: [] });
+    expect(rejected.parsed).toBe(false);
+    expect(rejected.rejectionReason).toBe("malformed JSON");
+    expect(rejected.rejectionDetail).toMatchObject({
+      candidateSource: "full-text",
+      candidateIndex: 0,
+      candidateLength: 8,
+      candidateCount: 1,
     });
+    expect(typeof rejected.rejectionDetail?.error).toBe("string");
+    expect(rejected.rejectionDetail?.excerpt).toBe("not-json");
     expect(parseAgentResponseWithStatus(JSON.stringify({ summary: "LGTM", comments: [] }))).toEqual(
       {
         result: { summary: "LGTM", comments: [] },
         parsed: true,
       },
     );
+  });
+
+  it("reports candidate source and error position for malformed fallbacks without leaking secrets", () => {
+    const secret = "sk-test-abcdefghij1234567890secretvalue";
+    const trailingComma = `{"summary": "review", "comments": [], "token": "${secret}",}`;
+    const rejected = parseAgentResponseWithStatus(trailingComma);
+    expect(rejected.parsed).toBe(false);
+    expect(rejected.rejectionReason).toBe("malformed JSON");
+    expect(rejected.rejectionDetail?.candidateSource).toBe("json-object");
+    expect(typeof rejected.rejectionDetail?.errorPosition).toBe("number");
+    expect(typeof rejected.rejectionDetail?.error).toBe("string");
+    expect(rejected.rejectionDetail?.excerpt?.length ?? 0).toBeLessThanOrEqual(161);
+    expect(JSON.stringify(rejected.rejectionDetail)).not.toContain(secret);
+  });
+
+  it("reports truncated JSON as a full-text failure when no object closes", () => {
+    const truncated = `{"summary": "review", "comments": [{"file": "a.ts"}`;
+    const rejected = parseAgentResponseWithStatus(truncated);
+    expect(rejected.parsed).toBe(false);
+    expect(rejected.rejectionReason).toBe("malformed JSON");
+    expect(rejected.rejectionDetail?.candidateSource).toBe("full-text");
+    expect(typeof rejected.rejectionDetail?.errorPosition).toBe("number");
+  });
+
+  it("reports empty input without claiming a parse position", () => {
+    const rejected = parseAgentResponseWithStatus("");
+    expect(rejected.parsed).toBe(false);
+    expect(rejected.rejectionReason).toBe("malformed JSON");
+    expect(rejected.rejectionDetail).toMatchObject({
+      candidateSource: "full-text",
+      candidateLength: 0,
+      candidateCount: 1,
+    });
+    expect(rejected.rejectionDetail?.errorPosition).toBeUndefined();
+  });
+
+  it("prefers the fenced candidate diagnostic when prose surrounds broken JSON", () => {
+    const rejected = parseAgentResponseWithStatus(
+      `Here is my review:\n\n\`\`\`json\n{"summary": "oops", "comments": [,]}\n\`\`\`\nThanks`,
+    );
+    expect(rejected.parsed).toBe(false);
+    expect(rejected.rejectionReason).toBe("malformed JSON");
+    expect(rejected.rejectionDetail?.candidateSource).toBe("fenced-block");
   });
 
   it("parses JSON wrapped in markdown code fences", () => {
@@ -2461,7 +2511,15 @@ printf("first\\nsecond")
         }),
       ).rejects.toThrow("refusing to post raw model output");
 
-      expect(warn).toHaveBeenCalledWith(`[pi-reviewer] rejected text fallback: ${reason}`);
+      if (reason === "malformed JSON") {
+        expect(warn).toHaveBeenCalledWith(
+          expect.stringMatching(
+            /^\[pi-reviewer\] rejected text fallback: malformed JSON \(candidate=(full-text|fenced-block|json-object) index=\d+ length=\d+ candidates=\d+ error=.+\)$/,
+          ),
+        );
+      } else {
+        expect(warn).toHaveBeenCalledWith(`[pi-reviewer] rejected text fallback: ${reason}`);
+      }
       expect(warn.mock.calls.flat().join(" ")).not.toContain("secret model text");
       expect(fetchMock).not.toHaveBeenCalled();
     },
