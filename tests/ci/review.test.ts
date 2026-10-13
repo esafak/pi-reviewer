@@ -909,6 +909,74 @@ describe("review", () => {
     );
   });
 
+  it("logs available and unavailable tools on CI comment startup", async () => {
+    process.env.GITHUB_ACTIONS = "true";
+    const { sink, records } = createMemorySink();
+
+    await review({
+      cwd: "/repo",
+      pr: 42,
+      githubToken: "token",
+      repo: "owner/repo",
+      logger: createLogger({ sink }),
+    });
+
+    const status = records.find(({ event }) => event === "review.tools.status");
+    expect(status?.level).toBe("info");
+    expect(status?.fields.available).toEqual(
+      expect.arrayContaining(["package_lookup", "github_search", "github_read"]),
+    );
+    expect(status?.fields.available).not.toEqual(
+      expect.arrayContaining(["web_search", "web_ai_search", "code_exec", "mcp"]),
+    );
+    expect(status?.fields.unavailable).toEqual(
+      expect.arrayContaining(["web_search", "web_ai_search", "code_exec", "mcp"]),
+    );
+  });
+
+  it("includes optional search, code-exec, and mcp tools when configured", async () => {
+    process.env.GITHUB_ACTIONS = "true";
+    process.env.PI_REVIEWER_WEB_SEARCH = "true";
+    process.env.PI_REVIEWER_SEARCH_PROVIDER = "duckduckgo";
+    process.env.PI_REVIEWER_AI_SEARCH = "true";
+    process.env.PI_REVIEWER_AI_SEARCH_PROVIDER = "exa";
+    process.env.EXA_API_KEY = "test-key";
+    process.env.PI_REVIEWER_CODE_EXEC = "true";
+    const { sink, records } = createMemorySink();
+
+    await review({
+      cwd: "/repo",
+      pr: 42,
+      githubToken: "token",
+      repo: "owner/repo",
+      mcpConfig: { mcpServers: { docs: { url: "https://mcp.example/mcp" } } },
+      output: "comment",
+      logger: createLogger({ sink }),
+    });
+
+    const status = records.find(({ event }) => event === "review.tools.status");
+    expect(status?.fields.available).toEqual(
+      expect.arrayContaining([
+        "web_search",
+        "web_ai_search",
+        "package_lookup",
+        "github_search",
+        "github_read",
+        "code_exec",
+        "mcp",
+      ]),
+    );
+    expect(status?.fields.unavailable).toEqual([]);
+  });
+
+  it("does not log tool availability for local output", async () => {
+    const { sink, records } = createMemorySink();
+
+    await review({ cwd: "/repo", logger: createLogger({ sink }) });
+
+    expect(records.find(({ event }) => event === "review.tools.status")).toBeUndefined();
+  });
+
   it("registers GitHub research tools only for enabled CI comment reviews", async () => {
     process.env.GITHUB_ACTIONS = "true";
     process.env.PI_REVIEWER_GH = "true";
