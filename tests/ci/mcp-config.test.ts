@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 import {
+  GIT_LOCATION_ENV_VARS,
   loadMcpConfigFromBase,
   parseMcpConfigJson,
   resolveDefaultBranchSha,
@@ -12,12 +13,24 @@ import {
 
 const tempDirs: string[] = [];
 
+// Repo-location variables git exports into hook processes (notably GIT_DIR)
+// would redirect scratch-repo commands at the real repository, so every git
+// invocation below runs with them removed.
+function git(args: string[], options: { encoding: "utf8" }): string;
+function git(args: string[]): void;
+function git(args: string[], options?: { encoding: "utf8" }): string | void {
+  const env = { ...process.env };
+  for (const key of GIT_LOCATION_ENV_VARS) delete env[key];
+  const output = execFileSync("git", args, { env, encoding: options?.encoding });
+  return options ? String(output) : undefined;
+}
+
 async function makeGitRepo(): Promise<string> {
   const repo = await mkdtemp(path.join(tmpdir(), "pi-reviewer-mcp-config-test-"));
   tempDirs.push(repo);
-  execFileSync("git", ["-c", "init.defaultBranch=main", "init", "-q", repo]);
-  execFileSync("git", ["-C", repo, "config", "user.name", "Test"]);
-  execFileSync("git", ["-C", repo, "config", "user.email", "test@example.com"]);
+  git(["-c", "init.defaultBranch=main", "init", "-q", repo]);
+  git(["-C", repo, "config", "user.name", "Test"]);
+  git(["-C", repo, "config", "user.email", "test@example.com"]);
   return repo;
 }
 
@@ -81,8 +94,8 @@ describe("MCP CI config", () => {
       configPath,
       JSON.stringify({ mcpServers: { trusted: { url: "https://trusted.example/mcp" } } }),
     );
-    execFileSync("git", ["-C", repo, "add", ".github/mcp.json"]);
-    execFileSync("git", [
+    git(["-C", repo, "add", ".github/mcp.json"]);
+    git([
       "-C",
       repo,
       "-c",
@@ -93,7 +106,7 @@ describe("MCP CI config", () => {
       "-qm",
       "base config",
     ]);
-    const baseSha = execFileSync("git", ["-C", repo, "rev-parse", "HEAD"], {
+    const baseSha = git(["-C", repo, "rev-parse", "HEAD"], {
       encoding: "utf8",
     }).trim();
 
@@ -109,8 +122,8 @@ describe("MCP CI config", () => {
   it("resolves the selected config revision from the remote default branch", async () => {
     const repo = await makeGitRepo();
     await writeFile(path.join(repo, "README.md"), "trusted default branch\n");
-    execFileSync("git", ["-C", repo, "add", "README.md"]);
-    execFileSync("git", [
+    git(["-C", repo, "add", "README.md"]);
+    git([
       "-C",
       repo,
       "-c",
@@ -121,13 +134,13 @@ describe("MCP CI config", () => {
       "-qm",
       "default branch",
     ]);
-    const trustedSha = execFileSync("git", ["-C", repo, "rev-parse", "HEAD"], {
+    const trustedSha = git(["-C", repo, "rev-parse", "HEAD"], {
       encoding: "utf8",
     }).trim();
     const bare = path.join(path.dirname(repo), `${path.basename(repo)}-origin.git`);
-    execFileSync("git", ["clone", "-q", "--bare", repo, bare]);
+    git(["clone", "-q", "--bare", repo, bare]);
     tempDirs.push(bare);
-    execFileSync("git", ["-C", repo, "remote", "add", "origin", bare]);
+    git(["-C", repo, "remote", "add", "origin", bare]);
 
     expect(resolveDefaultBranchSha(repo, "main")).toBe(trustedSha);
   });
@@ -135,8 +148,8 @@ describe("MCP CI config", () => {
   it("rejects config files that do not exist at the trusted base revision", async () => {
     const repo = await makeGitRepo();
     await writeFile(path.join(repo, "README.md"), "test\n");
-    execFileSync("git", ["-C", repo, "add", "README.md"]);
-    execFileSync("git", [
+    git(["-C", repo, "add", "README.md"]);
+    git([
       "-C",
       repo,
       "-c",
@@ -147,7 +160,7 @@ describe("MCP CI config", () => {
       "-qm",
       "initial",
     ]);
-    const sha = execFileSync("git", ["-C", repo, "rev-parse", "HEAD"], {
+    const sha = git(["-C", repo, "rev-parse", "HEAD"], {
       encoding: "utf8",
     }).trim();
     expect(() => loadMcpConfigFromBase(repo, sha, "missing.json")).toThrow(
@@ -161,8 +174,8 @@ describe("MCP CI config", () => {
       path.join(repo, "mcp.json"),
       JSON.stringify({ mcpServers: { docs: { note: "x".repeat(270 * 1024) } } }),
     );
-    execFileSync("git", ["-C", repo, "add", "mcp.json"]);
-    execFileSync("git", [
+    git(["-C", repo, "add", "mcp.json"]);
+    git([
       "-C",
       repo,
       "-c",
@@ -173,7 +186,7 @@ describe("MCP CI config", () => {
       "-qm",
       "large config",
     ]);
-    const sha = execFileSync("git", ["-C", repo, "rev-parse", "HEAD"], {
+    const sha = git(["-C", repo, "rev-parse", "HEAD"], {
       encoding: "utf8",
     }).trim();
 
