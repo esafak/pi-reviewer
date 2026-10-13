@@ -1,0 +1,18 @@
+src/ci/github-research/client.ts
+  h_ea91e2db23540f 51,56,116-134,173-190,237,334-338
+src/ci/github-research/tool.ts
+  h_ea91e2db23540f 74
+tests/ci/github-research.test.ts
+  h_ea91e2db23540f 76-170,200-208,212,216-221,226,230-237,241-256,260-272,274-278,311-334
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "fd0a349bd443237f8d4d657eb112a0e8ec2b8d30",
+  "prompts": {},
+  "humans": {
+    "h_ea91e2db23540f": {
+      "author": "Emre Şafak <3928300+esafak@users.noreply.github.com>"
+    }
+  }
+}
