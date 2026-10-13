@@ -90,6 +90,8 @@ import {
   ALLOWED_REACTIONS,
   buildReplyPrompt,
   defuseReplyMetadata,
+  extractMcpErrorSignal,
+  extractMcpToolIdentity,
   generateReplyResponse,
   parseReplyAction,
   resolveProviderApiKey,
@@ -724,16 +726,291 @@ describe("review", () => {
       expect.arrayContaining([
         expect.objectContaining({
           event: "review.mcp.tool_call",
-          fields: { tool: "docs/search_docs", callId: "mcp-call-1" },
+          fields: { server: "docs", tool: "search_docs", callId: "mcp-call-1" },
         }),
         expect.objectContaining({
           event: "review.mcp.tool_result",
-          fields: { tool: "docs/search_docs", callId: "mcp-call-1", status: "success" },
+          fields: { server: "docs", tool: "search_docs", callId: "mcp-call-1", status: "success" },
         }),
       ]),
     );
     expect(JSON.stringify(records)).not.toContain(secretArgument);
     expect(JSON.stringify(records)).not.toContain("private query");
+  });
+
+  describe("extractMcpErrorSignal", () => {
+    it("maps adapter codes to classes without reading content", () => {
+      expect(
+        extractMcpErrorSignal({
+          details: { mode: "call", error: "tool_error", server: "docs" },
+          content: [{ type: "text", text: "server said no" }],
+        }),
+      ).toEqual({ errorClass: "tool" });
+      expect(
+        extractMcpErrorSignal({
+          details: { mode: "call", error: "call_failed", server: "docs", message: "fetch failed" },
+        }),
+      ).toEqual({ errorClass: "call_failed", detail: "fetch failed" });
+      expect(
+        extractMcpErrorSignal({
+          details: {
+            error: "input_required_needs_ui",
+            server: "docs",
+            message: "approval in browser UI",
+          },
+        }),
+      ).toEqual({ errorClass: "input_required", detail: "approval in browser UI" });
+      expect(extractMcpErrorSignal({ details: { error: "bogus" } })).toEqual({
+        errorClass: "unknown",
+      });
+      expect(extractMcpErrorSignal({})).toBeUndefined();
+      expect(extractMcpErrorSignal(undefined)).toBeUndefined();
+    });
+
+    it("sanitizes, truncates, and never leaks bearer-like values", () => {
+      const secret = "bearer abcdefghij1234567890";
+      const signal = extractMcpErrorSignal({
+        details: { error: "call_failed", message: `  ok\x00${"x".repeat(600)}` },
+      });
+      expect(signal?.detail).not.toContain(secret);
+      expect(signal?.detail?.length).toBeLessThanOrEqual(500);
+      // eslint-disable-next-line no-control-regex -- asserts sanitized output has no control chars
+      expect(signal?.detail).not.toMatch(/[\x00-\x1f]/);
+      expect(
+        extractMcpErrorSignal({ details: { error: "call_failed", message: secret } })?.detail,
+      ).toContain("bearer");
+    });
+  });
+
+  describe("extractMcpToolIdentity", () => {
+    const known = new Set(["docs"]);
+    it("splits proxy server/tool without duplication", () => {
+      expect(
+        extractMcpToolIdentity(
+          "mcp",
+          { server: "docs", tool: "search_docs" },
+          new Set(["mcp"]),
+          known,
+        ),
+      ).toEqual({ server: "docs", tool: "search_docs" });
+    });
+    it("handles search/connect/action pseudos with no server", () => {
+      const registered = new Set(["mcp"]);
+      expect(extractMcpToolIdentity("mcp", { search: "x" }, registered, known)).toEqual({
+        tool: "search",
+      });
+      expect(
+        extractMcpToolIdentity("mcp", { connect: "docs" }, registered, known)?.server,
+      ).toBeUndefined();
+      expect(extractMcpToolIdentity("mcp", { action: "list" }, registered, known)).toEqual({
+        tool: "list",
+      });
+    });
+    it("splits namespace-proxy and direct prefixed names", () => {
+      expect(
+        extractMcpToolIdentity("mcp__docs", { tool: "search_docs" }, new Set(["mcp__docs"]), known),
+      ).toEqual({ server: "docs", tool: "search_docs" });
+      expect(
+        extractMcpToolIdentity("docs_search_docs", {}, new Set(["docs_search_docs"]), known),
+      ).toEqual({ server: "docs", tool: "search_docs" });
+    });
+    it("falls back and rejects unknown tools", () => {
+      expect(extractMcpToolIdentity("mcp__other", {}, new Set(["mcp__other"]), known)).toEqual({
+        server: undefined,
+        tool: "mcp__other",
+      });
+      expect(extractMcpToolIdentity("nope", {}, new Set(["mcp"]), known)).toBeUndefined();
+    });
+  });
+
+  it("emits split server/tool plus error class on MCP failure", async () => {
+    fakeAgentEvents = [
+      {
+        type: "tool_execution_start",
+        toolName: "mcp",
+        toolCallId: "mcp-failed-call",
+        args: { server: "docs", tool: "search_docs", args: { query: "x" } },
+      },
+      {
+        type: "tool_execution_end",
+        toolName: "mcp",
+        toolCallId: "mcp-failed-call",
+        isError: true,
+        result: { details: { mode: "call", error: "call_failed", message: "fetch failed" } },
+      },
+    ];
+    const { sink, records } = createMemorySink();
+    const mcpConfig: CiMcpConfig = { mcpServers: { docs: { url: "https://mcp.example/mcp" } } };
+
+    await expect(
+      review({ cwd: "/repo", output: "comment", mcpConfig, logger: createLogger({ sink }) }),
+    ).rejects.toThrow("A configured MCP tool call failed; refusing to post the review");
+    const failed = records.find(({ event }) => event === "review.mcp.failed");
+    expect(failed?.fields).toEqual({
+      servers: ["docs"],
+      tools: ["search_docs"],
+      errorClasses: ["call_failed"],
+      additionalTools: "",
+    });
+    expect(JSON.stringify(failed?.fields)).not.toContain("fetch failed");
+  });
+
+  it("keeps server/tool pairing with unknown for server-less failures", async () => {
+    fakeAgentEvents = [
+      {
+        type: "tool_execution_start",
+        toolName: "mcp",
+        toolCallId: "mcp-search-call",
+        args: { search: "query" },
+      },
+      {
+        type: "tool_execution_end",
+        toolName: "mcp",
+        toolCallId: "mcp-search-call",
+        isError: true,
+        result: { details: { mode: "call", error: "tool_error" } },
+      },
+    ];
+    const { sink, records } = createMemorySink();
+    const mcpConfig: CiMcpConfig = { mcpServers: { docs: { url: "https://mcp.example/mcp" } } };
+
+    await expect(
+      review({ cwd: "/repo", output: "comment", mcpConfig, logger: createLogger({ sink }) }),
+    ).rejects.toThrow("A configured MCP tool call failed; refusing to post the review");
+    const failed = records.find(({ event }) => event === "review.mcp.failed");
+    expect(failed?.fields).toEqual({
+      servers: ["unknown"],
+      tools: ["search"],
+      errorClasses: ["tool"],
+      additionalTools: "",
+    });
+  });
+
+  it("omits errorClass on successful results that carry details", async () => {
+    fakeAgentEvents = [
+      {
+        type: "tool_execution_start",
+        toolName: "mcp",
+        toolCallId: "mcp-ok-call",
+        args: { server: "docs", tool: "search_docs", args: {} },
+      },
+      {
+        type: "tool_execution_end",
+        toolName: "mcp",
+        toolCallId: "mcp-ok-call",
+        isError: false,
+        result: { details: { mode: "call", server: "docs", tool: "search_docs" } },
+      },
+    ];
+    const { sink, records } = createMemorySink();
+    const mcpConfig: CiMcpConfig = { mcpServers: { docs: { url: "https://mcp.example/mcp" } } };
+
+    await review({
+      cwd: "/repo",
+      output: "comment",
+      mcpConfig,
+      debug: true,
+      logger: createLogger({ sink }),
+    });
+    const result = records.find(({ event }) => event === "review.mcp.tool_result");
+    expect(result?.fields).toEqual({
+      server: "docs",
+      tool: "search_docs",
+      callId: "mcp-ok-call",
+      status: "success",
+    });
+  });
+
+  it("records the trace tool_end signal for failed MCP calls", async () => {
+    fakeAgentEvents = [
+      {
+        type: "tool_execution_start",
+        toolName: "mcp",
+        toolCallId: "mcp-trace-call",
+        args: { server: "docs", tool: "search_docs", args: {} },
+      },
+      {
+        type: "tool_execution_end",
+        toolName: "mcp",
+        toolCallId: "mcp-trace-call",
+        isError: true,
+        result: { details: { mode: "call", error: "call_failed", message: "fetch failed" } },
+      },
+    ];
+    const directory = await mkdtemp(path.join(tmpdir(), "pi-reviewer-mcp-trace-test-"));
+    const artifactPath = path.join(directory, "thinking.jsonl");
+    const previousArtifactPath = process.env.PI_REVIEWER_THINKING_ARTIFACT;
+    process.env.PI_REVIEWER_THINKING_ARTIFACT = artifactPath;
+    try {
+      const mcpConfig: CiMcpConfig = { mcpServers: { docs: { url: "https://mcp.example/mcp" } } };
+      await expect(
+        review({ cwd: "/repo", output: "comment", mcpConfig, debug: true }),
+      ).rejects.toThrow("A configured MCP tool call failed");
+      const trace = (await readFile(artifactPath, "utf8"))
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as Record<string, unknown>);
+      expect(trace).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: "tool_end",
+            server: "docs",
+            tool: "search_docs",
+            status: "error",
+            errorClass: "call_failed",
+            detail: "fetch failed",
+          }),
+        ]),
+      );
+    } finally {
+      if (previousArtifactPath === undefined) delete process.env.PI_REVIEWER_THINKING_ARTIFACT;
+      else process.env.PI_REVIEWER_THINKING_ARTIFACT = previousArtifactPath;
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("emits sanitized detail only in debug tool_result", async () => {
+    fakeAgentEvents = [
+      {
+        type: "tool_execution_start",
+        toolName: "mcp",
+        toolCallId: "mcp-failed-call",
+        args: { server: "docs", tool: "search_docs", args: {} },
+      },
+      {
+        type: "tool_execution_end",
+        toolName: "mcp",
+        toolCallId: "mcp-failed-call",
+        isError: true,
+        result: { details: { mode: "call", error: "call_failed", message: "fetch failed" } },
+      },
+    ];
+    const { sink, records } = createMemorySink();
+    const mcpConfig: CiMcpConfig = { mcpServers: { docs: { url: "https://mcp.example/mcp" } } };
+
+    await expect(
+      review({
+        cwd: "/repo",
+        output: "comment",
+        mcpConfig,
+        debug: true,
+        logger: createLogger({ sink }),
+      }),
+    ).rejects.toThrow("A configured MCP tool call failed");
+    expect(records).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          event: "review.mcp.tool_result",
+          fields: expect.objectContaining({
+            server: "docs",
+            tool: "search_docs",
+            status: "error",
+            errorClass: "call_failed",
+            detail: "fetch failed",
+          }),
+        }),
+      ]),
+    );
   });
 
   it("does not pass ambient process environment to configured stdio servers", async () => {
