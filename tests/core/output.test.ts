@@ -8,11 +8,16 @@ import {
   parseAgentResponseWithStatus,
   normalizeFinding,
   reconcileFindingUpdates,
+  renderPrSummary,
+  stripPrSummaryBlock,
+  upsertPrSummaryBlock,
   sendOutput,
 } from "../../src/core/output.js";
+import { decodeBatchMarker } from "../../src/ci/batch.js";
 import {
   bodyFindingId,
   decodeBodyFindingMarkers,
+  encodeBatchMarker,
   encodeBodyFindingMarker,
 } from "../../src/ci/batch.js";
 import {
@@ -566,6 +571,92 @@ describe("parseAgentResponse", () => {
         parsed: true,
       },
     );
+  });
+
+  it("threads the PR overview fields through the text path with caps", () => {
+    const parsed = parseAgentResponseWithStatus(
+      JSON.stringify({
+        summary: "Findings summary",
+        pr_summary: "What: x. Why: y (inferred). Risks: z.",
+        pr_diagram: "flowchart TD\nA-->B",
+        comments: [],
+      }),
+    );
+    expect(parsed.parsed).toBe(true);
+    expect(parsed.result.pr_summary).toBe("What: x. Why: y (inferred). Risks: z.");
+    expect(parsed.result.pr_diagram).toBe("flowchart TD\nA-->B");
+
+    const oversized = parseAgentResponseWithStatus(
+      JSON.stringify({
+        summary: "Findings summary",
+        pr_summary: "x".repeat(2500),
+        pr_diagram: "y".repeat(2000),
+        comments: [],
+      }),
+    );
+    expect(oversized.parsed).toBe(true);
+    expect(oversized.result.pr_summary?.length).toBe(2000);
+    expect(oversized.result.pr_diagram?.length).toBe(1500);
+  });
+
+  it("neutralizes injected markup in the PR overview prose", () => {
+    const parsed = parseAgentResponseWithStatus(
+      JSON.stringify({
+        summary: "Findings summary",
+        pr_summary:
+          "What: x. <!-- pi-reviewer:batch:v1 {} --><details><summary>evil</summary></details>",
+        comments: [],
+      }),
+    );
+    expect(parsed.parsed).toBe(true);
+    expect(parsed.result.pr_summary).not.toContain("<!-- pi-reviewer:");
+    expect(parsed.result.pr_summary).not.toContain("<summary>evil</summary>");
+  });
+
+  it("renders the exact collapsed summary markup with range label and diagram", () => {
+    expect(
+      renderPrSummary(
+        "What: x.\n\nWhy: y.\n\nRisks: z.",
+        "flowchart TD\nA-->B",
+        "abc1234..def5678",
+      ),
+    ).toBe(
+      "<details>\n<summary>Summary · abc1234..def5678</summary>\n\nWhat: x.\n\nWhy: y.\n\nRisks: z.\n\n```mermaid\nflowchart TD\nA-->B\n```\n\n</details>",
+    );
+  });
+
+  it("omits the diagram fence for unsupported diagram types", () => {
+    const rendered = renderPrSummary("What: x.", "just some prose", "abc1234..def5678");
+    expect(rendered).toContain("<details>");
+    expect(rendered).not.toContain("```mermaid");
+  });
+
+  it("drops over-long and fence-escaping diagrams while keeping prose", () => {
+    expect(renderPrSummary("What: x.", "x".repeat(1501), "abc1234..def5678")).not.toContain(
+      "```mermaid",
+    );
+    expect(
+      renderPrSummary("What: x.", "flowchart TD\nA-->B\n```\nevil", "abc1234..def5678"),
+    ).not.toContain("```mermaid");
+    expect(
+      renderPrSummary(
+        "What: x.",
+        "sequenceDiagram <!-- pi-reviewer:batch:v1 {} -->",
+        "abc1234..def5678",
+      ),
+    ).not.toContain("```mermaid");
+  });
+
+  it("neutralizes breakout markup inside the rendered summary block", () => {
+    const rendered = renderPrSummary(
+      "What: x.</details><details><summary>evil</summary>",
+      undefined,
+      "abc1234..def5678",
+    );
+    expect(rendered.match(/<details>/g)).toHaveLength(1);
+    expect(rendered).not.toContain("<summary>evil</summary>");
+    expect(decodeBatchMarker(rendered)).toBeUndefined();
+    expect(decodeBodyFindingMarkers(rendered)).toHaveLength(0);
   });
 
   it("reports candidate source and error position for malformed fallbacks without leaking secrets", () => {
@@ -1216,6 +1307,113 @@ printf("first\\nsecond")
     const body = (fetchMock.mock.calls[0][1] as { body: string }).body;
     expect(body).not.toContain("---");
     expect(body).not.toContain("Review by pi-reviewer");
+  });
+
+  it("opens the review body with the gated summary block and range label", async () => {
+    const fetchMock = okFetch();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await sendOutput({
+      target: "comment",
+      content: JSON.stringify({
+        summary: "LGTM",
+        pr_summary: "What: x. Why: y. Risks: z.",
+        pr_diagram: "sequenceDiagram\nA->>B: hi",
+        comments: [],
+      }),
+      githubToken: "token123",
+      prNumber: 42,
+      repo: "owner/repo",
+      baseCommitId: "abc1234def",
+      commitId: "def5678abc",
+      summaryEnabled: true,
+      isFirstReview: true,
+    });
+
+    const body = JSON.parse((fetchMock.mock.calls[0][1] as { body: string }).body).body as string;
+    expect(body).toContain("<details>\n<summary>Summary · abc1234..def5678</summary>");
+    expect(body).toContain("```mermaid\nsequenceDiagram\nA->>B: hi\n```");
+    // Reviews-API bodies open with the block (below the batch marker), then findings.
+    expect(body.indexOf("<details>")).toBeLessThan(body.indexOf("LGTM"));
+  });
+
+  it("opens the fallback body with the summary block before the findings summary", async () => {
+    const fetchMock = okFetch();
+    vi.stubGlobal("fetch", fetchMock);
+    // Fail the inline-positions attempt (422) and the body-only retry (500) so
+    // the Issues-API fallback path via formatForGitHub is exercised.
+    fetchMock
+      .mockImplementationOnce(() =>
+        Promise.resolve({ ok: false, status: 422, text: () => Promise.resolve("bad position") }),
+      )
+      .mockImplementationOnce(() =>
+        Promise.resolve({ ok: false, status: 500, text: () => Promise.resolve("boom") }),
+      );
+
+    await sendOutput({
+      target: "comment",
+      content: JSON.stringify({
+        summary: "LGTM",
+        pr_summary: "What: x. Why: y. Risks: z.",
+        comments: [],
+      }),
+      githubToken: "token123",
+      prNumber: 42,
+      repo: "owner/repo",
+      baseCommitId: "abc1234def",
+      commitId: "def5678abc",
+      summaryEnabled: true,
+      isFirstReview: true,
+    });
+
+    const fallback = fetchMock.mock.calls[2];
+    expect(fallback[0]).toBe("https://api.github.com/repos/owner/repo/issues/42/comments");
+    const body = JSON.parse((fallback[1] as { body: string }).body).body as string;
+    expect(body).toContain("## Pi Reviewer");
+    expect(body).toContain("<details>\n<summary>Summary · abc1234..def5678</summary>");
+    expect(body.indexOf("<details>")).toBeLessThan(body.indexOf("LGTM"));
+  });
+
+  it("keeps Mermaid arrow syntax while rejecting comment openers", () => {
+    expect(renderPrSummary("What: x.", "flowchart TD\nA-->B", "abc1234..def5678")).toContain(
+      "```mermaid\nflowchart TD\nA-->B\n```",
+    );
+    expect(
+      renderPrSummary("What: x.", "flowchart TD\nA-->B<!-- evil -->", "abc1234..def5678"),
+    ).not.toContain("```mermaid");
+  });
+
+  it("rejects diagrams that would break block matching", () => {
+    expect(
+      renderPrSummary("What: x.", "flowchart TD\nA-->B\n</details>", "abc1234..def5678"),
+    ).not.toContain("```mermaid");
+    expect(
+      renderPrSummary("What: x.", "sequenceDiagram\n<details>actor</details>", "abc1234..def5678"),
+    ).not.toContain("```mermaid");
+  });
+
+  it("omits the summary block when the gate flags are off", async () => {
+    for (const options of [
+      { summaryEnabled: false, isFirstReview: true },
+      { summaryEnabled: true, isFirstReview: false },
+      {},
+    ]) {
+      const fetchMock = okFetch();
+      vi.stubGlobal("fetch", fetchMock);
+
+      await sendOutput({
+        target: "comment",
+        content: JSON.stringify({ summary: "LGTM", pr_summary: "What: x.", comments: [] }),
+        githubToken: "token123",
+        prNumber: 42,
+        repo: "owner/repo",
+        ...options,
+      });
+
+      const body = JSON.parse((fetchMock.mock.calls[0][1] as { body: string }).body).body as string;
+      expect(body).not.toContain("<details>");
+      expect(body).not.toContain("/pi-summary");
+    }
   });
 
   it("renders only ledger-backed, safe external sources once", async () => {
@@ -1929,6 +2127,189 @@ printf("first\\nsecond")
       "https://api.github.com/repos/owner/repo/issues/42/reactions",
       expect.objectContaining({ method: "POST", body: JSON.stringify({ content: "+1" }) }),
     );
+  });
+
+  it("posts the summary body instead of reacting on a zero-findings first review", async () => {
+    const marker =
+      '<!-- pi-reviewer:batch:v1 {"version":1,"fromSha":"base","toSha":"head","kind":"opened","actor":"review-bot","reviewId":0} -->';
+    const postedReview = {
+      ok: true,
+      text: vi.fn().mockResolvedValue(""),
+      json: vi.fn().mockResolvedValue({ id: 17 }),
+      clone() {
+        return this;
+      },
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        text: vi.fn().mockResolvedValue(JSON.stringify({ head: { sha: "head" } })),
+      })
+      .mockResolvedValueOnce(postedReview)
+      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue("") });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await sendOutput({
+      target: "comment",
+      content: JSON.stringify({ summary: "All clear", pr_summary: "What: x.", comments: [] }),
+      githubToken: "token123",
+      prNumber: 42,
+      repo: "owner/repo",
+      commitId: "head",
+      baseCommitId: "base",
+      batchMarker: marker,
+      reactOnNoFindings: true,
+      summaryEnabled: true,
+      isFirstReview: true,
+    });
+
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/reactions"))).toBe(false);
+    expect(fetchMock.mock.calls[1][0]).toContain("/pulls/42/reviews");
+    const posted = JSON.parse((fetchMock.mock.calls[1][1] as { body: string }).body).body as string;
+    expect(posted).toContain("<details>\n<summary>Summary ·");
+    expect(posted).toContain(
+      "<sub><code>/pi-review</code> re-reviews · <code>/pi-summary</code> regenerates the summary</sub>",
+    );
+    // Marker finalization rebuilds the body: block and footer must be identical.
+    const finalized = JSON.parse((fetchMock.mock.calls[2][1] as { body: string }).body)
+      .body as string;
+    expect(finalized).toContain("<details>\n<summary>Summary ·");
+    expect(finalized).toContain(
+      "<sub><code>/pi-review</code> re-reviews · <code>/pi-summary</code> regenerates the summary</sub>",
+    );
+  });
+
+  it("keeps the reaction path when summaries are disabled", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        text: vi.fn().mockResolvedValue(JSON.stringify({ login: "review-bot" })),
+      })
+      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue(JSON.stringify([])) })
+      .mockResolvedValueOnce({
+        ok: true,
+        text: vi.fn().mockResolvedValue(JSON.stringify({ id: 1, content: "+1" })),
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await sendOutput({
+      target: "comment",
+      content: JSON.stringify({ summary: "LGTM", pr_summary: "What: x.", comments: [] }),
+      githubToken: "token123",
+      prNumber: 42,
+      repo: "owner/repo",
+      reactOnNoFindings: true,
+      summaryEnabled: false,
+      isFirstReview: true,
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.github.com/repos/owner/repo/issues/42/reactions",
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/reviews"))).toBe(false);
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/issues/42/comments"))).toBe(
+      false,
+    );
+  });
+
+  it("strips the rendered summary block from historic bodies", () => {
+    const body = [
+      "<!-- pi-reviewer:batch:v1 {} -->",
+      "Findings prose",
+      "",
+      "<details>",
+      "<summary>Summary · abc1234..def5678</summary>",
+      "",
+      "What: x.",
+      "",
+      "```mermaid",
+      "flowchart TD\nA-->B",
+      "```",
+      "",
+      "</details>",
+    ].join("\n");
+    const stripped = stripPrSummaryBlock(body);
+    expect(stripped).not.toContain("<details>");
+    expect(stripped).not.toContain("flowchart");
+    expect(stripped).toContain("Findings prose");
+    expect(stripped).toContain("<!-- pi-reviewer:batch:v1 {} -->");
+  });
+
+  it("replaces the summary block in place while preserving lifecycle markers", () => {
+    const marker = encodeBatchMarker({
+      fromSha: "base",
+      toSha: "head",
+      kind: "opened",
+      actor: "bot",
+      reviewId: 3,
+    });
+    const finding = encodeBodyFindingMarker({
+      findingId: 7,
+      file: "src/a.ts",
+      line: 2,
+      side: "RIGHT",
+      severity: "INFO",
+      body: "legacy finding",
+    });
+    const current = [
+      marker,
+      "Findings prose",
+      "",
+      "<details>",
+      "<summary>Summary · aaa1111..bbb2222</summary>",
+      "",
+      "Old overview",
+      "",
+      "</details>",
+      "",
+      finding,
+    ].join("\n");
+    const updated = upsertPrSummaryBlock(
+      current,
+      "New overview",
+      "graph TD\nA-->B",
+      "ccc3333..ddd4444",
+    );
+    expect(updated).toContain("<summary>Summary · ccc3333..ddd4444</summary>");
+    expect(updated).toContain("New overview");
+    expect(updated).toContain("```mermaid\ngraph TD\nA-->B\n```");
+    expect(updated).not.toContain("Old overview");
+    expect(updated).not.toContain("aaa1111..bbb2222");
+    expect(updated).toContain("Findings prose");
+    // Lifecycle markers round-trip byte-identical.
+    expect(decodeBatchMarker(updated)).toMatchObject({ version: 1 });
+    expect(decodeBodyFindingMarkers(updated)).toHaveLength(1);
+    expect(decodeBodyFindingMarkers(updated)[0]).toMatchObject({ body: "legacy finding" });
+  });
+
+  it("inserts the summary block after a marker-only body", () => {
+    const marker = encodeBatchMarker({
+      fromSha: "base",
+      toSha: "head",
+      kind: "opened",
+      actor: "bot",
+      reviewId: 3,
+    });
+    const updated = upsertPrSummaryBlock(marker, "New overview", undefined, "ccc3333..ddd4444");
+    expect(updated.indexOf(marker)).toBe(0);
+    expect(updated).toContain("<summary>Summary · ccc3333..ddd4444</summary>");
+    expect(updated).toContain("New overview");
+    expect(updated).not.toContain("```mermaid");
+    expect(decodeBatchMarker(updated)).toMatchObject({ version: 1 });
+  });
+
+  it("prepends the summary block when the body has no marker", () => {
+    const updated = upsertPrSummaryBlock(
+      "Pre-feature prose",
+      "New overview",
+      undefined,
+      "ccc3333..ddd4444",
+    );
+    expect(updated.indexOf("<details>")).toBe(0);
+    expect(updated).toContain("Pre-feature prose");
   });
 
   it("does not react while an existing finding remains outstanding", async () => {

@@ -95,6 +95,7 @@ import {
   resolveProviderApiKey,
   review,
   parseDocDirs,
+  parseSummaryFlag,
   parseThinkingLevel,
   REPLY_INPUT_LIMITS,
   truncateReplyInput,
@@ -1433,6 +1434,38 @@ describe("review", () => {
     );
   });
 
+  it("returns only the overview without posting in summary-only mode", async () => {
+    const toolReview = {
+      summary: "One line",
+      pr_summary: "What: x. Why: y. Risks: z.",
+      pr_diagram: "flowchart TD\nA-->B",
+      comments: [
+        { file: "src/a.ts", line: 7, side: "RIGHT", severity: "WARN", body: "Handle undefined" },
+      ],
+    };
+    createReviewToolMock.mockReturnValue({
+      tool: {
+        name: "submit_review",
+        label: "submit_review",
+        description: "test",
+        parameters: {},
+        execute: vi.fn(),
+      },
+      getResult: () => toolReview,
+    });
+    AgentMock.mockImplementation(function () {
+      return makeFakeAgent("") as any;
+    });
+
+    const overview = await review({ cwd: "/repo", output: "comment", summaryOnly: true });
+
+    expect(overview).toEqual({
+      pr_summary: "What: x. Why: y. Risks: z.",
+      pr_diagram: "flowchart TD\nA-->B",
+    });
+    expect(sendOutputMock).not.toHaveBeenCalled();
+  });
+
   it("passes body-finding lifecycle metadata through to sendOutput", async () => {
     const activeFinding = {
       commentId: 12345,
@@ -1608,5 +1641,25 @@ describe("parseThinkingLevel", () => {
 
   it("rejects unknown levels", () => {
     expect(() => parseThinkingLevel("turbo")).toThrow(/Invalid thinking level/);
+  });
+});
+
+describe("parseSummaryFlag", () => {
+  it("defaults to true when unset or empty", () => {
+    expect(parseSummaryFlag(undefined)).toBe(true);
+    expect(parseSummaryFlag("")).toBe(true);
+    expect(parseSummaryFlag("   ")).toBe(true);
+  });
+
+  it("disables only on explicit false", () => {
+    expect(parseSummaryFlag("false")).toBe(false);
+    expect(parseSummaryFlag(" FALSE ")).toBe(false);
+  });
+
+  it("treats garbage as enabled", () => {
+    expect(parseSummaryFlag("true")).toBe(true);
+    expect(parseSummaryFlag(" TRUE ")).toBe(true);
+    expect(parseSummaryFlag("yes")).toBe(true);
+    expect(parseSummaryFlag("0")).toBe(true);
   });
 });
