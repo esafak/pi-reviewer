@@ -246,6 +246,38 @@ describe("buildJSONSystemPrompt — contextFiles injection", () => {
   });
 });
 
+describe("buildJSONSystemPrompt — PR summary policy", () => {
+  it("omits the overview fields by default", () => {
+    const prompt = buildJSONSystemPrompt({ conventions: [], reviewRules: [] });
+
+    expect(prompt).toContain("Do not emit pr_summary or pr_diagram fields.");
+    expect(prompt).not.toContain("<pr_summary_policy>");
+    expect(prompt).not.toContain("sequenceDiagram");
+  });
+
+  it("requests the overview with mermaid guidance when enabled", () => {
+    const prompt = buildJSONSystemPrompt(
+      { conventions: [], reviewRules: [] },
+      "INFO",
+      [],
+      [],
+      "",
+      [],
+      undefined,
+      {
+        summaryEnabled: true,
+      },
+    );
+
+    expect(prompt).toContain("<pr_summary_policy>");
+    expect(prompt).toContain("pr_summary");
+    expect(prompt).toContain("strictly to the findings verdict");
+    expect(prompt).toContain("sequenceDiagram");
+    expect(prompt).toContain("flowchart TD");
+    expect(prompt).not.toContain("Do not emit pr_summary or pr_diagram fields.");
+  });
+});
+
 describe("buildMarkdownSystemPrompt", () => {
   it("returns markdown format, not JSON schema", () => {
     const prompt = buildMarkdownSystemPrompt();

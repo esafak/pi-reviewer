@@ -160,6 +160,11 @@ inputs:
     required: false
     default: "true"
 
+  summary:
+    description: "Post a collapsed PR summary (What/Why/Risk with an optional Mermaid diagram) on the PR's first review. Set to 'false' to opt out (default: true)."
+    required: false
+    default: "true"
+
   setup-node:
     description: "Set up Node via actions/setup-node when a compatible Node is not already on PATH. Set to false to require the runner to provide Node 24 or newer."
     required: false
@@ -478,6 +483,7 @@ runs:
         PI_REVIEWER_THINKING_ARTIFACT: ${{ runner.temp }}/pi-reviewer-thinking.jsonl
         MIN_SEVERITY: ${{ inputs.min-severity }}
         REACT_ON_NO_FINDINGS: ${{ inputs.react-on-no-findings }}
+        PI_REVIEWER_SUMMARY: ${{ inputs.summary }}
         PI_REVIEWER_DOC_DIRS: ${{ inputs.doc-dirs }}
         PI_REVIEWER_MCP_CONFIG_FILE: ${{ inputs.mcp-config-file }}
         PI_REVIEWER_WEB_SEARCH: ${{ inputs.web-search }}

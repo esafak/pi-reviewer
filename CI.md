@@ -70,6 +70,7 @@ jobs:
           min-severity: ${{ inputs.min-severity || 'info' }}
           review-drafts: 'false'
           react-on-no-findings: 'true'
+          # summary: 'false' # opt out of PR summaries (enabled by default)
           # Optional workflow_dispatch inputs:
           # pr-number: 123
           # target-head: <ancestor SHA>
@@ -293,13 +294,34 @@ Replies to Pi Reviewer findings use a strict assistant action: the provider-visi
 
 On `pull_request: synchronize`, the action also scans the authenticated, paginated review-comment and thread snapshot for the oldest unprocessed direct human reply to each unresolved Pi Reviewer finding. This recovers replies whose `pull_request_review_comment` workflow was canceled or superseded. Recovery runs before the normal diff review and once more after it; each candidate is re-fetched and head-checked before model generation and every mutation, and failures for one finding do not abort the review. A later push is required: if no synchronize event runs after a canceled reply, it remains unprocessed until a future push or manual intervention. A conversational `reply` or `react` action does not resolve the finding; only the assistant's guarded `resolve` action does so.
 
-Every eligible PR event produces at most one review for the range since the last successful marker. A human reply from an OWNER, MEMBER, or COLLABORATOR to a Pi Reviewer inline finding receives the reaction or concise response selected by the assistant; threads rooted at human comments, bot-authored comments, status replies, or resolved threads are ignored. GitHub review-comment replies are root-targeted because GitHub exposes review threads as flat REST replies, so each authorized human message in an active finding thread can receive at most one response. Existing agent findings are reconciled in their original threads; human-authored threads are never changed. `/pi-review` is restricted to authorized internal PR commenters. Fork PRs are skipped. Replies are skipped if the PR head changes before processing, or if the PR is a draft while `review-drafts` is disabled.
+Every eligible PR event produces at most one review for the range since the last successful marker. Only the PR's first review with a body carries the collapsed PR summary (see PR summaries); later batches post findings-only. A human reply from an OWNER, MEMBER, or COLLABORATOR to a Pi Reviewer inline finding receives the reaction or concise response selected by the assistant; threads rooted at human comments, bot-authored comments, status replies, or resolved threads are ignored. GitHub review-comment replies are root-targeted because GitHub exposes review threads as flat REST replies, so each authorized human message in an active finding thread can receive at most one response. Existing agent findings are reconciled in their original threads; human-authored threads are never changed. `/pi-review` is restricted to authorized internal PR commenters. Fork PRs are skipped. Replies are skipped if the PR head changes before processing, or if the PR is a draft while `review-drafts` is disabled.
 
 The marker is authenticated with the identity returned by `GET /user` and contains the reviewed `fromSha`, `toSha`, event kind, and review ID. It is the durable state for batching—not an LLM session, transcript replay, Actions cache, or provider cache. If several pushes arrive while a runner is pending, the next run recomputes the complete range from the latest marker.
 
 New findings are posted only for the current batch. Existing findings are returned as `finding_updates`: fully resolved findings receive one marked reply and are then resolved, partial findings receive one explanatory reply and remain open, and unchanged findings receive no reply. If a reply succeeds but resolution fails, the resolution remains independently retryable. Findings that cannot be positioned are kept in the review body with hidden, authenticated `body-finding:v1` markers and stable positive IDs; their lifecycle is reconciled by updating only the originating review body, preserving its visible text. The last-resort issue-comment fallback is intentionally not adopted as durable finding state, because issue comments do not have review-body lifecycle semantics. Lifecycle replies say `Resolved by <7-character SHA>` or `Partially addressed by <7-character SHA>`; conversational replies omit the SHA unless the user asks for it. Reply markers are authenticated by the posting bot and checked again immediately before posting. The per-PR concurrency group limits races, but check/POST is necessarily best-effort rather than atomic; a thread resolved during generation may still receive a response if resolution is not observed by the final check.
 
 Draft pull requests are skipped by default, including manual dispatch and `/pi-review`. Set `review-drafts: true` to review draft lifecycle events. When a draft becomes ready, the accumulated range is reviewed once. Manual dispatch accepts a PR number and optional ancestor target head; the target must belong to the current PR history.
+
+## PR summaries
+
+CI comment reviews post a collapsed PR summary on the PR's first review with a body. The block explains What changed, the inferred Why, and Risks/edge cases, and includes a GFM Mermaid diagram (`flowchart TD` for structure, `sequenceDiagram` for call order) only when the diff introduces or alters a multi-component interaction — a new subsystem, a cross-file flow, or a changed state machine. Localized changes (single-file fixes, renames, config/dependency bumps, docs-only diffs) omit the diagram. The toggle is labeled with the reviewed range (e.g. `Summary · abc1234..def5678`) and starts collapsed so findings stay first.
+
+Summaries are enabled by default and CI-only (local, SSH, and file outputs never include them). Opt out per workflow:
+```yaml
+      - uses: esafak/pi-reviewer@main
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          model: openrouter/openai/gpt-5.4-mini
+          summary: 'false'
+```
+
+Emit-once cadence: only the first bodied review carries the summary; later pushes post findings-only and never rewrite it automatically. Marker-only reaction reviews do not consume the slot — if the first batch fell back to a reaction, a later batch still posts the first summary. When summaries are disabled, review bodies are byte-identical to before this feature and the reaction fast-path is unchanged. A zero-findings first batch with a summary posts the summary body instead of reacting.
+
+The skipped-files notice (when the diff exceeds the size limit) stays in the findings summary, not the PR overview. A review carrying a summary ends with a server-rendered fine-print footer naming the available commands; it is never model-generated, and it renders if and only if the summary block does — so a first review whose overview the model omitted carries neither.
+
+Diagrams render with GitHub's default Mermaid theme; per-diagram theme directives are stripped by GitHub and must not be emitted. If a diagram shows "Unable to render rich display" with a chunk-load error, that is GitHub's renderer bundle failing to load in the viewer — unrelated to the diagram source, which is validated before posting. Refreshing the page resolves it; the prose carries the full content either way.
+
+To refresh the summary after the PR evolves, comment `/pi-summary` in the PR conversation tab (top-level comment, not an inline thread reply). It carries the same contract as `/pi-review`: non-bot `OWNER`, `MEMBER`, or `COLLABORATOR` only, and it never runs on forks or drafts skipped by `review-drafts`. The command recomputes the summary over the whole diff (`merge-base` to head, never the incremental batch range) and updates the first bodied review — or the fallback issue comment — in place, replacing only the summary block and leaving batch markers and body-finding markers untouched. The run is head-checked like finding reconciliation: if the head moves during generation, nothing is mutated. Findings from the regeneration pass are discarded, so it can never file inline comments on old commits. Each invocation costs a full review pass.
 
 ## Inputs
 
@@ -312,6 +334,7 @@ Draft pull requests are skipped by default, including manual dispatch and `/pi-r
 | `debug` | no | Log tool calls and upload available model thinking as a one-day artifact (default: `false`). Thinking may contain sensitive context. |
 | `min-severity` | no | Minimum severity: `info`, `warn`, or `critical` (default: `info`) |
 | `react-on-no-findings` | no | Leave a thumbs-up reaction on the PR instead of posting a comment when no new findings remain and all existing findings are resolved (default: `true`) |
+| `summary` | no | Post a collapsed PR summary (What/Why/Risk with an optional Mermaid diagram) on the PR's first review (default: `true`). Set to `'false'` to opt out. CI comment reviews only. |
 | `doc-dirs` | no | Comma-separated dirs to scan for docs to inject into the review (default: empty — inject nothing) |
 | `web-search` | no | Enable regular CI web search (default: false) |
 | `search-provider` | no | `exa`, `brave`, or `duckduckgo`; explicit provider selection, no fallback. May also be set as `PI_REVIEWER_SEARCH_PROVIDER` in the caller workflow environment. |

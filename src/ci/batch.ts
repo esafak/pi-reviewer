@@ -295,6 +295,23 @@ export function selectAuthenticatedBatchMarkers(
     .map((r) => decodeBatchMarker(r.body))
     .filter((m): m is BatchMarker => m !== undefined && m.actor === login);
 }
+/**
+ * Emit-once anchor for PR summaries: true when no prior authenticated marker
+ * source carries a visible body. Marker-only reaction-path reviews (body is
+ * just the batch marker) and pre-feature reviews (no marker at all) do not
+ * consume the first-review slot.
+ */
+export function isFirstBodiedReview(
+  sources: Array<{ body?: string | null; user?: { login?: string } }>,
+  login: string,
+): boolean {
+  return !sources.some((source) => {
+    if (source.user?.login !== login) return false;
+    const marker = decodeBatchMarker(source.body);
+    if (!marker || marker.actor !== login) return false;
+    return (source.body ?? "").replace(/<!-- pi-reviewer:batch:v1 [^>]+ -->/, "").trim() !== "";
+  });
+}
 export function selectBatchRange(
   mergeBase: string,
   head: string,
@@ -410,6 +427,75 @@ export function isAuthorizedReviewCommand(event: Event) {
     event.actor?.type !== "Bot" &&
     ["OWNER", "MEMBER", "COLLABORATOR"].includes(event.actor?.association ?? "")
   );
+}
+/** Same contract as the review command, but for whole-diff summary regeneration. */
+export function isAuthorizedSummaryCommand(event: Event) {
+  return (
+    event.command === "/pi-summary" &&
+    event.actor?.type !== "Bot" &&
+    ["OWNER", "MEMBER", "COLLABORATOR"].includes(event.actor?.association ?? "")
+  );
+}
+/** Earliest authenticated marker source with a visible body, if any. */
+export interface FirstBodiedSource {
+  kind: "review" | "issue";
+  id: number;
+  body: string;
+}
+/**
+ * Locates the first review or issue comment that can host the regenerated
+ * summary: the earliest bot-authored marker source. Marker-only reaction
+ * reviews qualify (the insert path adds the block after their marker), as do
+ * pre-feature bodies without markers (bot authorship via user login is
+ * sufficient — there is no marker to spoof — and the upsert prepends the
+ * block). A present marker must still authenticate to the bot login.
+ * Review sources sort before issue comments on equal timestamps, matching
+ * the marker-source merge order.
+ */
+export function selectFirstBodiedSource(
+  reviews: Array<{
+    id: number;
+    body?: string | null;
+    user?: { login?: string };
+    created_at?: string;
+  }>,
+  issueComments: Array<{
+    id: number;
+    body?: string | null;
+    user?: { login?: string };
+    created_at?: string;
+  }>,
+  login: string,
+): FirstBodiedSource | undefined {
+  const sources = [
+    ...reviews.map((source) => ({
+      ...source,
+      kind: "review" as const,
+      time: source.created_at ? Date.parse(source.created_at) || 0 : 0,
+    })),
+    ...issueComments.map((source) => ({
+      ...source,
+      kind: "issue" as const,
+      time: source.created_at ? Date.parse(source.created_at) || 0 : 0,
+    })),
+  ].sort(
+    (a, b) =>
+      a.time - b.time || (a.kind === b.kind ? 0 : a.kind === "review" ? -1 : 1) || a.id - b.id,
+  );
+  for (const source of sources) {
+    if (source.user?.login !== login) continue;
+    const marker = decodeBatchMarker(source.body);
+    if (marker && marker.actor !== login) continue;
+    return { kind: source.kind, id: source.id, body: source.body ?? "" };
+  }
+  return undefined;
+}
+/** Whole-diff range for `/pi-summary`: always merge-base to head, never the incremental batch range. */
+export function selectSummaryRegenerateRange(
+  mergeBase: string,
+  head: string,
+): { fromSha: string; toSha: string } {
+  return { fromSha: mergeBase, toSha: head };
 }
 
 export const replyMarker = (commentId: number, parentId: number, threadId: string) =>

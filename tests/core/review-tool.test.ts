@@ -81,6 +81,26 @@ describe("createReviewTool", () => {
     expect(() => validateToolArguments(tool, toolCall(validArgs()))).not.toThrow();
   });
 
+  it("schema accepts an optional PR summary and diagram", () => {
+    const { tool } = createReviewTool();
+    const args = {
+      ...validArgs(),
+      pr_summary: "What: new auth flow. Why: SSO rollout (inferred). Risks: token expiry.",
+      pr_diagram: "sequenceDiagram\nA->>B: login",
+    };
+    expect(() => validateToolArguments(tool, toolCall(args))).not.toThrow();
+  });
+
+  it("schema rejects an oversized PR summary or diagram", () => {
+    const { tool } = createReviewTool();
+    expect(() =>
+      validateToolArguments(tool, toolCall({ ...validArgs(), pr_summary: "x".repeat(2001) })),
+    ).toThrow(/Validation failed/);
+    expect(() =>
+      validateToolArguments(tool, toolCall({ ...validArgs(), pr_diagram: "x".repeat(1501) })),
+    ).toThrow(/Validation failed/);
+  });
+
   it("accepts optional replacement code, including an empty deletion", () => {
     const { tool } = createReviewTool();
     const args = validArgs();

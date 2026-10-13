@@ -8,7 +8,9 @@ import {
   encodeBatchMarker,
   encodeBodyFindingMarker,
   isAuthorizedReviewCommand,
+  isAuthorizedSummaryCommand,
   isEventRangeConsistent,
+  isFirstBodiedReview,
   isPiReviewerRootComment,
   isRenovatePullRequest,
   isSafePullRequestNumber,
@@ -17,6 +19,8 @@ import {
   decodeReplyMarker,
   selectAuthenticatedBatchMarkers,
   selectBatchRange,
+  selectFirstBodiedSource,
+  selectSummaryRegenerateRange,
 } from "../../src/ci/batch.js";
 
 describe("batch markers", () => {
@@ -220,6 +224,139 @@ describe("batch markers", () => {
         -1,
       )?.toSha,
     ).toBe("new");
+  });
+  it("gates /pi-summary with the same contract as /pi-review", () => {
+    const member = {
+      issue: { number: 1, pull_request: {} },
+      comment: { body: "/pi-summary", author_association: "MEMBER", user: { type: "User" } },
+    };
+    expect(isAuthorizedSummaryCommand(normalizeEvent(member))).toBe(true);
+    expect(
+      isAuthorizedSummaryCommand(
+        normalizeEvent({
+          issue: { number: 1, pull_request: {} },
+          comment: { body: "/pi-summary", author_association: "NONE", user: { type: "User" } },
+        }),
+      ),
+    ).toBe(false);
+    expect(
+      isAuthorizedSummaryCommand(
+        normalizeEvent({
+          issue: { number: 1, pull_request: {} },
+          comment: { body: "/pi-summary", author_association: "MEMBER", user: { type: "Bot" } },
+        }),
+      ),
+    ).toBe(false);
+    // Exact match only: arguments and lookalikes are not commands.
+    for (const body of ["/pi-summary full", "/pi-review", "/pi-summary\nplease"]) {
+      expect(
+        isAuthorizedSummaryCommand(
+          normalizeEvent({
+            issue: { number: 1, pull_request: {} },
+            comment: { body, author_association: "MEMBER", user: { type: "User" } },
+          }),
+        ),
+      ).toBe(false);
+    }
+  });
+  it("locates the earliest bodied marker source for summary regeneration", () => {
+    const bot = "bot";
+    const marker = (fromSha: string, toSha: string, reviewId: number) =>
+      encodeBatchMarker({ fromSha, toSha, kind: "synchronize", actor: bot, reviewId });
+    const bodiedReview = {
+      id: 10,
+      user: { login: bot },
+      body: `${marker("base", "old", 10)}\n\nFindings prose`,
+      created_at: "2026-01-01T00:00:00Z",
+    };
+    const markerOnlyIssue = {
+      id: 99,
+      user: { login: bot },
+      body: marker("old", "new", 0),
+      created_at: "2026-01-02T00:00:00Z",
+    };
+    expect(selectFirstBodiedSource([], [], bot)).toBeUndefined();
+    // Marker-only reaction reviews qualify for the insert path.
+    expect(selectFirstBodiedSource([], [markerOnlyIssue], bot)).toEqual({
+      kind: "issue",
+      id: 99,
+      body: markerOnlyIssue.body,
+    });
+    expect(selectFirstBodiedSource([bodiedReview], [markerOnlyIssue], bot)).toEqual({
+      kind: "review",
+      id: 10,
+      body: bodiedReview.body,
+    });
+    // Issue-comment sources qualify when earliest.
+    const bodiedIssue = {
+      id: 7,
+      user: { login: bot },
+      body: `${marker("base", "old", 0)}\n\nFallback prose`,
+      created_at: "2025-12-31T00:00:00Z",
+    };
+    expect(selectFirstBodiedSource([bodiedReview], [bodiedIssue], bot)).toEqual({
+      kind: "issue",
+      id: 7,
+      body: bodiedIssue.body,
+    });
+    // Foreign logins never qualify; spoofed marker actors are rejected.
+    expect(
+      selectFirstBodiedSource(
+        [{ ...bodiedReview, user: { login: "human" } }],
+        [{ ...bodiedIssue, user: { login: "human" } }],
+        bot,
+      ),
+    ).toBeUndefined();
+    const spoofed = {
+      id: 12,
+      user: { login: bot },
+      body: `${encodeBatchMarker({ fromSha: "a", toSha: "b", kind: "opened", actor: "attacker", reviewId: 1 })}\n\nProse`,
+    };
+    expect(selectFirstBodiedSource([spoofed], [], bot)).toBeUndefined();
+    // Pre-feature bot bodies without markers qualify for the prepend path.
+    expect(
+      selectFirstBodiedSource(
+        [{ id: 11, user: { login: bot }, body: "pre-feature prose" }],
+        [],
+        bot,
+      ),
+    ).toEqual({ kind: "review", id: 11, body: "pre-feature prose" });
+  });
+  it("regenerates over the whole diff, never the incremental range", () => {
+    expect(selectSummaryRegenerateRange("mergeBase", "head")).toEqual({
+      fromSha: "mergeBase",
+      toSha: "head",
+    });
+  });
+  it("leaves the first-review slot open for marker-only and pre-feature reviews", () => {
+    const markerOnly = {
+      user: { login: "bot" },
+      body: encodeBatchMarker({
+        fromSha: "base",
+        toSha: "old",
+        kind: "opened",
+        actor: "bot",
+        reviewId: 1,
+      }),
+    };
+    const bodied = {
+      user: { login: "bot" },
+      body: `${encodeBatchMarker({ fromSha: "old", toSha: "new", kind: "synchronize", actor: "bot", reviewId: 2 })}\n\nFindings prose`,
+    };
+    expect(isFirstBodiedReview([], "bot")).toBe(true);
+    expect(isFirstBodiedReview([markerOnly], "bot")).toBe(true);
+    expect(
+      isFirstBodiedReview([{ user: { login: "bot" }, body: "pre-feature prose" }], "bot"),
+    ).toBe(true);
+    expect(isFirstBodiedReview([bodied], "bot")).toBe(false);
+    expect(isFirstBodiedReview([bodied, markerOnly], "bot")).toBe(false);
+    expect(isFirstBodiedReview([markerOnly, bodied], "bot")).toBe(false);
+    expect(
+      isFirstBodiedReview(
+        [{ user: { login: "human" }, body: `${markerOnly.body}\n\nProse` }],
+        "bot",
+      ),
+    ).toBe(true);
   });
 });
 

@@ -2,19 +2,25 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { parseThinkingLevel, review } from "./review.js";
+import { parseSummaryFlag, parseThinkingLevel, review } from "./review.js";
+import { applySummaryRegeneration } from "./summary-command.js";
+import { COMMAND_HINT_FOOTER, prSummaryRangeLabel, stripPrSummaryBlock } from "../core/output.js";
 import { GitHubClient } from "./github.js";
 import {
   collectFindingHistory,
   decodeBatchMarker,
   encodeBatchMarker,
   isAuthorizedReviewCommand,
+  isAuthorizedSummaryCommand,
   isEventRangeConsistent,
+  isFirstBodiedReview,
   isRenovatePullRequest,
   isSafePullRequestNumber,
   normalizeEvent,
   selectAuthenticatedBatchMarkers,
   selectBatchRange,
+  selectFirstBodiedSource,
+  selectSummaryRegenerateRange,
 } from "./batch.js";
 import { fetchReplySnapshot, handleReply } from "./reply.js";
 import { recoverSynchronizeReplies } from "./recovery.js";
@@ -133,7 +139,7 @@ async function main(): Promise<void> {
     );
     return;
   }
-  if (event.command && !isAuthorizedReviewCommand(event)) {
+  if (event.command && !isAuthorizedReviewCommand(event) && !isAuthorizedSummaryCommand(event)) {
     log.info("action.comment.unauthorized", "Ignoring unauthorized comment");
     return;
   }
@@ -147,6 +153,7 @@ async function main(): Promise<void> {
   if (
     event.kind === "manual" &&
     event.command !== "/pi-review" &&
+    event.command !== "/pi-summary" &&
     process.env.GITHUB_EVENT_NAME === "issue_comment"
   )
     return;
@@ -251,8 +258,17 @@ async function main(): Promise<void> {
       })
     : undefined;
   const priorSummary =
-    latestMarkerSource?.body?.replace(/<!-- pi-reviewer:batch:v1 [^>]+ -->/, "").trim() ||
-    undefined;
+    stripPrSummaryBlock(
+      latestMarkerSource?.body?.replace(/<!-- pi-reviewer:batch:v1 [^>]+ -->/, "") ?? "",
+    )
+      .split(COMMAND_HINT_FOOTER)
+      .join("")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim() || undefined;
+  // Emit-once anchor for PR summaries: marker-only reaction-path reviews carry
+  // no visible body, so they must not consume the first-review slot. Any
+  // earlier bodied source does — even when a later source is marker-only.
+  const hasPriorBodiedReview = !isFirstBodiedReview(markerSources, identity.login);
   const { activeFindings, resolvedFindings } = collectFindingHistory({
     reviews,
     issueComments,
@@ -338,6 +354,53 @@ async function main(): Promise<void> {
       );
     }
     execFileSync("git", ["worktree", "add", "--detach", worktree, head], { cwd: process.cwd() });
+    if (event.command === "/pi-summary") {
+      // Whole-diff summary regeneration: run the agent for its overview only
+      // (never the incremental batch range), then update the first bodied
+      // review in place instead of posting. Creates no markers or findings.
+      if (!parseSummaryFlag(process.env.PI_REVIEWER_SUMMARY)) {
+        log.info("summary.disabled", "PR summaries are disabled; ignoring /pi-summary");
+        return;
+      }
+      const target = selectFirstBodiedSource(reviews, issueComments, identity.login);
+      if (!target) {
+        log.info("summary_regenerate.no_target", "No prior review to update; ignoring /pi-summary");
+        return;
+      }
+      const regenerateRange = selectSummaryRegenerateRange(mergeBase, head);
+      const overview = await review({
+        cwd: worktree,
+        pr: event.pr,
+        commitId: regenerateRange.toSha,
+        fromSha: regenerateRange.fromSha,
+        allowEmptyDiff: true,
+        title: pr.title,
+        body: pr.body,
+        output: "comment",
+        minSeverity,
+        thinking: parseThinkingLevel(process.env.PI_REVIEWER_THINKING),
+        debug: process.env.PI_REVIEWER_DEBUG === "true",
+        piApiKey: process.env.PI_API_KEY,
+        githubToken: token,
+        repo,
+        summaryOnly: true,
+        mcpConfig,
+        mcpServerCwd: trustedMcpWorktree,
+      });
+      await applySummaryRegeneration({
+        github,
+        repo,
+        prNumber: event.pr!,
+        headSha: head,
+        target:
+          target.kind === "review"
+            ? { kind: "review", reviewId: target.id }
+            : { kind: "issue", issueCommentId: target.id },
+        overview: overview ?? {},
+        rangeLabel: prSummaryRangeLabel(regenerateRange.fromSha, regenerateRange.toSha),
+      });
+      return;
+    }
     await review({
       cwd: worktree,
       pr: event.pr,
@@ -361,6 +424,8 @@ async function main(): Promise<void> {
       githubToken: token,
       repo,
       reactOnNoFindings: process.env.REACT_ON_NO_FINDINGS === "true",
+      summary: parseSummaryFlag(process.env.PI_REVIEWER_SUMMARY),
+      isFirstReview: !hasPriorBodiedReview,
       mcpConfig,
       mcpServerCwd: trustedMcpWorktree,
     });

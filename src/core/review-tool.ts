@@ -19,6 +19,20 @@ const reviewSchema = Type.Object(
       description:
         "Overall review written in Markdown. Use bullet points and bold for clarity. In JSON, encode each Markdown newline once as \\n; never double-escape formatting newlines as \\\\n.",
     }),
+    pr_summary: Type.Optional(
+      Type.String({
+        maxLength: 2000,
+        description:
+          "What/Why/Risk overview of the shown diff for the PR summary block. What: bulleted file/feature changes. Why: inferred intent, labeled as inference. Risks: edge cases and follow-ups. Markdown with single-escaped newlines; at most 2000 characters. Omit entirely for follow-up batches or when summary output is disabled.",
+      }),
+    ),
+    pr_diagram: Type.Optional(
+      Type.String({
+        maxLength: 1500,
+        description:
+          "Raw Mermaid source (no fences) for the PR summary block, at most 1500 characters. Emit only when the diff introduces or alters a multi-component interaction (new subsystem, cross-file flow, changed state machine); prefer flowchart TD for structure and sequenceDiagram for call order. Omit for localized changes.",
+      }),
+    ),
     comments: Type.Array(
       Type.Object(
         {

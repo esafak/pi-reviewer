@@ -116,6 +116,13 @@ describe("GitHub Action Vite+ setup", () => {
     expect(entry).toContain("mcpConfig,");
   });
 
+  it("maps the default-on summary input to the CI environment", async () => {
+    const action = await readFile(path.join(process.cwd(), "action.yml"), "utf8");
+    expect(action).toContain("  summary:");
+    expect(action).toContain('default: "true"');
+    expect(action).toContain("PI_REVIEWER_SUMMARY: ${{ inputs.summary }}");
+  });
+
   it("keeps the action manifest valid YAML", async () => {
     const action = await readFile(path.join(process.cwd(), "action.yml"), "utf8");
     expect(() => YAML.parse(action)).not.toThrow();

@@ -3,6 +3,7 @@ import path from "node:path";
 
 import { parseDiffPositions, partitionComments } from "./diff-positions.js";
 import { escapeHtmlCommentText } from "./html-comment.js";
+import { PR_DIAGRAM_MAX_LENGTH, PR_SUMMARY_MAX_LENGTH } from "./prompts.js";
 import { GitHubClient } from "../ci/github.js";
 import {
   bodyFindingId,
@@ -62,6 +63,10 @@ export interface ReviewResult {
   summary: string;
   comments: ReviewComment[];
   finding_updates?: FindingUpdate[];
+  /** What/Why/Risk overview for the collapsible PR summary block (first review only). */
+  pr_summary?: string;
+  /** Raw Mermaid source (no fences) for the summary block diagram. */
+  pr_diagram?: string;
   /** Raw diff included by the agent in SSH+UI mode */
   diff?: string;
   tokenUsage?: TokenUsage;
@@ -128,6 +133,10 @@ export interface OutputOptions {
   resolvedFindings?: ResolvedFinding[];
   /** React to the pull request instead of posting a comment when no findings remain. */
   reactOnNoFindings?: boolean;
+  /** Render the collapsible PR summary block when the result carries an overview. */
+  summaryEnabled?: boolean;
+  /** True when no prior authenticated review with a body exists (first review). */
+  isFirstReview?: boolean;
   /** Current-run, server-recorded external evidence; never model-authored. */
   evidence?: readonly SearchCitation[];
 }
@@ -253,6 +262,16 @@ function structuredResultRejection(
   if (!value || typeof value !== "object") return "invalid summary";
   const result = value as Record<string, unknown>;
   if (typeof result.summary !== "string") return "invalid summary";
+  if (
+    result.pr_summary !== undefined &&
+    (typeof result.pr_summary !== "string" || result.pr_summary.length > PR_SUMMARY_MAX_LENGTH)
+  )
+    return "invalid summary";
+  if (
+    result.pr_diagram !== undefined &&
+    (typeof result.pr_diagram !== "string" || result.pr_diagram.length > PR_DIAGRAM_MAX_LENGTH)
+  )
+    return "invalid summary";
   if (!Array.isArray(result.comments) || !result.comments.every(isReviewComment))
     return "invalid comments";
   if (result.finding_updates !== undefined && !Array.isArray(result.finding_updates))
@@ -261,7 +280,7 @@ function structuredResultRejection(
 }
 
 /** Normalize tool output while isolating contextual finding validation from the review itself. */
-function normalizeReviewResult(
+export function normalizeReviewResult(
   result: ReviewResult,
   options: Pick<
     OutputOptions,
@@ -349,6 +368,17 @@ function normalizeReviewResult(
     summary: normalizeMarkdownText(result.summary),
     comments,
     ...(updates.length ? { finding_updates: updates } : {}),
+    ...(typeof result.pr_summary === "string" && result.pr_summary.trim()
+      ? {
+          pr_summary: sanitizeVisibleReviewText(normalizeMarkdownText(result.pr_summary)).slice(
+            0,
+            PR_SUMMARY_MAX_LENGTH,
+          ),
+        }
+      : {}),
+    ...(typeof result.pr_diagram === "string" && result.pr_diagram.trim()
+      ? { pr_diagram: result.pr_diagram.slice(0, PR_DIAGRAM_MAX_LENGTH) }
+      : {}),
     ...(result.diff !== undefined ? { diff: result.diff } : {}),
   };
 }
@@ -926,11 +956,15 @@ export function parseAgentResponseWithStatus(
       updatesValid
     ) {
       const diff = typeof parsed.diff === "string" ? parsed.diff : undefined;
+      const prSummary = typeof parsed.pr_summary === "string" ? parsed.pr_summary : undefined;
+      const prDiagram = typeof parsed.pr_diagram === "string" ? parsed.pr_diagram : undefined;
       const review = normalizeReviewResult(
         {
           summary: parsed.summary,
           comments: parsed.comments as ReviewComment[],
           finding_updates: rawUpdates as FindingUpdate[],
+          ...(prSummary !== undefined ? { pr_summary: prSummary } : {}),
+          ...(prDiagram !== undefined ? { pr_diagram: prDiagram } : {}),
           ...(diff !== undefined ? { diff } : {}),
         },
         { minSeverity, allowedFindingIds, existingFindingKeys, resolvedFindings, ...provenance },
@@ -1116,9 +1150,22 @@ export function parseAgentResponse(text: string, minSeverity: Severity = "INFO")
 
 function formatForGitHub(
   result: ReviewResult,
-  provenance: ReRaiseProvenanceOptions & Pick<OutputOptions, "repo" | "baseCommitId" | "evidence">,
+  provenance: ReRaiseProvenanceOptions &
+    Pick<OutputOptions, "repo" | "baseCommitId" | "evidence" | "summaryEnabled" | "isFirstReview">,
 ): string {
-  const lines = ["## Pi Reviewer", "", sanitizeVisibleReviewText(result.summary)];
+  const lines = ["## Pi Reviewer", ""];
+  // Footer advertises regeneration, so it renders iff the block does (see buildReviewBody).
+  const showSummary = shouldRenderPrSummary(result, provenance);
+  if (showSummary)
+    lines.push(
+      renderPrSummary(
+        result.pr_summary!,
+        result.pr_diagram,
+        prSummaryRangeLabel(provenance.baseCommitId, provenance.commitId),
+      ),
+      "",
+    );
+  lines.push(sanitizeVisibleReviewText(result.summary));
 
   const actionable = result.comments.filter(
     (comment) => comment.severity === "WARN" || comment.severity === "CRITICAL",
@@ -1156,6 +1203,7 @@ function formatForGitHub(
     provenance.evidence,
   );
   if (sources) lines.push("", sources);
+  if (showSummary) lines.push("", COMMAND_HINT_FOOTER);
 
   const body = lines.join("\n");
   return body;
@@ -1168,6 +1216,129 @@ function escapeHtml(value: string): string {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
+}
+
+type PrSummaryGate = Pick<OutputOptions, "summaryEnabled" | "isFirstReview">;
+
+/** Server-rendered discoverability footer for the first review only. Never model-generated. */
+export const COMMAND_HINT_FOOTER =
+  "<sub><code>/pi-review</code> re-reviews · <code>/pi-summary</code> regenerates the summary</sub>";
+
+/** Whether the collapsible PR summary block belongs in this review body. */
+function shouldRenderPrSummary(result: ReviewResult, options: PrSummaryGate): boolean {
+  return Boolean(options.summaryEnabled && options.isFirstReview && result.pr_summary?.trim());
+}
+
+/** Short `base..head` label for the summary toggle, matching lifecycle replies. */
+export function prSummaryRangeLabel(baseCommitId?: string, commitId?: string): string {
+  const base = (baseCommitId ?? "").slice(0, 7);
+  const head = (commitId ?? "").slice(0, 7);
+  return base && head ? `${base}..${head}` : "";
+}
+
+const MERMAID_FIRST_LINE_ALLOWLIST =
+  /^(flowchart|graph|sequenceDiagram|stateDiagram|classDiagram|erDiagram)\b/;
+
+/**
+ * Validates untrusted Mermaid source for the summary block. Returns the source
+ * unchanged when it is a supported diagram type without fence escapes or
+ * lifecycle-marker text; otherwise returns undefined so the caller keeps the
+ * prose and drops the diagram (warn-only, never fatal).
+ */
+function validateMermaidSource(source: string): string | undefined {
+  if (source.length > PR_DIAGRAM_MAX_LENGTH) {
+    console.warn("[pi-reviewer] dropped PR summary diagram: exceeds size cap");
+    return undefined;
+  }
+  if (/`{3,}/.test(source)) {
+    console.warn("[pi-reviewer] dropped PR summary diagram: contains a code fence");
+    return undefined;
+  }
+  // HTML comments open with `<!--`: that sequence (or lifecycle-marker text)
+  // could smuggle metadata into decoders, so it is rejected. A lone `-->`
+  // without its opener is inert text — and `-->` arrows are core Mermaid
+  // syntax — so only the opener is refused. details/summary tags would break
+  // the upsert/strip block matching, so they are refused as well.
+  if (
+    /pi-reviewer:/i.test(source) ||
+    source.includes("<!--") ||
+    /<\/?(details|summary)[\s>/]/i.test(source)
+  ) {
+    console.warn("[pi-reviewer] dropped PR summary diagram: contains markup");
+    return undefined;
+  }
+  const firstLine = source
+    .split("\n")
+    .map((line) => line.trim())
+    .find((line) => line.length > 0);
+  if (!firstLine || !MERMAID_FIRST_LINE_ALLOWLIST.test(firstLine)) {
+    console.warn("[pi-reviewer] dropped PR summary diagram: unsupported diagram type");
+    return undefined;
+  }
+  return source;
+}
+
+/**
+ * Renders the collapsible PR summary block. The prose is sanitized here (in
+ * addition to normalization) so every posting path — including summary
+ * regeneration — stays injection-safe; the wrapper is added after sanitizing
+ * so model-emitted details/summary tags cannot break out of it.
+ */
+export function renderPrSummary(
+  prSummary: string,
+  prDiagram: string | undefined,
+  rangeLabel: string,
+): string {
+  const lines = [
+    "<details>",
+    `<summary>Summary${rangeLabel ? ` · ${rangeLabel}` : ""}</summary>`,
+    "",
+    sanitizeVisibleReviewText(prSummary),
+  ];
+  const diagram = prDiagram?.trim() ? validateMermaidSource(prDiagram) : undefined;
+  if (diagram) lines.push("", "```mermaid", diagram, "```");
+  lines.push("", "</details>");
+  return lines.join("\n");
+}
+
+/**
+ * Matches the server-rendered PR summary block. Anchored on the exact wrapper
+ * this module generates: model prose can never contain `details`/`summary`
+ * tags (neutralized before wrapping), so the first match is always our block.
+ */
+export const PR_SUMMARY_BLOCK_PATTERN =
+  /<details>\n<summary>Summary(?: · [^\n<]*)?<\/summary>\n\n[\s\S]*?\n<\/details>/;
+
+/** Removes the rendered PR summary block so historic overviews never pollute finding context. */
+export function stripPrSummaryBlock(body: string): string {
+  return body
+    .replace(PR_SUMMARY_BLOCK_PATTERN, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+/**
+ * Replaces the rendered summary block in place, or inserts it immediately
+ * after the batch-marker line when the body has none (marker-only and
+ * pre-feature reviews). Lifecycle markers are never touched; callers assert
+ * the round-trip.
+ */
+export function upsertPrSummaryBlock(
+  reviewBody: string,
+  prSummary: string,
+  prDiagram: string | undefined,
+  rangeLabel: string,
+): string {
+  const block = renderPrSummary(prSummary, prDiagram, rangeLabel);
+  if (PR_SUMMARY_BLOCK_PATTERN.test(reviewBody))
+    return reviewBody.replace(PR_SUMMARY_BLOCK_PATTERN, block);
+  const marker = reviewBody.match(/<!-- pi-reviewer:batch:v1 [^>]+ -->\n?/);
+  if (marker?.index !== undefined) {
+    const at = marker.index + marker[0].length;
+    const tail = reviewBody.slice(at).replace(/^\n+/, "");
+    return `${reviewBody.slice(0, at)}\n${block}${tail ? `\n\n${tail}` : ""}`.trimEnd();
+  }
+  return `${block}\n\n${reviewBody}`.trimEnd();
 }
 
 function renderExternalSources(
@@ -1202,12 +1373,26 @@ function renderExternalSources(
  * the review's main text, so moved comments stay visible to the author.
  */
 function buildReviewBody(
-  summary: string,
+  result: ReviewResult,
   moved: ReviewComment[],
   allComments: ReviewComment[],
-  provenance: ReRaiseProvenanceOptions & Pick<OutputOptions, "repo" | "baseCommitId" | "evidence">,
+  provenance: ReRaiseProvenanceOptions &
+    Pick<OutputOptions, "repo" | "baseCommitId" | "evidence" | "summaryEnabled" | "isFirstReview">,
 ): string {
-  const lines = [sanitizeVisibleReviewText(summary)];
+  const lines: string[] = [];
+  // The footer advertises summary regeneration, so it renders if and only if
+  // the block renders: a consumed slot with no summary must not promise one.
+  const showSummary = shouldRenderPrSummary(result, provenance);
+  if (showSummary)
+    lines.push(
+      renderPrSummary(
+        result.pr_summary!,
+        result.pr_diagram,
+        prSummaryRangeLabel(provenance.baseCommitId, provenance.commitId),
+      ),
+      "",
+    );
+  lines.push(sanitizeVisibleReviewText(result.summary));
   const actionable = allComments.filter(
     (comment) => comment.severity === "WARN" || comment.severity === "CRITICAL",
   );
@@ -1243,10 +1428,11 @@ function buildReviewBody(
     }
   }
   const sources = renderExternalSources(
-    `${summary}\n${allComments.map((comment) => comment.body).join("\n")}`,
+    `${result.summary}\n${allComments.map((comment) => comment.body).join("\n")}`,
     provenance.evidence,
   );
   if (sources) lines.push("", sources);
+  if (showSummary) lines.push("", COMMAND_HINT_FOOTER);
   const body = lines.join("\n");
   return body;
 }
@@ -1359,7 +1545,7 @@ export async function sendOutput(options: OutputOptions): Promise<OutputMetadata
       body: `<!-- pi-reviewer:finding:v1 -->\n${appendGitHubSuggestion(comment, appendFindingFooter(comment, `${reRaiseMetadata(comment, options)}${sanitizeVisibleReviewText(comment.body)}`))}`,
     }));
 
-    const body = [options.batchMarker, buildReviewBody(result.summary, moved, comments, options)]
+    const body = [options.batchMarker, buildReviewBody(result, moved, comments, options)]
       .filter(Boolean)
       .join("\n\n");
 
@@ -1379,6 +1565,12 @@ export async function sendOutput(options: OutputOptions): Promise<OutputMetadata
 
     let outstandingFindings = new Set<number>(options.existingFindings?.map((f) => f.commentId));
     let findingUpdatesReconciled = false;
+    // Emit-once summaries post a body even with zero findings: the first
+    // review carries the overview, so the reaction fast-path must stand down
+    // for that run (finding_updates still reconcile via the post-post path).
+    const postsSummaryBody = Boolean(
+      options.summaryEnabled && options.isFirstReview && result.pr_summary?.trim(),
+    );
     if (
       options.reactOnNoFindings &&
       result.comments.length === 0 &&
@@ -1399,7 +1591,8 @@ export async function sendOutput(options: OutputOptions): Promise<OutputMetadata
     if (
       options.reactOnNoFindings &&
       result.comments.length === 0 &&
-      outstandingFindings.size === 0
+      outstandingFindings.size === 0 &&
+      !postsSummaryBody
     ) {
       const client = new GitHubClient(options.githubToken);
       let reactionSucceeded = false;
@@ -1498,9 +1691,7 @@ export async function sendOutput(options: OutputOptions): Promise<OutputMetadata
                   options.repo,
                   options.prNumber,
                   posted.id,
-                  [finalized, buildReviewBody(result.summary, moved, comments, options)].join(
-                    "\n\n",
-                  ),
+                  [finalized, buildReviewBody(result, moved, comments, options)].join("\n\n"),
                 )
                 .catch((error) =>
                   console.warn(
@@ -1547,7 +1738,7 @@ export async function sendOutput(options: OutputOptions): Promise<OutputMetadata
       if (reviewResponse.status === 422) {
         const allMovedBody = [
           options.batchMarker,
-          buildReviewBody(result.summary, comments, comments, options),
+          buildReviewBody(result, comments, comments, options),
         ]
           .filter(Boolean)
           .join("\n\n");
