@@ -1,0 +1,16 @@
+src/core/prompts.ts
+  h_ea91e2db23540f 55
+tests/core/prompt-builder.test.ts
+  h_ea91e2db23540f 274
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "6a01295df6702dca447afe7bbf82530827bb71f8",
+  "prompts": {},
+  "humans": {
+    "h_ea91e2db23540f": {
+      "author": "Emre Şafak <3928300+esafak@users.noreply.github.com>"
+    }
+  }
+}
