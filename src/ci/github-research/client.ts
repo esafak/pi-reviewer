@@ -30,7 +30,12 @@ export type GitHubReadKind =
   | "checks"
   | "status";
 export interface GitHubResearchClient {
-  search(kind: GitHubSearchKind, query: string, limit: number): Promise<Record<string, unknown>>;
+  search(
+    kind: GitHubSearchKind,
+    query: string,
+    limit: number,
+    options?: SearchOptions,
+  ): Promise<Record<string, unknown>>;
   read(params: {
     kind: GitHubReadKind;
     owner: string;
@@ -38,7 +43,31 @@ export interface GitHubResearchClient {
     path?: string;
     ref?: string;
     number?: number;
+    comments?: boolean;
+    name_only?: boolean;
+    branch?: string;
+    log?: boolean;
+    exit_status?: boolean;
+    attempt?: number;
   }): Promise<Record<string, unknown>>;
+}
+export interface SearchOptions {
+  state?: "open" | "closed" | "merged" | "all";
+  label?: string;
+  assignee?: string;
+  author?: string;
+  search?: string;
+  language?: string;
+  match?: string;
+  sort?: string;
+  order?: "asc" | "desc";
+  workflow?: string;
+  branch?: string;
+  status?: string;
+  event?: string;
+  all?: boolean;
+  exclude_drafts?: boolean;
+  exclude_prereleases?: boolean;
 }
 // Keep these public research budgets sourced from the shared gh runner limits.
 export const MAX_GITHUB_RESULT_BYTES = MAX_GH_RESULT_BYTES,
@@ -47,6 +76,7 @@ export const MAX_GITHUB_RESULT_BYTES = MAX_GH_RESULT_BYTES,
   GITHUB_REQUEST_TIMEOUT_MS = GH_TIMEOUT_MS,
   GITHUB_WALL_TIME_MS = GH_WALL_MS;
 const listFields: Record<string, string> = {
+  // Search JSON uses fullName/defaultBranch; repo view uses nameWithOwner/defaultBranchRef below.
   repositories: "name,fullName,description,url,visibility,defaultBranch",
   code: "path,repository,url",
   pull_requests: "number,title,state,url,repository,updatedAt",
@@ -55,6 +85,127 @@ const listFields: Record<string, string> = {
   workflows: "id,name,state,path",
   releases: "tagName,name,isDraft,isLatest,publishedAt",
 };
+const searchSorts: Record<string, readonly string[]> = {
+  repositories: ["forks", "help-wanted-issues", "stars", "updated"],
+  code: [],
+  pull_requests: ["comments", "created", "interactions", "reactions", "updated"],
+  issues: ["comments", "created", "interactions", "reactions", "updated"],
+};
+const searchMatches: Partial<Record<GitHubSearchKind, readonly string[]>> = {
+  repositories: ["name", "description", "readme"],
+  code: ["file", "path"],
+  pull_requests: ["title", "body", "comments"],
+  issues: ["title", "body", "comments"],
+};
+const validRef = (v: string) =>
+  v.length <= 256 &&
+  /^[A-Za-z0-9._/-]+$/.test(v) &&
+  !v.startsWith("-") &&
+  !v.includes("..") &&
+  !v.endsWith("/") &&
+  !v.includes("//");
+const validToken = (v: string, max: number) =>
+  v.length <= max && /^[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(v);
+const validWorkflow = (v: string) =>
+  v.length <= 100 && /^[A-Za-z0-9._ /-]+$/.test(v) && !v.startsWith("-") && !v.includes("..");
+const workflowEvents = new Set([
+  "branch_protection_rule",
+  "check_run",
+  "check_suite",
+  "create",
+  "delete",
+  "deployment",
+  "deployment_status",
+  "discussion",
+  "discussion_comment",
+  "fork",
+  "gollum",
+  "issue_comment",
+  "issues",
+  "label",
+  "merge_group",
+  "milestone",
+  "page_build",
+  "public",
+  "pull_request",
+  "pull_request_comment",
+  "pull_request_review",
+  "pull_request_review_comment",
+  "pull_request_target",
+  "push",
+  "registry_package",
+  "release",
+  "repository_dispatch",
+  "schedule",
+  "status",
+  "watch",
+  "workflow_call",
+  "workflow_dispatch",
+  "workflow_run",
+]);
+function validateSearchOptions(kind: GitHubSearchKind, o: SearchOptions): void {
+  const fail = () => {
+    throw new Error("GitHub search filter is invalid for this kind");
+  };
+  const only = (...keys: (keyof SearchOptions)[]) =>
+    Object.keys(o).every((k) => keys.includes(k as keyof SearchOptions));
+  if (kind === "pull_requests" || kind === "issues") {
+    if (!only("state", "label", "assignee", "author", "search", "match", "sort", "order")) fail();
+    if (o.state && !["open", "closed", "merged", "all"].includes(o.state)) fail();
+    if (kind === "issues" && o.state === "merged") fail();
+    if (o.label && !validToken(o.label, 50)) fail();
+    if (o.assignee && !validToken(o.assignee, 39)) fail();
+    if (o.author && !validToken(o.author, 39)) fail();
+    if (
+      o.search &&
+      (o.search.length > 128 ||
+        hasControlCharacters(o.search) ||
+        o.search.startsWith("-") ||
+        /[;&|`$<>]/.test(o.search))
+    )
+      fail();
+    if (o.match && !searchMatches[kind]!.includes(o.match)) fail();
+    if (o.sort && !searchSorts[kind]!.includes(o.sort)) fail();
+    if (o.order && !["asc", "desc"].includes(o.order)) fail();
+  } else if (kind === "repositories" || kind === "code") {
+    if (!only("language", "match", "sort", "order")) fail();
+    if (o.language && !/^[A-Za-z0-9+#.-]{1,40}$/.test(o.language)) fail();
+    if (o.match && !searchMatches[kind]!.includes(o.match)) fail();
+    if (o.sort && !searchSorts[kind]!.includes(o.sort)) fail();
+    if (o.order && (!["asc", "desc"].includes(o.order) || kind === "code")) fail();
+  } else if (kind === "runs") {
+    if (!only("workflow", "branch", "status", "event")) fail();
+    if (o.workflow && !validWorkflow(o.workflow)) fail();
+    if (o.branch && !validRef(o.branch)) fail();
+    if (
+      o.status &&
+      ![
+        "queued",
+        "completed",
+        "in_progress",
+        "requested",
+        "waiting",
+        "pending",
+        "action_required",
+        "cancelled",
+        "failure",
+        "neutral",
+        "skipped",
+        "stale",
+        "startup_failure",
+        "success",
+        "timed_out",
+      ].includes(o.status)
+    )
+      fail();
+    if (o.event && !workflowEvents.has(o.event)) fail();
+  } else if (kind === "workflows") {
+    if (!only("all")) fail();
+  } else if (kind === "releases") {
+    if (!only("exclude_drafts", "exclude_prereleases", "order")) fail();
+    if (o.order && !["asc", "desc"].includes(o.order)) fail();
+  } else if (Object.keys(o).length) fail();
+}
 const searchCmd: Record<string, string> = {
   repositories: "repos",
   code: "code",
@@ -71,6 +222,12 @@ const safeFailure = (e: unknown) =>
     .join("")
     .replace(/(?:token|authorization|bearer)\s*[:=]?\s*\S+/gi, "[redacted]")
     .slice(0, 240);
+const truncateContent = (value: string, cap = 4 * 1024) => {
+  const bytes = Buffer.from(value);
+  if (bytes.length <= cap) return value;
+  const marker = "\n[truncated]";
+  return `${bytes.subarray(0, cap - Buffer.byteLength(marker)).toString("utf8")}${marker}`;
+};
 const record = (s: string): unknown => {
   try {
     return JSON.parse(s);
@@ -101,7 +258,7 @@ export function createGitHubResearchClient(
     return value;
   };
   return {
-    async search(kind, query, limit) {
+    async search(kind, query, limit, options = {}) {
       if (
         !(kind in listFields) ||
         !query.trim() ||
@@ -112,6 +269,7 @@ export function createGitHubResearchClient(
       )
         throw new Error("GitHub search query is invalid");
       const n = Math.min(limit, 5);
+      validateSearchOptions(kind, options);
       let args: string[];
       const localKinds = kind === "runs" || kind === "workflows" || kind === "releases";
       if (localKinds && scope === "public") {
@@ -168,6 +326,38 @@ export function createGitHubResearchClient(
           "--jq",
           `.[:${n}]`,
         ];
+      // Typed options append only reviewed flags; with no options the legacy argv remains byte-identical.
+      const add = (flag: string, value?: string) => {
+        if (value !== undefined) args.push(flag, value);
+      };
+      if (["pull_requests", "issues", "repositories", "code"].includes(kind)) {
+        if (options.search) args[2] = `${options.search} ${args[2]}`;
+        add(
+          "--state",
+          options.state && options.state !== "merged" && options.state !== "all"
+            ? options.state
+            : undefined,
+        );
+        if (options.state === "merged") args.push("--merged");
+        add("--label", options.label);
+        add("--assignee", options.assignee);
+        add("--author", options.author);
+        add("--language", options.language);
+        add("--match", options.match);
+        add("--sort", options.sort);
+        add("--order", options.order);
+      } else if (kind === "runs") {
+        add("--workflow", options.workflow);
+        add("--branch", options.branch);
+        add("--status", options.status);
+        add("--event", options.event);
+      } else if (kind === "workflows") {
+        if (options.all) args.push("--all");
+      } else if (kind === "releases") {
+        if (options.exclude_drafts) args.push("--exclude-drafts");
+        if (options.exclude_prereleases) args.push("--exclude-pre-releases");
+        add("--order", options.order);
+      }
       let items = await bounded(args);
       if (!Array.isArray(items)) throw new Error("GitHub search returned an invalid response");
       if (localKinds) {
@@ -222,6 +412,27 @@ export function createGitHubResearchClient(
         throw new Error("GitHub repository identifier is invalid");
       const repo = `${p.owner}/${p.repo}`,
         num = p.number;
+      const enrichments = [
+        "comments",
+        "name_only",
+        "branch",
+        "log",
+        "exit_status",
+        "attempt",
+      ] as const;
+      const byKind: Record<string, readonly string[]> = {
+        pull_request: ["comments"],
+        issue: ["comments"],
+        diff: ["name_only"],
+        repository: ["branch"],
+        run: ["log", "exit_status", "attempt"],
+      };
+      if (enrichments.some((k) => p[k] !== undefined && !byKind[p.kind]?.includes(k)))
+        throw new Error("GitHub read option is invalid for this kind");
+      if (p.branch !== undefined && !validRef(p.branch))
+        throw new Error("GitHub branch ref is invalid");
+      if (p.attempt !== undefined && (!Number.isInteger(p.attempt) || p.attempt < 1))
+        throw new Error("GitHub run attempt is invalid");
       if (scope === "public") {
         const privacy = String(await call(["api", `repos/${repo}`, "--jq", ".private"])).trim();
         if (privacy !== "false")
@@ -233,6 +444,7 @@ export function createGitHubResearchClient(
           "repo",
           "view",
           repo,
+          ...(p.branch ? ["--branch", p.branch] : []),
           "--json",
           "name,nameWithOwner,description,url,visibility,defaultBranchRef",
         ]);
@@ -245,7 +457,9 @@ export function createGitHubResearchClient(
           "--repo",
           repo,
           "--json",
-          "number,title,body,state,url,headRefName,baseRefName,updatedAt,isDraft",
+          p.comments
+            ? "number,title,body,comments,state,url,headRefName,baseRefName,updatedAt,isDraft"
+            : "number,title,body,state,url,headRefName,baseRefName,updatedAt,isDraft",
         ]);
       } else if (p.kind === "issue") {
         if (!num) throw new Error("An issue number is required for this read");
@@ -256,7 +470,9 @@ export function createGitHubResearchClient(
           "--repo",
           repo,
           "--json",
-          "number,title,body,state,url,updatedAt",
+          p.comments
+            ? "number,title,body,comments,state,url,updatedAt"
+            : "number,title,body,state,url,updatedAt",
         ]);
       } else if (p.kind === "file") {
         if (
@@ -292,7 +508,14 @@ export function createGitHubResearchClient(
         };
       } else if (p.kind === "diff") {
         if (!num) throw new Error("A pull request number is required for this read");
-        result = await call(["pr", "diff", String(num), "--repo", repo]);
+        result = await call([
+          "pr",
+          "diff",
+          String(num),
+          "--repo",
+          repo,
+          ...(p.name_only ? ["--name-only"] : []),
+        ]);
       } else if (p.kind === "checks")
         result = await bounded([
           "pr",
@@ -312,17 +535,20 @@ export function createGitHubResearchClient(
           "--json",
           "createdAt,headRefName,isDraft,number,state,statusCheckRollup,title,url",
         ]);
-      else if (p.kind === "run")
-        result = await bounded([
+      else if (p.kind === "run") {
+        const args = [
           "run",
           "view",
           String(num),
           "--repo",
           repo,
-          "--json",
-          "databaseId,name,status,conclusion,url,headBranch,headSha",
-        ]);
-      else if (p.kind === "workflow")
+          ...(p.log ? ["--log"] : []),
+          ...(p.exit_status ? ["--exit-status"] : []),
+          ...(p.attempt !== undefined ? ["--attempt", String(p.attempt)] : []),
+          ...(!p.log ? ["--json", "databaseId,name,status,conclusion,url,headBranch,headSha"] : []),
+        ];
+        result = p.log ? truncateContent(await call(args)) : await bounded(args);
+      } else if (p.kind === "workflow")
         result = await bounded([
           "api",
           `repos/${repo}/actions/workflows/${num}`,
@@ -346,6 +572,12 @@ export function createGitHubResearchClient(
           "{number,title,body,html_url,created_at,updated_at,category:.category.name,user:.user.login}",
         ]);
       } else throw new Error("Unsupported GitHub read kind");
+      if (p.comments && result && typeof result === "object") {
+        const row = result as Record<string, unknown>;
+        if (typeof row.comments === "string") row.comments = truncateContent(row.comments);
+        else if (Array.isArray(row.comments))
+          row.comments = truncateContent(JSON.stringify(row.comments));
+      }
       const text = typeof result === "string" ? result : JSON.stringify(result);
       if (Buffer.byteLength(text) > MAX_GITHUB_RESULT_BYTES)
         throw new Error("GitHub research result exceeded the byte limit");

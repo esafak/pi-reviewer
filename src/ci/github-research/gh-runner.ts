@@ -37,13 +37,40 @@ export function createGhRunner(token: string, run = exec) {
     const remaining = GH_WALL_MS - (Date.now() - started);
     if (remaining <= 0) throw new Error("gh wall-time budget exhausted");
     try {
-      const { stdout } = await run("gh", args, {
-        env: { GH_TOKEN: token, PATH: process.env.PATH },
-        timeout: Math.min(GH_TIMEOUT_MS, remaining),
-        maxBuffer: MAX_GH_RESULT_BYTES + 1,
-        encoding: "utf8",
-      });
-      const value = String(stdout);
+      let stdout: string | Buffer;
+      try {
+        ({ stdout } = await run("gh", args, {
+          env: { GH_TOKEN: token, PATH: process.env.PATH },
+          timeout: Math.min(GH_TIMEOUT_MS, remaining),
+          // Logs use the code-exec per-stream ceiling before applying the smaller research result budget.
+          maxBuffer: args.includes("--log") ? 32 * 1024 + 1 : MAX_GH_RESULT_BYTES + 1,
+          encoding: "utf8",
+        }));
+      } catch (error) {
+        // gh --exit-status may exit 1 for a failed run after emitting useful requested logs.
+        if (
+          args.includes("--log") &&
+          args.includes("--exit-status") &&
+          error &&
+          typeof error === "object" &&
+          "code" in error &&
+          error.code === 1 &&
+          "stdout" in error &&
+          typeof error.stdout === "string" &&
+          error.stdout.length > 0
+        )
+          stdout = error.stdout;
+        else throw error;
+      }
+      let value = String(stdout);
+      if (args.includes("--log") && Buffer.byteLength(value) > MAX_GH_RESULT_BYTES)
+        throw new Error("gh output budget exhausted");
+      if (args.includes("--log") && Buffer.byteLength(value) > 4 * 1024) {
+        const marker = "\n[truncated]";
+        value = `${Buffer.from(value)
+          .subarray(0, 4 * 1024 - Buffer.byteLength(marker))
+          .toString("utf8")}${marker}`;
+      }
       const size = Buffer.byteLength(value);
       if (size > MAX_GH_RESULT_BYTES || bytes + size > MAX_GH_TOTAL_BYTES)
         throw new Error("gh output budget exhausted");
