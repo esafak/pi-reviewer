@@ -1,0 +1,14 @@
+src/ci/github-research/gh-allowlist.ts
+  h_ea91e2db23540f 107
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "0daf01c73440dc8c68e3662d63d0742e97ca5a25",
+  "prompts": {},
+  "humans": {
+    "h_ea91e2db23540f": {
+      "author": "Emre Şafak <3928300+esafak@users.noreply.github.com>"
+    }
+  }
+}
