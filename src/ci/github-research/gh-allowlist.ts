@@ -104,6 +104,7 @@ const commands: Record<
     flags: { "--json": "value", "--branch": "value" },
     json: [
       "name,nameWithOwner,description,url,visibility,defaultBranchRef",
+      // Emitted by the CWD-repo visibility probe for repo-local searches (client.ts); not dead.
       "isPrivate,nameWithOwner",
     ],
   },
