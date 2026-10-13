@@ -8,7 +8,137 @@ const allowed: Record<string, readonly string[]> = {
   search: ["repos", "code", "prs", "issues"],
   api: [],
 };
-// Intentionally over-broad for read subcommands: mutation-capable flags stay blocked even if a CLI version starts accepting them.
+// Typed inputs are converted to fixed argv by the client; this layer verifies command, flag, and value combinations.
+const commands: Record<
+  string,
+  { flags: Record<string, "value" | "boolean">; json?: readonly string[] }
+> = {
+  "search repos": {
+    flags: {
+      "--limit": "value",
+      "--json": "value",
+      "--jq": "value",
+      "--language": "value",
+      "--match": "value",
+      "--sort": "value",
+      "--order": "value",
+    },
+    json: ["name,fullName,description,url,visibility,defaultBranch"],
+  },
+  "search code": {
+    flags: {
+      "--limit": "value",
+      "--json": "value",
+      "--jq": "value",
+      "--language": "value",
+      "--match": "value",
+    },
+    json: ["path,repository,url"],
+  },
+  "search prs": {
+    flags: {
+      "--limit": "value",
+      "--json": "value",
+      "--jq": "value",
+      "--state": "value",
+      "--merged": "boolean",
+      "--draft": "boolean",
+      "--label": "value",
+      "--assignee": "value",
+      "--author": "value",
+      "--milestone": "value",
+      "--project": "value",
+      "--language": "value",
+      "--match": "value",
+      "--sort": "value",
+      "--order": "value",
+    },
+    json: ["number,title,state,url,repository,updatedAt"],
+  },
+  "search issues": {
+    flags: {
+      "--limit": "value",
+      "--json": "value",
+      "--jq": "value",
+      "--state": "value",
+      "--label": "value",
+      "--assignee": "value",
+      "--author": "value",
+      "--milestone": "value",
+      "--project": "value",
+      "--language": "value",
+      "--match": "value",
+      "--sort": "value",
+      "--order": "value",
+    },
+    json: ["number,title,state,url,repository,updatedAt"],
+  },
+  "run list": {
+    flags: {
+      "--limit": "value",
+      "--json": "value",
+      "--jq": "value",
+      "--workflow": "value",
+      "--branch": "value",
+      "--status": "value",
+      "--event": "value",
+    },
+    json: ["databaseId,name,status,conclusion,url,headBranch,headSha"],
+  },
+  "workflow list": {
+    flags: { "--json": "value", "--jq": "value", "--all": "boolean" },
+    json: ["id,name,state,path"],
+  },
+  "release list": {
+    flags: {
+      "--limit": "value",
+      "--json": "value",
+      "--jq": "value",
+      "--exclude-drafts": "boolean",
+      "--exclude-pre-releases": "boolean",
+      "--order": "value",
+    },
+    json: ["tagName,name,isDraft,isLatest,publishedAt"],
+  },
+  "repo view": {
+    flags: { "--json": "value", "--branch": "value" },
+    json: [
+      "name,nameWithOwner,description,url,visibility,defaultBranchRef",
+      // Emitted by the CWD-repo visibility probe for repo-local searches (client.ts); not dead.
+      "isPrivate,nameWithOwner",
+    ],
+  },
+  "pr view": {
+    flags: { "--repo": "value", "--json": "value" },
+    json: [
+      "number,title,body,state,url,headRefName,baseRefName,updatedAt,isDraft",
+      "number,title,body,comments,state,url,headRefName,baseRefName,updatedAt,isDraft",
+    ],
+  },
+  "issue view": {
+    flags: { "--repo": "value", "--json": "value" },
+    json: [
+      "number,title,body,state,url,updatedAt",
+      "number,title,body,comments,state,url,updatedAt",
+    ],
+  },
+  "pr diff": { flags: { "--repo": "value", "--name-only": "boolean" } },
+  "pr checks": { flags: { "--repo": "value", "--json": "value" }, json: ["name,state,workflow"] },
+  "pr status": {
+    flags: { "--repo": "value", "--json": "value" },
+    json: ["createdAt,headRefName,isDraft,number,state,statusCheckRollup,title,url"],
+  },
+  "run view": {
+    flags: {
+      "--repo": "value",
+      "--json": "value",
+      "--log": "boolean",
+      "--exit-status": "boolean",
+      "--attempt": "value",
+    },
+    json: ["databaseId,name,status,conclusion,url,headBranch,headSha"],
+  },
+};
 const mutationFlags = new Set([
   "--add",
   "--remove",
@@ -20,22 +150,30 @@ const mutationFlags = new Set([
   "--input",
   "--field",
   "--raw-field",
+  "--header",
   "--silent",
   "--confirm",
   "--approve",
   "--request-review",
-  "--assign",
-  "--label",
-  "--milestone",
-  "--project",
-  "--draft",
   "--publish",
   "--merge",
   "--auto",
   "--admin",
+  "--template",
+  "--paginate",
+  "--watch",
+  "--hostname",
+  "-w",
+  "-R",
   "-f",
   "-F",
-  "-w",
+]);
+const jqExpressions = new Set([
+  ".private",
+  "{path:.path,url:.html_url,content:.content}",
+  "{id,name,state,path,url,html_url}",
+  "{tagName:.tag_name,name,isDraft:.draft,url:.html_url,publishedAt:.published_at}",
+  "{number,title,body,html_url,created_at,updated_at,category:.category.name,user:.user.login}",
 ]);
 
 export function validateGhArgs(args: string[]): string | undefined {
@@ -50,40 +188,126 @@ export function validateGhArgs(args: string[]): string | undefined {
   if (!Object.hasOwn(allowed, group!) || (group !== "api" && !allowed[group!]?.includes(command!)))
     return "gh command is not allowed";
   if (group === "api" && command!.startsWith("-")) return "gh api endpoint is required";
-  let method = "GET";
   if (args.some((a) => /[;&|`$<>]/.test(a))) return "Mutation or shell syntax is not allowed";
+  let method = "GET";
+  const profile =
+    group === "api" ? { flags: { "--jq": "value" as const } } : commands[`${group} ${command}`];
+  if (!profile && group !== "api") return "gh command profile is not allowed";
   for (let i = 2; i < args.length; i++) {
     const arg = args[i]!;
     const flag = arg.split("=", 1)[0]!.toLowerCase();
-    if (
-      mutationFlags.has(flag) ||
-      /^-[fFw]/.test(arg) ||
-      [...mutationFlags].some((m) => m.startsWith("--") && flag.startsWith(`${m}-`))
-    )
-      return "Mutation flags are not allowed";
+    if (mutationFlags.has(flag) || /^-[fFwR]/.test(arg) || flag.startsWith("--hostname"))
+      return "Mutation or unsafe flags are not allowed";
     if (group === "api" && (arg === "--method" || arg.startsWith("--method="))) {
       method = arg === "--method" ? (args[++i] ?? "") : arg.slice("--method=".length);
-    } else if (group === "api" && arg === "-X") {
-      method = args[++i] ?? "";
-    } else if (group === "api" && arg.startsWith("-X")) {
-      method = arg.startsWith("-X=") ? arg.slice(3) : arg.slice(2);
-    } else if (
-      arg === "-f" ||
-      arg.startsWith("-f=") ||
-      arg === "--input" ||
-      arg.startsWith("--input=")
-    ) {
+      continue;
+    }
+    if (group === "api" && (arg === "-X" || arg.startsWith("-X"))) {
+      method =
+        arg === "-X" ? (args[++i] ?? "") : arg.startsWith("-X=") ? arg.slice(3) : arg.slice(2);
+      continue;
+    }
+    if (
+      group === "api" &&
+      (arg === "--input" || arg.startsWith("--input=") || arg === "-f" || arg.startsWith("-f="))
+    )
       return "Only read-only GET API calls are allowed";
+    if (arg.startsWith("-")) {
+      const spec = profile?.flags[flag];
+      if (!spec) return `Flag ${flag} is not allowed for this command`;
+      if (spec === "boolean" && arg.includes("=")) return `Unexpected value for ${flag}`;
+      const value = arg.includes("=")
+        ? arg.slice(arg.indexOf("=") + 1)
+        : spec === "value"
+          ? args[++i]
+          : undefined;
+      if (spec === "value" && (!value || value.startsWith("-"))) return `Missing value for ${flag}`;
+      if (flag === "--repo" && !/^[A-Za-z0-9-]+\/[A-Za-z0-9_.-]+$/.test(value!))
+        return "Repository argument is invalid";
+      const enumValues: Record<string, readonly string[]> = {
+        "--state": ["open", "closed"],
+        "--match":
+          group === "search" && command === "repos"
+            ? ["name", "description", "readme"]
+            : command === "code"
+              ? ["file", "path"]
+              : ["title", "body", "comments"],
+        "--order": ["asc", "desc"],
+        "--status": [
+          "queued",
+          "completed",
+          "in_progress",
+          "requested",
+          "waiting",
+          "pending",
+          "action_required",
+          "cancelled",
+          "failure",
+          "neutral",
+          "skipped",
+          "stale",
+          "startup_failure",
+          "success",
+          "timed_out",
+        ],
+        "--sort":
+          command === "repos"
+            ? ["forks", "help-wanted-issues", "stars", "updated"]
+            : ["comments", "created", "interactions", "reactions", "updated"],
+      };
+      if (enumValues[flag] && !enumValues[flag]!.includes(value!))
+        return `Invalid value for ${flag}`;
+      if (flag === "--attempt" && (!/^[1-9][0-9]{0,3}$/.test(value!) || Number(value) > 1000))
+        return "Run attempt is invalid";
+      if (
+        flag === "--branch" &&
+        (value!.length > 256 ||
+          !/^[A-Za-z0-9._/-]+$/.test(value!) ||
+          value!.startsWith("-") ||
+          value!.includes("..") ||
+          value!.endsWith("/") ||
+          value!.includes("//"))
+      )
+        return "Branch ref is invalid";
+      if (
+        ["--label", "--assignee", "--author"].includes(flag) &&
+        (!/^[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(value!) ||
+          value!.length > (flag === "--label" ? 50 : 39))
+      )
+        return `Invalid value for ${flag}`;
+      if (
+        flag === "--workflow" &&
+        (!/^[A-Za-z0-9._ /-]{1,100}$/.test(value!) ||
+          value!.startsWith("-") ||
+          value!.includes(".."))
+      )
+        return "Workflow is invalid";
+      if (flag === "--language" && !/^[A-Za-z0-9+#.-]{1,40}$/.test(value!))
+        return "Language is invalid";
+      if (flag === "--event" && !/^[a-z][a-z0-9_]{0,39}$/.test(value!)) return "Event is invalid";
+      if (
+        flag === "--milestone" &&
+        (value!.length > 100 || !/^[A-Za-z0-9][A-Za-z0-9_. -]*$/.test(value!))
+      )
+        return "Milestone is invalid";
+      if (flag === "--project" && !/^[A-Za-z0-9-]+\/[1-9][0-9]*$/.test(value!))
+        return "Project is invalid";
+      if (flag === "--limit" && !/^[1-5]$/.test(value!)) return "Result limit is invalid";
+      if (flag === "--json" && !profile?.json?.includes(value!))
+        return `JSON fields are not allowed for ${group} ${command}`;
+      if (flag === "--jq" && !/^\.\[:[1-5]\]$/.test(value!) && !jqExpressions.has(value!))
+        return "jq expression is not allowed";
+      continue;
     }
   }
-  if (group === "api") {
-    if (method.toUpperCase() !== "GET") return "Only read-only GET API calls are allowed";
-  } else if (
+  if (group === "api" && method.toUpperCase() !== "GET")
+    return "Only read-only GET API calls are allowed";
+  if (
+    group !== "api" &&
     args.some(
       (a) => a === "-X" || a.startsWith("-X") || a === "--method" || a.startsWith("--method="),
     )
-  ) {
+  )
     return "HTTP method flags are only allowed for gh api";
-  }
   return undefined;
 }

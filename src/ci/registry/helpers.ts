@@ -160,3 +160,25 @@ export function hasControlCharacters(value: string): boolean {
     return code < 0x20 || code === 0x7f;
   });
 }
+
+const TRUNCATION_MARKER = "\n[truncated]";
+
+export function truncateUtf8WithMarker(value: string | Buffer, cap: number): string {
+  const marker = Buffer.from(TRUNCATION_MARKER, "utf8");
+  if (!Number.isInteger(cap) || cap <= marker.byteLength)
+    throw new RangeError("Truncation byte cap must exceed the marker length");
+  const bytes = typeof value === "string" ? Buffer.from(value, "utf8") : value;
+  if (bytes.byteLength <= cap) return bytes.toString("utf8");
+
+  let prefixLength = cap - marker.byteLength;
+  let walkedBack = 0;
+  while (
+    prefixLength < bytes.byteLength &&
+    (bytes[prefixLength]! & 0xc0) === 0x80 &&
+    walkedBack < 3
+  ) {
+    prefixLength--;
+    walkedBack++;
+  }
+  return `${bytes.subarray(0, prefixLength).toString("utf8")}${TRUNCATION_MARKER}`;
+}

@@ -391,7 +391,19 @@ contain secrets, private source, or the full diff. Public code search requires
 GitHub authentication; cross-repository availability therefore depends on the
 configured token having access to the search results. GitHub API search limits
 apply, including the stricter code-search limit; rate-limit failures are
-advisory and do not fail a review.
+advisory and do not fail a review. `github_search` accepts typed state, label,
+assignee, author, and additional query text for issue/PR searches; language and
+match for repository/code searches; sort/order for repositories/issues/PRs; run
+workflow/branch/status/event filters; `all` for workflows; and draft/prerelease
+exclusions for releases. Labels are single validated tokens (spaces are not
+supported). `github_read` supports comments for PRs/issues, name-only diffs,
+branch-specific repository reads, and run logs/exit-status/attempt. These are
+per-tool fields, not action inputs: the client maps them to fixed `gh` flags and
+raw argv/output-shaping controls are not model inputs. Search limits remain at
+five, while repo-local run/workflow/release matching checks all query terms
+against the five most recent fetched items. Comments and logs show `[truncated]`
+only when their raw result fits the 4–7 KiB capture window; results over 7 KiB
+fail and the tool advises continuing without the result.
 
 ## Sandboxed code execution
 
