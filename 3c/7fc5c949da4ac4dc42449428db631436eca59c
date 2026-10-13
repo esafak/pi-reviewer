@@ -1,0 +1,16 @@
+src/ci/mcp-config.ts
+  h_330e75a16c7ef4 6-23,141,152,158,197
+tests/ci/mcp-config.test.ts
+  h_330e75a16c7ef4 7,16-27,31-33,97-98,109,125-126,137,141,143,151-152,163,177-178,189
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "3c7fc5c949da4ac4dc42449428db631436eca59c",
+  "prompts": {},
+  "humans": {
+    "h_330e75a16c7ef4": {
+      "author": "Test <test@example.com>"
+    }
+  }
+}
