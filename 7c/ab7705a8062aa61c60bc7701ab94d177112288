@@ -1,0 +1,18 @@
+AGENTS.md
+  h_330e75a16c7ef4 7-8
+src/ci/github-research/client.ts
+  h_330e75a16c7ef4 32-45,53,79,89,94-96,171-172,177-178,213-229,316,321,332,337,345,404-408,412-413,447
+src/ci/github-research/tool.ts
+  h_330e75a16c7ef4 5,9,154-156,216
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "7cab7705a8062aa61c60bc7701ab94d177112288",
+  "prompts": {},
+  "humans": {
+    "h_330e75a16c7ef4": {
+      "author": "Test <test@example.com>"
+    }
+  }
+}
