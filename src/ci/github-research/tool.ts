@@ -2,9 +2,11 @@ import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { Type, type Static } from "@earendil-works/pi-ai";
 import {
   createGitHubResearchClient,
+  enrichmentsByKind,
   type GitHubReadKind,
   type GitHubResearchClient,
   type GitHubSearchKind,
+  type ReadParams,
   type SearchOptions,
 } from "./client.js";
 import type { GitHubResearchConfig } from "./config.js";
@@ -149,7 +151,9 @@ const readSchema = Type.Object(
   { additionalProperties: false },
 );
 type SearchParams = Static<typeof searchSchema> & { kind: GitHubSearchKind };
-type ReadParams = Static<typeof readSchema> & { kind: GitHubReadKind };
+// ReadParams (client domain contract) is the single params type; the wire
+// contract is readSchema above and the two are kept in sync by the
+// exact-argv tests.
 
 function safeFailure(error: unknown): string {
   const value = error instanceof Error ? error.message : "GitHub research failed";
@@ -205,18 +209,11 @@ export function createGitHubResearchTools(
           throw new Error("Path and ref are only valid for file reads");
         if (!["file", "repository", "status"].includes(params.kind) && params.number === undefined)
           throw new Error("An item number is required for this read");
-        const allowed: Record<string, string[]> = {
-          pull_request: ["comments"],
-          issue: ["comments"],
-          diff: ["name_only"],
-          repository: ["branch"],
-          run: ["log", "exit_status", "attempt"],
-        };
         if (
           Object.keys(params).some(
             (k) =>
               ["comments", "name_only", "branch", "log", "exit_status", "attempt"].includes(k) &&
-              !allowed[params.kind]?.includes(k),
+              !enrichmentsByKind[params.kind].includes(k),
           )
         )
           throw new Error("Read option is invalid for this kind");

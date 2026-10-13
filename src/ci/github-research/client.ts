@@ -29,6 +29,20 @@ export type GitHubReadKind =
   | "diff"
   | "checks"
   | "status";
+export interface ReadParams {
+  kind: GitHubReadKind;
+  owner: string;
+  repo: string;
+  path?: string;
+  ref?: string;
+  number?: number;
+  comments?: boolean;
+  name_only?: boolean;
+  branch?: string;
+  log?: boolean;
+  exit_status?: boolean;
+  attempt?: number;
+}
 export interface GitHubResearchClient {
   search(
     kind: GitHubSearchKind,
@@ -36,20 +50,7 @@ export interface GitHubResearchClient {
     limit: number,
     options?: SearchOptions,
   ): Promise<Record<string, unknown>>;
-  read(params: {
-    kind: GitHubReadKind;
-    owner: string;
-    repo: string;
-    path?: string;
-    ref?: string;
-    number?: number;
-    comments?: boolean;
-    name_only?: boolean;
-    branch?: string;
-    log?: boolean;
-    exit_status?: boolean;
-    attempt?: number;
-  }): Promise<Record<string, unknown>>;
+  read(params: ReadParams): Promise<Record<string, unknown>>;
 }
 export interface SearchOptions {
   state?: "open" | "closed" | "merged" | "all";
@@ -75,7 +76,7 @@ export const MAX_GITHUB_RESULT_BYTES = MAX_GH_RESULT_BYTES,
   MAX_GITHUB_REQUESTS = MAX_GH_REQUESTS,
   GITHUB_REQUEST_TIMEOUT_MS = GH_TIMEOUT_MS,
   GITHUB_WALL_TIME_MS = GH_WALL_MS;
-const listFields: Record<string, string> = {
+const listFields: Record<GitHubSearchKind, string> = {
   // Search JSON uses fullName/defaultBranch; repo view uses nameWithOwner/defaultBranchRef below.
   repositories: "name,fullName,description,url,visibility,defaultBranch",
   code: "path,repository,url",
@@ -85,11 +86,14 @@ const listFields: Record<string, string> = {
   workflows: "id,name,state,path",
   releases: "tagName,name,isDraft,isLatest,publishedAt",
 };
-const searchSorts: Record<string, readonly string[]> = {
+const searchSorts: Record<GitHubSearchKind, readonly string[]> = {
   repositories: ["forks", "help-wanted-issues", "stars", "updated"],
   code: [],
   pull_requests: ["comments", "created", "interactions", "reactions", "updated"],
   issues: ["comments", "created", "interactions", "reactions", "updated"],
+  runs: [],
+  workflows: [],
+  releases: [],
 };
 const searchMatches: Partial<Record<GitHubSearchKind, readonly string[]>> = {
   repositories: ["name", "description", "readme"],
@@ -164,14 +168,14 @@ function validateSearchOptions(kind: GitHubSearchKind, o: SearchOptions): void {
         /[;&|`$<>]/.test(o.search))
     )
       fail();
-    if (o.match && !searchMatches[kind]!.includes(o.match)) fail();
-    if (o.sort && !searchSorts[kind]!.includes(o.sort)) fail();
+    if (o.match && !searchMatches[kind]?.includes(o.match)) fail();
+    if (o.sort && !searchSorts[kind].includes(o.sort)) fail();
     if (o.order && !["asc", "desc"].includes(o.order)) fail();
   } else if (kind === "repositories" || kind === "code") {
     if (!only("language", "match", "sort", "order")) fail();
     if (o.language && !/^[A-Za-z0-9+#.-]{1,40}$/.test(o.language)) fail();
-    if (o.match && !searchMatches[kind]!.includes(o.match)) fail();
-    if (o.sort && !searchSorts[kind]!.includes(o.sort)) fail();
+    if (o.match && !searchMatches[kind]?.includes(o.match)) fail();
+    if (o.sort && !searchSorts[kind].includes(o.sort)) fail();
     if (o.order && (!["asc", "desc"].includes(o.order) || kind === "code")) fail();
   } else if (kind === "runs") {
     if (!only("workflow", "branch", "status", "event")) fail();
@@ -206,7 +210,23 @@ function validateSearchOptions(kind: GitHubSearchKind, o: SearchOptions): void {
     if (o.order && !["asc", "desc"].includes(o.order)) fail();
   } else if (Object.keys(o).length) fail();
 }
-const searchCmd: Record<string, string> = {
+// Single source of truth for which read enrichments each kind accepts;
+// shared with tool.ts so the contract is defined once. Kinds without
+// enrichments map to [] so every GitHubReadKind stays compiler-checked.
+export const enrichmentsByKind: Record<GitHubReadKind, readonly string[]> = {
+  file: [],
+  pull_request: ["comments"],
+  issue: ["comments"],
+  discussion: [],
+  run: ["log", "exit_status", "attempt"],
+  workflow: [],
+  release: [],
+  repository: ["branch"],
+  diff: ["name_only"],
+  checks: [],
+  status: [],
+};
+const searchCmd: Record<GitHubSearchKind, string> = {
   repositories: "repos",
   code: "code",
   pull_requests: "prs",
@@ -293,12 +313,12 @@ export function createGitHubResearchClient(
       if (searchCmd[kind])
         args = [
           "search",
-          searchCmd[kind]!,
+          searchCmd[kind],
           query,
           "--limit",
           String(n),
           "--json",
-          listFields[kind]!,
+          listFields[kind],
           "--jq",
           `.[:${n}]`,
         ];
@@ -309,12 +329,12 @@ export function createGitHubResearchClient(
           "--limit",
           String(n),
           "--json",
-          listFields[kind]!,
+          listFields[kind],
           "--jq",
           `.[:${n}]`,
         ];
       else if (kind === "workflows")
-        args = ["workflow", "list", "--json", listFields[kind]!, "--jq", `.[:${n}]`];
+        args = ["workflow", "list", "--json", listFields[kind], "--jq", `.[:${n}]`];
       else
         args = [
           "release",
@@ -322,7 +342,7 @@ export function createGitHubResearchClient(
           "--limit",
           String(n),
           "--json",
-          listFields[kind]!,
+          listFields[kind],
           "--jq",
           `.[:${n}]`,
         ];
@@ -381,12 +401,16 @@ export function createGitHubResearchClient(
         const visible = [];
         for (const item of items) {
           if (!item || typeof item !== "object") continue;
-          const row = item as Record<string, any>;
+          const row = item as Record<string, unknown>;
+          const rowRepo =
+            row.repository && typeof row.repository === "object"
+              ? (row.repository as Record<string, unknown>)
+              : undefined;
           const name =
             typeof row.fullName === "string"
               ? row.fullName
-              : typeof row.repository?.nameWithOwner === "string"
-                ? row.repository.nameWithOwner
+              : typeof rowRepo?.nameWithOwner === "string"
+                ? rowRepo.nameWithOwner
                 : undefined;
           if (!name) {
             if (
@@ -420,14 +444,7 @@ export function createGitHubResearchClient(
         "exit_status",
         "attempt",
       ] as const;
-      const byKind: Record<string, readonly string[]> = {
-        pull_request: ["comments"],
-        issue: ["comments"],
-        diff: ["name_only"],
-        repository: ["branch"],
-        run: ["log", "exit_status", "attempt"],
-      };
-      if (enrichments.some((k) => p[k] !== undefined && !byKind[p.kind]?.includes(k)))
+      if (enrichments.some((k) => p[k] !== undefined && !enrichmentsByKind[p.kind].includes(k)))
         throw new Error("GitHub read option is invalid for this kind");
       if (p.branch !== undefined && !validRef(p.branch))
         throw new Error("GitHub branch ref is invalid");
