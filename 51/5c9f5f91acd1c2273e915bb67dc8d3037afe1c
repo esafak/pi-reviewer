@@ -1,0 +1,24 @@
+src/ci/github-research/client.ts
+  h_ea91e2db23540f 1,561,588-589,591
+src/ci/github-research/gh-allowlist.ts
+  h_ea91e2db23540f 259
+src/ci/github-research/gh-runner.ts
+  h_ea91e2db23540f 4,51,68
+src/ci/registry/helpers.ts
+  h_ea91e2db23540f 163-184
+tests/ci/github-research.test.ts
+  h_ea91e2db23540f 367-402
+tests/ci/registry.test.ts
+  h_ea91e2db23540f 9,392-404
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "515c9f5f91acd1c2273e915bb67dc8d3037afe1c",
+  "prompts": {},
+  "humans": {
+    "h_ea91e2db23540f": {
+      "author": "Emre Şafak <3928300+esafak@users.noreply.github.com>"
+    }
+  }
+}
