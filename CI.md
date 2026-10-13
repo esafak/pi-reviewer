@@ -179,9 +179,18 @@ required variables in the server's explicit `env` mapping. The action supports
 Claude/agent plugin bundles, or `settings.agentPluginPaths`. Only configure
 servers you trust: their tool output is available to the reviewer and their
 requests may receive diff or repository context. MCP output is treated as
-untrusted reference data, not instructions. When `debug: true`, MCP calls log
-tool names and status only; their arguments, results, and credentials are not
-logged. If the reviewer actually calls a configured MCP tool and that call
+untrusted reference data, not instructions. Per-call MCP logging exists only
+when `debug: true`: split `server` and bare `tool` names with status, the
+closed `errorClass` (`tool` vs `call_failed` vs `input_required`), and — for
+results whose adapter details carry one (`call_failed`, `input_required`) — a
+bounded (≤500 chars) sanitized exception message from `details.message`.
+Tool output (`content`) is still never logged. Without debug, per-call
+details are not logged; the always-on failure event carries `servers`, bare
+`tools`, and `errorClasses`, so operators can triage without debug: `tool`
+means the server rejected the call (check the server tool contract),
+`call_failed` means the call threw (check server health and config),
+`input_required` means a UI-gated tool cannot run headless. If the
+reviewer actually calls a configured MCP tool and that call
 fails, pi-reviewer does not post a potentially incomplete review. Servers the
 reviewer never calls are not connected.
 

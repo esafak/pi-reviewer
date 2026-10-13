@@ -50,6 +50,7 @@ import { createGitHubResearchTools } from "./github-research/tool.js";
 import { probeGhCli } from "./github-research/gh-runner.js";
 import { KNOWN_CI_TOOL_NAMES, MCP_TOOL_NAME } from "./tool-names.js";
 import type { CiMcpConfig } from "./mcp-config.js";
+import { formatServerNamespace, getServerPrefix } from "pi-mcp-adapter/types";
 import { log, logAssistantFallback } from "./log.js";
 import type { Logger } from "../logging/index.js";
 
@@ -134,7 +135,7 @@ function isThinkingContentPart(value: unknown): value is ThinkingContentPart {
   return isRecord(value) && value.type === "thinking" && typeof value.thinking === "string";
 }
 
-function sanitizeMcpDebugName(value: string): string {
+function sanitizeMcpDebugText(value: string, maxLength: number): string {
   const sanitized = [...value]
     .map((char) => {
       const code = char.charCodeAt(0);
@@ -143,26 +144,128 @@ function sanitizeMcpDebugName(value: string): string {
     .join("")
     .replace(/\s+/g, " ")
     .trim()
-    .slice(0, 160);
+    .slice(0, maxLength);
   return sanitized || "unknown";
 }
 
-function mcpDebugToolName(
+function sanitizeMcpDebugName(value: string): string {
+  return sanitizeMcpDebugText(value, 160);
+}
+
+export type McpErrorClass = "tool" | "call_failed" | "input_required" | "unknown";
+export interface McpErrorSignal {
+  errorClass: McpErrorClass;
+  detail?: string;
+}
+export interface McpToolIdentity {
+  server?: string;
+  tool: string;
+}
+export interface McpFailureEntry {
+  identity: McpToolIdentity;
+  signal: McpErrorSignal;
+}
+
+// A failed MCP tool call is returned (not thrown) with a closed adapter code
+// in result.details.error; other adapter codes never set isError and never
+// fail closed, so classification reads that code only, never message text.
+const MAX_MCP_ERROR_DETAIL_LENGTH = 500;
+
+export function extractMcpErrorSignal(result: unknown): McpErrorSignal | undefined {
+  if (!isRecord(result) || !isRecord(result.details)) return undefined;
+  const error = result.details.error;
+  let errorClass: McpErrorClass;
+  if (error === "tool_error") errorClass = "tool";
+  else if (error === "call_failed") errorClass = "call_failed";
+  else if (error === "input_required_needs_ui") errorClass = "input_required";
+  else errorClass = "unknown";
+  const message = result.details.message;
+  if (typeof message !== "string" || !message.trim()) return { errorClass };
+  // Server error text for tool_error lives in result.content (tool output,
+  // never logged); only details.message (call-level exceptions and
+  // UI-gated input requests) is a safe detail source.
+  return { errorClass, detail: sanitizeMcpDebugText(message, MAX_MCP_ERROR_DETAIL_LENGTH) };
+}
+
+function matchKnownServerPrefix(
+  toolName: string,
+  knownServers: ReadonlySet<string>,
+): { server: string; bare: string } | undefined {
+  // Longest sanitized prefix wins so `docs-extra` beats `docs` on overlap.
+  let best: { server: string; bare: string; length: number } | undefined;
+  for (const server of knownServers) {
+    const candidates = new Set<string>();
+    try {
+      candidates.add(formatServerNamespace(server));
+    } catch {
+      // Fall through to the plain-name fallback below.
+    }
+    // Direct-tool prefixes vary with toolPrefix mode; try each encoding
+    // rather than assuming the configured mode.
+    for (const mode of ["server", "mcp", "short"] as const) {
+      try {
+        const prefix = getServerPrefix(server, mode);
+        if (prefix) candidates.add(prefix);
+      } catch {
+        continue;
+      }
+    }
+    candidates.add(server);
+    candidates.add(server.replace(/-/g, "_"));
+    for (const prefix of candidates) {
+      if (!prefix) continue;
+      if (toolName === prefix || toolName.startsWith(`${prefix}_`)) {
+        const bare = toolName === prefix ? toolName : toolName.slice(prefix.length + 1);
+        if (!bare) continue;
+        if (!best || prefix.length > best.length) best = { server, bare, length: prefix.length };
+      }
+    }
+  }
+  return best ? { server: best.server, bare: best.bare } : undefined;
+}
+
+export function extractMcpToolIdentity(
   toolName: string,
   args: unknown,
   registeredMcpTools: Set<string>,
-): string | undefined {
+  knownServers: ReadonlySet<string>,
+): McpToolIdentity | undefined {
   if (toolName !== MCP_TOOL_NAME && !registeredMcpTools.has(toolName)) return undefined;
-  if (toolName !== MCP_TOOL_NAME) return sanitizeMcpDebugName(toolName);
-  if (!isRecord(args)) return MCP_TOOL_NAME;
-  if (typeof args.tool === "string") {
-    const server = typeof args.server === "string" ? `${args.server}/` : "";
-    return sanitizeMcpDebugName(`${server}${args.tool}`);
+  if (toolName === MCP_TOOL_NAME) {
+    if (!isRecord(args)) return { tool: MCP_TOOL_NAME };
+    if (typeof args.tool === "string") {
+      // Bare tool name stays in `tool`; the owning server (when present)
+      // goes in `server` so structured consumers never split strings.
+      const server =
+        typeof args.server === "string" ? sanitizeMcpDebugName(args.server) : undefined;
+      return { server, tool: sanitizeMcpDebugName(args.tool) };
+    }
+    if (typeof args.search === "string") return { tool: "search" };
+    if (typeof args.connect === "string")
+      return { tool: sanitizeMcpDebugName(`connect:${args.connect}`) };
+    if (typeof args.action === "string") return { tool: sanitizeMcpDebugName(args.action) };
+    return { tool: MCP_TOOL_NAME };
   }
-  if (typeof args.search === "string") return "search";
-  if (typeof args.connect === "string") return sanitizeMcpDebugName(`connect:${args.connect}`);
-  if (typeof args.action === "string") return sanitizeMcpDebugName(args.action);
-  return MCP_TOOL_NAME;
+  if (toolName.startsWith("mcp__")) {
+    const matched = matchKnownServerPrefix(toolName, knownServers);
+    if (matched) {
+      // Namespace proxies (`mcp__<server>`, default-on) carry the inner MCP
+      // tool name in args; direct prefixed tools encode it in the suffix.
+      const inner =
+        isRecord(args) && typeof args.tool === "string"
+          ? sanitizeMcpDebugName(args.tool)
+          : sanitizeMcpDebugName(matched.bare);
+      return { server: sanitizeMcpDebugName(matched.server), tool: inner };
+    }
+  } else {
+    const matched = matchKnownServerPrefix(toolName, knownServers);
+    if (matched)
+      return {
+        server: sanitizeMcpDebugName(matched.server),
+        tool: sanitizeMcpDebugName(matched.bare),
+      };
+  }
+  return { server: undefined, tool: sanitizeMcpDebugName(toolName) };
 }
 
 function mcpOutputArtifactDirectory(result: unknown): string | undefined {
@@ -520,10 +623,11 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
   let agent: Agent;
   let closeMcpSession: (() => Promise<void>) | undefined;
   const registeredMcpTools = new Set<string>();
-  const mcpToolCalls = new Map<string, string>();
+  const mcpToolCalls = new Map<string, McpToolIdentity>();
   const mcpOutputArtifacts = new Set<string>();
   let restoreMcpEnvironment = () => {};
-  const failedMcpTools = new Set<string>();
+  const failedMcpCalls = new Map<string, McpFailureEntry>();
+  const knownMcpServers = new Set<string>(mcpConfig ? Object.keys(mcpConfig.mcpServers) : []);
   if (mcpConfig) {
     const agentDir = await mkdtemp(path.join(tmpdir(), "pi-reviewer-agent-"));
     let session: Awaited<ReturnType<typeof createAgentSession>>["session"] | undefined;
@@ -766,27 +870,59 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
             typeof toolEvent.toolName === "string" ? toolEvent.toolName : "unknown";
           const rawCallId =
             typeof toolEvent.toolCallId === "string" ? toolEvent.toolCallId : undefined;
-          const mcpName =
+          // Stable identity per tool call: the end event reuses the start
+          // event's identity so arg-less end payloads cannot drift.
+          const mcpIdentity =
             eventType === "tool_execution_end" && rawCallId
               ? (mcpToolCalls.get(rawCallId) ??
-                mcpDebugToolName(rawToolName, toolEvent.args, registeredMcpTools))
-              : mcpDebugToolName(rawToolName, toolEvent.args, registeredMcpTools);
+                extractMcpToolIdentity(
+                  rawToolName,
+                  toolEvent.args,
+                  registeredMcpTools,
+                  knownMcpServers,
+                ))
+              : extractMcpToolIdentity(
+                  rawToolName,
+                  toolEvent.args,
+                  registeredMcpTools,
+                  knownMcpServers,
+                );
+          const mcpKey = mcpIdentity
+            ? `${mcpIdentity.server ?? ""}\0${mcpIdentity.tool}`
+            : undefined;
           if (traceEnabled) {
-            const toolName = mcpName ?? rawToolName;
+            // Error signal is failure-only: successful adapter results also
+            // carry details, which must not surface as errorClass.
+            const endSignal =
+              eventType === "tool_execution_end" && mcpIdentity && toolEvent.isError === true
+                ? extractMcpErrorSignal(toolEvent.result)
+                : undefined;
             addTraceEvent(eventType === "tool_execution_start" ? "tool_start" : "tool_end", {
-              tool: sanitizeMcpDebugName(toolName).slice(0, 200),
+              ...(mcpIdentity
+                ? {
+                    ...(mcpIdentity.server !== undefined ? { server: mcpIdentity.server } : {}),
+                    tool: mcpIdentity.tool.slice(0, 200),
+                  }
+                : { tool: sanitizeMcpDebugName(rawToolName).slice(0, 200) }),
               callId: rawCallId ? sanitizeMcpDebugName(rawCallId).slice(0, 128) : undefined,
               ...(eventType === "tool_execution_end"
                 ? { status: toolEvent.isError === true ? "error" : "success" }
                 : {}),
+              ...(endSignal
+                ? {
+                    errorClass: endSignal.errorClass,
+                    ...(endSignal.detail !== undefined ? { detail: endSignal.detail } : {}),
+                  }
+                : {}),
             });
           }
           if (eventType === "tool_execution_start") {
-            if (mcpName) {
-              if (rawCallId) mcpToolCalls.set(rawCallId, mcpName);
+            if (mcpIdentity) {
+              if (rawCallId) mcpToolCalls.set(rawCallId, mcpIdentity);
               if (options.debug)
                 logger.debug("review.mcp.tool_call", "MCP tool call", {
-                  tool: mcpName,
+                  ...(mcpIdentity.server !== undefined ? { server: mcpIdentity.server } : {}),
+                  tool: mcpIdentity.tool,
                   callId: rawCallId,
                 });
             } else if (options.debug) {
@@ -798,20 +934,40 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
               });
             }
           } else {
-            if (mcpName && toolEvent.isError === true) failedMcpTools.add(mcpName);
-            else if (mcpName) failedMcpTools.delete(mcpName);
-            const outputArtifact = mcpName
+            if (mcpIdentity && mcpKey && toolEvent.isError === true) {
+              const signal = extractMcpErrorSignal(toolEvent.result) ?? {
+                errorClass: "unknown" as const,
+              };
+              failedMcpCalls.set(mcpKey, { identity: mcpIdentity, signal });
+            } else if (mcpIdentity && mcpKey) failedMcpCalls.delete(mcpKey);
+            const outputArtifact = mcpIdentity
               ? mcpOutputArtifactDirectory(toolEvent.result)
               : undefined;
             if (outputArtifact) mcpOutputArtifacts.add(outputArtifact);
             if (options.debug)
               logger.debug(
-                mcpName ? "review.mcp.tool_result" : "review.tool.result",
-                mcpName ? "MCP tool result" : "Tool result",
+                mcpIdentity ? "review.mcp.tool_result" : "review.tool.result",
+                mcpIdentity ? "MCP tool result" : "Tool result",
                 {
-                  tool: mcpName ?? rawToolName,
+                  ...(mcpIdentity
+                    ? {
+                        ...(mcpIdentity.server !== undefined ? { server: mcpIdentity.server } : {}),
+                        tool: mcpIdentity.tool,
+                      }
+                    : { tool: rawToolName }),
                   callId: rawCallId,
                   status: toolEvent.isError === true ? "error" : "success",
+                  ...(mcpIdentity && toolEvent.isError === true
+                    ? (() => {
+                        const signal = extractMcpErrorSignal(toolEvent.result);
+                        return signal
+                          ? {
+                              errorClass: signal.errorClass,
+                              ...(signal.detail !== undefined ? { detail: signal.detail } : {}),
+                            }
+                          : {};
+                      })()
+                    : {}),
                 },
               );
             if (rawCallId) mcpToolCalls.delete(rawCallId);
@@ -913,14 +1069,22 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
     } finally {
       await writeThinkingTrace();
     }
-    if (failedMcpTools.size > 0) {
-      const failedTools = [...failedMcpTools].slice(0, 5).map(sanitizeMcpDebugName);
-      const additional = failedMcpTools.size > failedTools.length ? " and other MCP tools" : "";
+    if (failedMcpCalls.size > 0) {
+      const entries = [...failedMcpCalls.values()].slice(0, 5);
+      // Parallel arrays: servers repeats per entry ("unknown" when the
+      // identity carries none) so servers[i] pairs with tools[i].
+      const servers = entries.map((entry) => entry.identity.server ?? "unknown");
+      const tools = entries.map((entry) => entry.identity.tool);
+      // Classes cover only the capped entries so every class has a visible tool.
+      const errorClasses = [...new Set(entries.map((entry) => entry.signal.errorClass))];
+      const additional = failedMcpCalls.size > entries.length ? " and other MCP tools" : "";
       logger.error(
         "review.mcp.failed",
         "MCP tool call failed; check server availability and auth. Review not posted.",
         {
-          tools: failedTools,
+          servers,
+          tools,
+          errorClasses,
           additionalTools: additional,
         },
       );
