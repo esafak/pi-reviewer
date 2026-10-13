@@ -1,0 +1,26 @@
+src/ci/code-exec/tool.ts
+  h_ea91e2db23540f 13,77-78
+src/ci/github-research/tool.ts
+  h_ea91e2db23540f 13,173-174,198-199
+src/ci/registry/tool.ts
+  h_ea91e2db23540f 7,106-107
+src/ci/review.ts
+  h_ea91e2db23540f 49,138-140,148,367-385,398
+src/ci/search/tool.ts
+  h_ea91e2db23540f 6,52-53,76-77
+src/ci/tool-names.ts
+  h_ea91e2db23540f 1-22
+tests/ci/review.test.ts
+  h_ea91e2db23540f 912-979
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "ab071a9f18677862b2d0735e9559ab03a4a93e15",
+  "prompts": {},
+  "humans": {
+    "h_ea91e2db23540f": {
+      "author": "Emre Şafak <3928300+esafak@users.noreply.github.com>"
+    }
+  }
+}
