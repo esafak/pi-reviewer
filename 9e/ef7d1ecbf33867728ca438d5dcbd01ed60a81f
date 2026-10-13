@@ -1,0 +1,24 @@
+CI.md
+  h_330e75a16c7ef4 394-406
+src/ci/github-research/client.ts
+  h_330e75a16c7ef4 33-38,46-51,54-71,79,88-208,225-230,261,272,329-360,415-435,447,460-462,473-475,511-518,538-539,545-551,575-580
+src/ci/github-research/gh-allowlist.ts
+  h_330e75a16c7ef4 11-140,152,161-166,169-175,191-194,198-199,202-212,214-299,302-305,309
+src/ci/github-research/gh-runner.ts
+  h_330e75a16c7ef4 40-73
+src/ci/github-research/tool.ts
+  h_330e75a16c7ef4 8,40-130,142-147,172,177-178,197,208-222
+tests/ci/github-research.test.ts
+  h_330e75a16c7ef4 19-43,45-55,69-79,106-460
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "9eef7d1ecbf33867728ca438d5dcbd01ed60a81f",
+  "prompts": {},
+  "humans": {
+    "h_330e75a16c7ef4": {
+      "author": "Test <test@example.com>"
+    }
+  }
+}
