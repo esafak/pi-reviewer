@@ -205,8 +205,8 @@ importers:
         specifier: ^11.11.1
         version: 11.12.0
       pi-mcp-adapter:
-        specifier: 3.1.0
-        version: 3.1.0(@earendil-works/pi-ai@0.87.1(@modelcontextprotocol/sdk@1.30.0(zod@4.6.5))(ws@8.21.0)(zod@4.6.5))(@earendil-works/pi-tui@0.87.1)(@modelcontextprotocol/sdk@1.30.0(zod@4.6.5))(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(typebox@1.3.7)(zod@4.6.5)
+        specifier: 3.2.0
+        version: 3.2.0(@earendil-works/pi-ai@0.87.1(@modelcontextprotocol/sdk@1.30.0(zod@4.6.5))(ws@8.21.0)(zod@4.6.5))(@earendil-works/pi-tui@0.87.1)(@modelcontextprotocol/sdk@1.30.0(zod@4.6.5))(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(typebox@1.3.7)(zod@4.6.5)
       tsx:
         specifier: ^4.20.5
         version: 4.23.15
@@ -2611,8 +2611,8 @@ packages:
   pathe@2.0.3:
     resolution: {integrity: sha512-WUjGcAqP1gQacoQe+OBJsFA7Ld4DyXuUIjZ5cc75cLHvJ7dtNsTugphxIADwspS+AraAUePCKrSVtPLFj/F88w==}
 
-  pi-mcp-adapter@3.1.0:
-    resolution: {integrity: sha512-jW3ucLFvt1YtV7yHctXloQshaW+hWEQYylNGHR6chR7pOHJNC8dJiSoeKuz9bmRFIZfAY+vhM0DUTmIkXEX8dQ==}
+  pi-mcp-adapter@3.2.0:
+    resolution: {integrity: sha512-FzGepoyY7+fmQS3Y2PMnbu+mxbR7nrtXryfw5pKCGc9Nn8i7+zSuDjT9NOna3jatyqciIQbX2KBtTgzOE8FLDg==}
     engines: {node: '>=20'}
     hasBin: true
     peerDependencies:
@@ -5069,7 +5069,7 @@ snapshots:
 
   pathe@2.0.3: {}
 
-  pi-mcp-adapter@3.1.0(@earendil-works/pi-ai@0.87.1(@modelcontextprotocol/sdk@1.30.0(zod@4.6.5))(ws@8.21.0)(zod@4.6.5))(@earendil-works/pi-tui@0.87.1)(@modelcontextprotocol/sdk@1.30.0(zod@4.6.5))(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(typebox@1.3.7)(zod@4.6.5):
+  pi-mcp-adapter@3.2.0(@earendil-works/pi-ai@0.87.1(@modelcontextprotocol/sdk@1.30.0(zod@4.6.5))(ws@8.21.0)(zod@4.6.5))(@earendil-works/pi-tui@0.87.1)(@modelcontextprotocol/sdk@1.30.0(zod@4.6.5))(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(typebox@1.3.7)(zod@4.6.5):
     dependencies:
       '@modelcontextprotocol/client': 2.0.0
       '@modelcontextprotocol/core': 2.0.0
