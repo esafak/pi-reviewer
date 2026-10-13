@@ -48,12 +48,12 @@ export const MAX_GITHUB_RESULT_BYTES = MAX_GH_RESULT_BYTES,
   GITHUB_WALL_TIME_MS = GH_WALL_MS;
 const listFields: Record<string, string> = {
   repositories: "name,fullName,description,url,visibility,defaultBranch",
-  code: "name,path,url,repository",
+  code: "path,repository,url",
   pull_requests: "number,title,state,url,repository,updatedAt",
   issues: "number,title,state,url,repository,updatedAt",
   runs: "databaseId,name,status,conclusion,url,headBranch,headSha",
   workflows: "id,name,state,path",
-  releases: "tagName,name,isDraft,isLatest,url,publishedAt",
+  releases: "tagName,name,isDraft,isLatest,publishedAt",
 };
 const searchCmd: Record<string, string> = {
   repositories: "repos",
@@ -113,6 +113,25 @@ export function createGitHubResearchClient(
         throw new Error("GitHub search query is invalid");
       const n = Math.min(limit, 5);
       let args: string[];
+      const localKinds = kind === "runs" || kind === "workflows" || kind === "releases";
+      if (localKinds && scope === "public") {
+        // List commands infer their repository from cwd, so visibility must be resolved from that same checkout without -R.
+        const currentRepository = await bounded([
+          "repo",
+          "view",
+          "--json",
+          "isPrivate,nameWithOwner",
+        ]);
+        if (
+          !currentRepository ||
+          typeof currentRepository !== "object" ||
+          typeof (currentRepository as Record<string, unknown>).isPrivate !== "boolean" ||
+          typeof (currentRepository as Record<string, unknown>).nameWithOwner !== "string"
+        )
+          throw new Error("Current repository visibility could not be verified");
+        if ((currentRepository as { isPrivate: boolean }).isPrivate)
+          throw new Error("Private repositories are unavailable in public scope");
+      }
       if (searchCmd[kind])
         args = [
           "search",
@@ -151,7 +170,24 @@ export function createGitHubResearchClient(
         ];
       let items = await bounded(args);
       if (!Array.isArray(items)) throw new Error("GitHub search returned an invalid response");
-      if (scope === "public") {
+      if (localKinds) {
+        const terms = query.trim().toLowerCase().split(/\s+/u);
+        items = items.filter((item) => {
+          if (!item || typeof item !== "object") return false;
+          const row = item as Record<string, unknown>;
+          const fields =
+            kind === "runs"
+              ? [row.name]
+              : kind === "workflows"
+                ? [row.name, row.path]
+                : [row.name, row.tagName];
+          const text = fields
+            .filter((field): field is string => typeof field === "string")
+            .join(" ")
+            .toLowerCase();
+          return terms.every((term) => text.includes(term));
+        });
+      } else if (scope === "public") {
         const visible = [];
         for (const item of items) {
           if (!item || typeof item !== "object") continue;
@@ -198,7 +234,7 @@ export function createGitHubResearchClient(
           "view",
           repo,
           "--json",
-          "name,fullName,description,url,visibility,defaultBranch",
+          "name,nameWithOwner,description,url,visibility,defaultBranchRef",
         ]);
       else if (p.kind === "pull_request") {
         if (!num) throw new Error("An issue number is required for this read");
@@ -295,13 +331,11 @@ export function createGitHubResearchClient(
         ]);
       else if (p.kind === "release")
         result = await bounded([
-          "release",
-          "view",
-          String(num),
-          "--repo",
-          repo,
-          "--json",
-          "tagName,name,isDraft,isLatest,url,publishedAt",
+          "api",
+          `repos/${repo}/releases/${num}`,
+          "--jq",
+          // A single release payload has no reliable latest-release indicator, so omit isLatest.
+          "{tagName:.tag_name,name,isDraft:.draft,url:.html_url,publishedAt:.published_at}",
         ]);
       else if (p.kind === "discussion") {
         if (!num) throw new Error("A discussion number is required for this read");

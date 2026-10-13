@@ -73,6 +73,101 @@ describe("gh-backed GitHub research", () => {
     );
     expect(result.results).toEqual([{ fullName: "org/public" }]);
   });
+  it("checks the current checkout once for public repo-local searches", async () => {
+    const run = vi
+      .fn()
+      .mockResolvedValueOnce({
+        stdout: JSON.stringify({ isPrivate: false, nameWithOwner: "org/repo" }),
+      })
+      .mockResolvedValueOnce({ stdout: JSON.stringify([{ name: "Build nightly" }]) });
+    const result = await createGitHubResearchClient("t", "public", Date.now, run as never).search(
+      "runs",
+      "build",
+      5,
+    );
+    expect(result.results).toEqual([{ name: "Build nightly" }]);
+    expect(run).toHaveBeenCalledTimes(2);
+    expect(run.mock.calls[0]![1]).toEqual(["repo", "view", "--json", "isPrivate,nameWithOwner"]);
+    expect(run.mock.calls[1]![1]).not.toContain("--repo");
+  });
+  it("does not add a repo privacy request for token-accessible local searches", async () => {
+    const run = vi.fn().mockResolvedValue({ stdout: JSON.stringify([{ name: "Build nightly" }]) });
+    await createGitHubResearchClient("t", "token-accessible", Date.now, run as never).search(
+      "runs",
+      "build",
+      5,
+    );
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(run.mock.calls[0]![1]).toEqual(expect.arrayContaining(["run", "list", "--limit", "5"]));
+  });
+  it("uses only valid gh search code JSON fields", async () => {
+    const run = vi.fn().mockResolvedValue({ stdout: JSON.stringify([{ path: "src/a.ts" }]) });
+    await createGitHubResearchClient("t", "token-accessible", Date.now, run as never).search(
+      "code",
+      "needle",
+      5,
+    );
+    expect(run.mock.calls[0]![1]).toEqual([
+      "search",
+      "code",
+      "needle",
+      "--limit",
+      "5",
+      "--json",
+      "path,repository,url",
+      "--jq",
+      ".[:5]",
+    ]);
+  });
+  it("fails loudly when public-scope current repository visibility is unavailable", async () => {
+    const run = vi.fn().mockRejectedValue(new Error("gh repo view failed"));
+    await expect(
+      createGitHubResearchClient("t", "public", Date.now, run as never).search(
+        "workflows",
+        "deploy",
+        5,
+      ),
+    ).rejects.toThrow("gh repo view failed");
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+  it.each([
+    [
+      "runs",
+      [{ name: "Build docs nightly" }, { name: "Build weekly" }],
+      "BUILD nightly",
+      [{ name: "Build docs nightly" }],
+    ],
+    [
+      "workflows",
+      [
+        { name: "Deploy app", path: ".github/workflows/deploy.yml" },
+        { name: "Build app", path: ".github/workflows/build.yml" },
+      ],
+      "deploy workflow",
+      [{ name: "Deploy app", path: ".github/workflows/deploy.yml" }],
+    ],
+    [
+      "releases",
+      [
+        { name: "October release", tagName: "v2.1" },
+        { name: "October release", tagName: "v1.0" },
+      ],
+      "OCTOBER v2",
+      [{ name: "October release", tagName: "v2.1" }],
+    ],
+  ] as const)(
+    "matches all whitespace-tokenized query terms for %s",
+    async (kind, items, query, expected) => {
+      const run = vi.fn().mockResolvedValue({ stdout: JSON.stringify(items) });
+      const result = await createGitHubResearchClient(
+        "t",
+        "token-accessible",
+        Date.now,
+        run as never,
+      ).search(kind, query, 5);
+      expect(result.results).toEqual(expected);
+    },
+  );
   it("soft-fails missing CLI and preserves the research tool names", async () => {
     const tools = createGitHubResearchTools(
       { scope: "public", token: "t" },
@@ -102,36 +197,85 @@ describe("gh-backed GitHub research", () => {
     const cases = [
       [
         { kind: "run", owner: "o", repo: "r", number: 11 },
-        ["run", "view", "11", "--repo", "o/r", "--json", expect.any(String)],
+        [
+          "run",
+          "view",
+          "11",
+          "--repo",
+          "o/r",
+          "--json",
+          "databaseId,name,status,conclusion,url,headBranch,headSha",
+        ],
       ],
       [
         { kind: "workflow", owner: "o", repo: "r", number: 12 },
-        ["api", "repos/o/r/actions/workflows/12", "--jq", expect.any(String)],
+        ["api", "repos/o/r/actions/workflows/12", "--jq", "{id,name,state,path,url,html_url}"],
       ],
       [
         { kind: "release", owner: "o", repo: "r", number: 13 },
-        ["release", "view", "13", "--repo", "o/r", "--json", expect.any(String)],
+        [
+          "api",
+          "repos/o/r/releases/13",
+          "--jq",
+          "{tagName:.tag_name,name,isDraft:.draft,url:.html_url,publishedAt:.published_at}",
+        ],
       ],
       [{ kind: "diff", owner: "o", repo: "r", number: 14 }, ["pr", "diff", "14", "--repo", "o/r"]],
       [
         { kind: "checks", owner: "o", repo: "r", number: 15 },
-        ["pr", "checks", "15", "--repo", "o/r", "--json", expect.any(String)],
+        ["pr", "checks", "15", "--repo", "o/r", "--json", "name,state,workflow"],
       ],
       [
         { kind: "status", owner: "o", repo: "r" },
-        ["pr", "status", "--repo", "o/r", "--json", expect.any(String)],
+        [
+          "pr",
+          "status",
+          "--repo",
+          "o/r",
+          "--json",
+          "createdAt,headRefName,isDraft,number,state,statusCheckRollup,title,url",
+        ],
       ],
       [
         { kind: "discussion", owner: "o", repo: "r", number: 16 },
-        ["api", "repos/o/r/discussions/16", "--jq", expect.any(String)],
+        [
+          "api",
+          "repos/o/r/discussions/16",
+          "--jq",
+          "{number,title,body,html_url,created_at,updated_at,category:.category.name,user:.user.login}",
+        ],
+      ],
+      [
+        { kind: "repository", owner: "o", repo: "r" },
+        [
+          "repo",
+          "view",
+          "o/r",
+          "--json",
+          "name,nameWithOwner,description,url,visibility,defaultBranchRef",
+        ],
       ],
     ] as const;
     for (const [params, expected] of cases) {
-      const run = vi.fn().mockResolvedValue({ stdout: params.kind === "diff" ? "diff" : "{}" });
-      await createGitHubResearchClient("t", "token-accessible", Date.now, run as never).read(
-        params as never,
-      );
+      const value =
+        params.kind === "repository"
+          ? { name: "r", nameWithOwner: "o/r", defaultBranchRef: { name: "main" } }
+          : {};
+      const run = vi
+        .fn()
+        .mockResolvedValue({ stdout: params.kind === "diff" ? "diff" : JSON.stringify(value) });
+      const result = await createGitHubResearchClient(
+        "t",
+        "token-accessible",
+        Date.now,
+        run as never,
+      ).read(params as never);
       expect(run).toHaveBeenCalledWith("gh", expected, expect.any(Object));
+      if (params.kind === "repository")
+        expect(result.result).toMatchObject({
+          nameWithOwner: "o/r",
+          defaultBranchRef: { name: "main" },
+        });
     }
   });
 
@@ -163,5 +307,29 @@ describe("gh-backed GitHub research", () => {
       content: "export const answer = 42;\n",
       ref: "main",
     });
+  });
+  it("maps release fields and preserves a null publishedAt for drafts", async () => {
+    const run = vi.fn().mockResolvedValue({
+      stdout: JSON.stringify({
+        tagName: "v1.0",
+        name: "Draft release",
+        isDraft: true,
+        url: "https://github.com/o/r/releases/1",
+        publishedAt: null,
+      }),
+    });
+    const result = await createGitHubResearchClient(
+      "t",
+      "token-accessible",
+      Date.now,
+      run as never,
+    ).read({ kind: "release", owner: "o", repo: "r", number: 1 });
+    expect(run.mock.calls[0]![1]).toEqual([
+      "api",
+      "repos/o/r/releases/1",
+      "--jq",
+      "{tagName:.tag_name,name,isDraft:.draft,url:.html_url,publishedAt:.published_at}",
+    ]);
+    expect(result.result).toMatchObject({ isDraft: true, publishedAt: null });
   });
 });
