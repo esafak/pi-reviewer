@@ -1,0 +1,50 @@
+src/ci/batch.ts
+  h_ea91e2db23540f 298-314,431-499
+src/core/prompts.ts
+  h_ea91e2db23540f 2-3,25-26,37,51-57
+src/ci/init.ts
+  h_ea91e2db23540f 71
+tests/ci/review.test.ts
+  h_ea91e2db23540f 98,1437-1468,1646-1665
+src/core/prompt-builder.ts
+  h_ea91e2db23540f 31-34,124,197-199
+action.yml
+  h_ea91e2db23540f 163-167,486
+src/core/review-tool.ts
+  h_ea91e2db23540f 22-35
+tests/core/prompt-builder.test.ts
+  h_ea91e2db23540f 249-279
+tests/ci/action.test.ts
+  h_ea91e2db23540f 119-125
+tests/ci/summary-command.test.ts
+  h_ea91e2db23540f 1-99
+tests/core/review-tool.test.ts
+  h_ea91e2db23540f 84-103
+tests/ci/batch.test.ts
+  h_ea91e2db23540f 11,13,22-23,228-360
+src/ci/summary-command.ts
+  h_ea91e2db23540f 1-85
+tests/core/output.test.ts
+  h_ea91e2db23540f 11-13,16,20,576-661,1312-1418,2132-2314
+CI.md
+  h_ea91e2db23540f 73,297,305-324,336
+src/ci/action-entry.ts
+  h_ea91e2db23540f 5-7,14,16,22-23,142,156,261-271,357-403,427-428
+src/ci/review.ts
+  h_ea91e2db23540f 21-22,84-98,210-229,303,349-357,370,450-455,932-944,981-982
+README.md
+  h_ea91e2db23540f 74
+src/core/output.ts
+  h_ea91e2db23540f 6,66-69,136-139,265-274,283,371-381,959-960,966-967,1153-1154,1156-1166,1204,1219-1341,1374,1377-1378,1380-1390,1426,1430,1543,1563-1568,1589-1590,1689,1736
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "b7ec161ba1725ea75c24ea36ef4a0dac8f166d09",
+  "prompts": {},
+  "humans": {
+    "h_ea91e2db23540f": {
+      "author": "Emre Şafak <3928300+esafak@users.noreply.github.com>"
+    }
+  }
+}
