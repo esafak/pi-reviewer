@@ -1,6 +1,6 @@
 [tools]
 hk = "2.4.0"
-pnpm = "12.8.1"
+pnpm = "12.8.2"
 vp = "1.0.0"
 "npm:renovate" = "latest"
 
