@@ -1094,17 +1094,18 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
           forceSubmit = true;
           await runAgent(SUBMIT_NUDGE);
         } catch (error) {
+          // Only the pinned attempt's failure is anticipated: the pinned value
+          // is a documented type-lie whose support varies by provider, so it
+          // degrades to the nudge. The bare retry is the last attempt, carries
+          // nothing provider-specific, and swallowing its failure could only
+          // relabel it — so it propagates.
           logger.warn(
             "review.agent.forced_call_failed",
             "Pinned submit_review call failed; retrying with the nudge alone",
             { error: error instanceof Error ? error.message : String(error) },
           );
           forceSubmit = false;
-          await runAgent(SUBMIT_NUDGE).catch((retryError) => {
-            logger.warn("review.agent.retry_failed", "Re-prompt failed", {
-              error: retryError instanceof Error ? retryError.message : String(retryError),
-            });
-          });
+          await runAgent(SUBMIT_NUDGE);
         } finally {
           forceSubmit = false;
         }
