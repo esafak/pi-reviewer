@@ -1,5 +1,5 @@
 import { Agent, type AgentTool } from "@earendil-works/pi-agent-core";
-import { type Api, type Model } from "@earendil-works/pi-ai";
+import { type Api, type Model, type SimpleStreamOptions } from "@earendil-works/pi-ai";
 import { builtinModels, getBuiltinModel } from "@earendil-works/pi-ai/providers/all";
 import {
   createAgentSession,
@@ -75,6 +75,28 @@ function decisionToOutput(
     }
   }
 }
+
+/**
+ * Re-ask used when the model stops without calling `submit_review`. The nudge
+ * itself needs nothing provider-specific, which is what makes it the part that
+ * always applies.
+ */
+const SUBMIT_NUDGE =
+  'Submit your decision now by calling submit_review: action "review" with your findings, or "none" when there is nothing to publish.';
+
+/**
+ * Pinned tool choice for the retry — best-effort enrichment on top of the
+ * nudge, in the shape upstream types as valid for this adapter:
+ * `{ type: "function"; function: { name } }`. Other shapes are rejected by
+ * compatible endpoints rather than converted — an Anthropic-shaped
+ * `{ type: "tool", name }` returns "Invalid API parameter" on zai
+ * (earendil-works/pi#5154) — so support and shape still vary per provider and a
+ * rejection here must not fail the run.
+ */
+export const FORCED_SUBMIT_TOOL = {
+  type: "function",
+  function: { name: "submit_review" },
+} as unknown as NonNullable<SimpleStreamOptions["toolChoice"]>;
 
 export interface ReviewOptions {
   logger?: Logger;
@@ -822,6 +844,19 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
   try {
     let reviewDecision: ReviewDecision | undefined;
     let runMessages: unknown[] = [];
+    let forceSubmit = false;
+    // The retry pins tool_choice to submit_review. The declared tool set is left
+    // alone so each request keeps matching the transcript it carries. Compose
+    // with whatever stream function the setup installed (the MCP session's or the
+    // constructor's) rather than re-deriving it, so there stays exactly one
+    // source of truth for the base stream.
+    const baseStream = agent.streamFunction;
+    agent.streamFunction = (model, context, options) =>
+      baseStream(
+        model,
+        context,
+        forceSubmit ? { ...options, toolChoice: FORCED_SUBMIT_TOOL } : options,
+      );
     const thinkingTrace: Array<Record<string, unknown>> = [];
     let pendingThinking: { timestamp: string; text: string } | undefined;
     let thinkingDeltaCount = 0;
@@ -860,190 +895,220 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
       }
     };
 
-    const ended = new Promise<void>((resolve, reject) => {
-      unsubscribe = agent.subscribe((event: unknown) => {
-        if (!event || typeof event !== "object") return;
-        const eventType = (event as { type?: string }).type;
-        if (eventType === "message_update" && traceEnabled) {
-          const update = event as {
-            assistantMessageEvent?: { type?: string; delta?: unknown };
-          };
-          const thinkingEvent = update.assistantMessageEvent;
-          if (thinkingEvent?.type === "thinking_delta" && typeof thinkingEvent.delta === "string") {
-            thinkingDeltaCount++;
-            if (pendingThinking) pendingThinking.text += thinkingEvent.delta;
-            else
-              pendingThinking = { timestamp: new Date().toISOString(), text: thinkingEvent.delta };
-          } else {
-            flushThinking();
-          }
-        }
-        if (eventType === "tool_execution_start" || eventType === "tool_execution_end") {
+    let settleRun: (() => void) | undefined;
+    let failRun: ((error: Error) => void) | undefined;
+    unsubscribe = agent.subscribe((event: unknown) => {
+      if (!event || typeof event !== "object") return;
+      const eventType = (event as { type?: string }).type;
+      if (eventType === "message_update" && traceEnabled) {
+        const update = event as {
+          assistantMessageEvent?: { type?: string; delta?: unknown };
+        };
+        const thinkingEvent = update.assistantMessageEvent;
+        if (thinkingEvent?.type === "thinking_delta" && typeof thinkingEvent.delta === "string") {
+          thinkingDeltaCount++;
+          if (pendingThinking) pendingThinking.text += thinkingEvent.delta;
+          else pendingThinking = { timestamp: new Date().toISOString(), text: thinkingEvent.delta };
+        } else {
           flushThinking();
-          const toolEvent = event as {
-            toolName?: unknown;
-            toolCallId?: unknown;
-            args?: unknown;
-            result?: unknown;
-            isError?: unknown;
-          };
-          const rawToolName =
-            typeof toolEvent.toolName === "string" ? toolEvent.toolName : "unknown";
-          const rawCallId =
-            typeof toolEvent.toolCallId === "string" ? toolEvent.toolCallId : undefined;
-          // Stable identity per tool call: the end event reuses the start
-          // event's identity so arg-less end payloads cannot drift.
-          const mcpIdentity =
-            eventType === "tool_execution_end" && rawCallId
-              ? (mcpToolCalls.get(rawCallId) ??
-                extractMcpToolIdentity(
-                  rawToolName,
-                  toolEvent.args,
-                  registeredMcpTools,
-                  knownMcpServers,
-                ))
-              : extractMcpToolIdentity(
-                  rawToolName,
-                  toolEvent.args,
-                  registeredMcpTools,
-                  knownMcpServers,
-                );
-          const mcpKey = mcpIdentity
-            ? `${mcpIdentity.server ?? ""}\0${mcpIdentity.tool}`
-            : undefined;
-          if (traceEnabled) {
-            // Error signal is failure-only: successful adapter results also
-            // carry details, which must not surface as errorClass.
-            const endSignal =
-              eventType === "tool_execution_end" && mcpIdentity && toolEvent.isError === true
-                ? extractMcpErrorSignal(toolEvent.result)
-                : undefined;
-            addTraceEvent(eventType === "tool_execution_start" ? "tool_start" : "tool_end", {
-              ...(mcpIdentity
-                ? {
-                    ...(mcpIdentity.server !== undefined ? { server: mcpIdentity.server } : {}),
-                    tool: mcpIdentity.tool.slice(0, 200),
-                  }
-                : { tool: sanitizeMcpDebugName(rawToolName).slice(0, 200) }),
-              callId: rawCallId ? sanitizeMcpDebugName(rawCallId).slice(0, 128) : undefined,
-              ...(eventType === "tool_execution_end"
-                ? { status: toolEvent.isError === true ? "error" : "success" }
-                : {}),
-              ...(endSignal
-                ? {
-                    errorClass: endSignal.errorClass,
-                    ...(endSignal.detail !== undefined ? { detail: endSignal.detail } : {}),
-                  }
-                : {}),
+        }
+      }
+      if (eventType === "tool_execution_start" || eventType === "tool_execution_end") {
+        flushThinking();
+        const toolEvent = event as {
+          toolName?: unknown;
+          toolCallId?: unknown;
+          args?: unknown;
+          result?: unknown;
+          isError?: unknown;
+        };
+        const rawToolName = typeof toolEvent.toolName === "string" ? toolEvent.toolName : "unknown";
+        const rawCallId =
+          typeof toolEvent.toolCallId === "string" ? toolEvent.toolCallId : undefined;
+        // Stable identity per tool call: the end event reuses the start
+        // event's identity so arg-less end payloads cannot drift.
+        const mcpIdentity =
+          eventType === "tool_execution_end" && rawCallId
+            ? (mcpToolCalls.get(rawCallId) ??
+              extractMcpToolIdentity(
+                rawToolName,
+                toolEvent.args,
+                registeredMcpTools,
+                knownMcpServers,
+              ))
+            : extractMcpToolIdentity(
+                rawToolName,
+                toolEvent.args,
+                registeredMcpTools,
+                knownMcpServers,
+              );
+        const mcpKey = mcpIdentity ? `${mcpIdentity.server ?? ""}\0${mcpIdentity.tool}` : undefined;
+        if (traceEnabled) {
+          // Error signal is failure-only: successful adapter results also
+          // carry details, which must not surface as errorClass.
+          const endSignal =
+            eventType === "tool_execution_end" && mcpIdentity && toolEvent.isError === true
+              ? extractMcpErrorSignal(toolEvent.result)
+              : undefined;
+          addTraceEvent(eventType === "tool_execution_start" ? "tool_start" : "tool_end", {
+            ...(mcpIdentity
+              ? {
+                  ...(mcpIdentity.server !== undefined ? { server: mcpIdentity.server } : {}),
+                  tool: mcpIdentity.tool.slice(0, 200),
+                }
+              : { tool: sanitizeMcpDebugName(rawToolName).slice(0, 200) }),
+            callId: rawCallId ? sanitizeMcpDebugName(rawCallId).slice(0, 128) : undefined,
+            ...(eventType === "tool_execution_end"
+              ? { status: toolEvent.isError === true ? "error" : "success" }
+              : {}),
+            ...(endSignal
+              ? {
+                  errorClass: endSignal.errorClass,
+                  ...(endSignal.detail !== undefined ? { detail: endSignal.detail } : {}),
+                }
+              : {}),
+          });
+        }
+        if (eventType === "tool_execution_start") {
+          if (mcpIdentity) {
+            if (rawCallId) mcpToolCalls.set(rawCallId, mcpIdentity);
+            if (options.debug)
+              logger.debug("review.mcp.tool_call", "MCP tool call", {
+                ...(mcpIdentity.server !== undefined ? { server: mcpIdentity.server } : {}),
+                tool: mcpIdentity.tool,
+                callId: rawCallId,
+              });
+          } else if (options.debug) {
+            const args = formatDebugToolArgs(toolEvent.args);
+            logger.debug("review.tool.call", "Tool call", {
+              tool: rawToolName,
+              callId: rawCallId,
+              args,
             });
           }
-          if (eventType === "tool_execution_start") {
-            if (mcpIdentity) {
-              if (rawCallId) mcpToolCalls.set(rawCallId, mcpIdentity);
-              if (options.debug)
-                logger.debug("review.mcp.tool_call", "MCP tool call", {
-                  ...(mcpIdentity.server !== undefined ? { server: mcpIdentity.server } : {}),
-                  tool: mcpIdentity.tool,
-                  callId: rawCallId,
-                });
-            } else if (options.debug) {
-              const args = formatDebugToolArgs(toolEvent.args);
-              logger.debug("review.tool.call", "Tool call", {
-                tool: rawToolName,
+        } else {
+          if (mcpIdentity && mcpKey && toolEvent.isError === true) {
+            const signal = extractMcpErrorSignal(toolEvent.result) ?? {
+              errorClass: "unknown" as const,
+            };
+            failedMcpCalls.set(mcpKey, { identity: mcpIdentity, signal });
+          } else if (mcpIdentity && mcpKey) failedMcpCalls.delete(mcpKey);
+          const outputArtifact = mcpIdentity
+            ? mcpOutputArtifactDirectory(toolEvent.result)
+            : undefined;
+          if (outputArtifact) mcpOutputArtifacts.add(outputArtifact);
+          if (options.debug)
+            logger.debug(
+              mcpIdentity ? "review.mcp.tool_result" : "review.tool.result",
+              mcpIdentity ? "MCP tool result" : "Tool result",
+              {
+                ...(mcpIdentity
+                  ? {
+                      ...(mcpIdentity.server !== undefined ? { server: mcpIdentity.server } : {}),
+                      tool: mcpIdentity.tool,
+                    }
+                  : { tool: rawToolName }),
                 callId: rawCallId,
-                args,
-              });
-            }
-          } else {
-            if (mcpIdentity && mcpKey && toolEvent.isError === true) {
-              const signal = extractMcpErrorSignal(toolEvent.result) ?? {
-                errorClass: "unknown" as const,
-              };
-              failedMcpCalls.set(mcpKey, { identity: mcpIdentity, signal });
-            } else if (mcpIdentity && mcpKey) failedMcpCalls.delete(mcpKey);
-            const outputArtifact = mcpIdentity
-              ? mcpOutputArtifactDirectory(toolEvent.result)
-              : undefined;
-            if (outputArtifact) mcpOutputArtifacts.add(outputArtifact);
-            if (options.debug)
-              logger.debug(
-                mcpIdentity ? "review.mcp.tool_result" : "review.tool.result",
-                mcpIdentity ? "MCP tool result" : "Tool result",
-                {
-                  ...(mcpIdentity
-                    ? {
-                        ...(mcpIdentity.server !== undefined ? { server: mcpIdentity.server } : {}),
-                        tool: mcpIdentity.tool,
-                      }
-                    : { tool: rawToolName }),
-                  callId: rawCallId,
-                  status: toolEvent.isError === true ? "error" : "success",
-                  ...(mcpIdentity && toolEvent.isError === true
-                    ? (() => {
-                        const signal = extractMcpErrorSignal(toolEvent.result);
-                        return signal
-                          ? {
-                              errorClass: signal.errorClass,
-                              ...(signal.detail !== undefined ? { detail: signal.detail } : {}),
-                            }
-                          : {};
-                      })()
-                    : {}),
-                },
-              );
-            if (rawCallId) mcpToolCalls.delete(rawCallId);
+                status: toolEvent.isError === true ? "error" : "success",
+                ...(mcpIdentity && toolEvent.isError === true
+                  ? (() => {
+                      const signal = extractMcpErrorSignal(toolEvent.result);
+                      return signal
+                        ? {
+                            errorClass: signal.errorClass,
+                            ...(signal.detail !== undefined ? { detail: signal.detail } : {}),
+                          }
+                        : {};
+                    })()
+                  : {}),
+              },
+            );
+          if (rawCallId) mcpToolCalls.delete(rawCallId);
+        }
+      }
+      if (eventType !== "agent_end") return;
+      flushThinking();
+
+      const ev = event as { messages?: unknown; stopReason?: string; errorMessage?: string };
+      const msgs = Array.isArray(ev.messages) ? ev.messages : [];
+      runMessages = msgs;
+      const lastAssistant = [...msgs]
+        .reverse()
+        .find((m) => (m as { role?: string })?.role === "assistant") as
+        | { stopReason?: string; errorMessage?: string; content?: unknown }
+        | undefined;
+
+      if (traceEnabled && thinkingDeltaCount === 0 && !finalMessageThinkingCaptured) {
+        for (const message of msgs) {
+          if (!isAssistantMessage(message) || !Array.isArray(message.content)) continue;
+          for (const part of message.content) {
+            if (!isThinkingContentPart(part)) continue;
+            const timestamp = new Date().toISOString();
+            addTraceEvent("thinking", {
+              timestamp,
+              endTimestamp: timestamp,
+              text: part.thinking,
+            });
+            finalMessageThinkingCaptured = true;
           }
         }
-        if (eventType !== "agent_end") return;
-        flushThinking();
+      }
 
-        const ev = event as { messages?: unknown; stopReason?: string; errorMessage?: string };
-        const msgs = Array.isArray(ev.messages) ? ev.messages : [];
-        runMessages = msgs;
-        const lastAssistant = [...msgs]
-          .reverse()
-          .find((m) => (m as { role?: string })?.role === "assistant") as
-          | { stopReason?: string; errorMessage?: string; content?: unknown }
-          | undefined;
+      // The error may surface on the agent_end event OR on the last assistant
+      // message (e.g. provider 402/429/401 — pi-agent-core attaches it there).
+      const errorMessage =
+        (ev.stopReason === "error" ? ev.errorMessage : undefined) ??
+        (lastAssistant?.stopReason === "error" ? lastAssistant.errorMessage : undefined);
+      if (errorMessage) {
+        logger.error("review.agent.error", "Agent error", { error: errorMessage });
+        failRun?.(new Error(`Agent failed: ${errorMessage}`));
+        return;
+      }
 
-        if (traceEnabled && thinkingDeltaCount === 0 && !finalMessageThinkingCaptured) {
-          for (const message of msgs) {
-            if (!isAssistantMessage(message) || !Array.isArray(message.content)) continue;
-            for (const part of message.content) {
-              if (!isThinkingContentPart(part)) continue;
-              const timestamp = new Date().toISOString();
-              addTraceEvent("thinking", {
-                timestamp,
-                endTimestamp: timestamp,
-                text: part.thinking,
-              });
-              finalMessageThinkingCaptured = true;
-            }
-          }
-        }
-
-        // The error may surface on the agent_end event OR on the last assistant
-        // message (e.g. provider 402/429/401 — pi-agent-core attaches it there).
-        const errorMessage =
-          (ev.stopReason === "error" ? ev.errorMessage : undefined) ??
-          (lastAssistant?.stopReason === "error" ? lastAssistant.errorMessage : undefined);
-        if (errorMessage) {
-          logger.error("review.agent.error", "Agent error", { error: errorMessage });
-          reject(new Error(`Agent failed: ${errorMessage}`));
-          return;
-        }
-
-        // submit_review is the only structured contract; a text-only response is
-        // a failed review, so the harness never parses model prose.
-        const decision = getResult();
-        if (decision) reviewDecision = decision;
-        resolve();
-      });
+      // submit_review is the only structured contract; a text-only response is
+      // a failed review, so the harness never parses model prose.
+      const decision = getResult();
+      if (decision) reviewDecision = decision;
+      settleRun?.();
     });
 
+    const runAgent = async (message: string) => {
+      const ended = new Promise<void>((resolve, reject) => {
+        settleRun = resolve;
+        failRun = reject;
+      });
+      await Promise.all([agent.prompt(message), ended]);
+    };
+
     try {
-      await agent.prompt(userPrompt);
-      await ended;
+      await runAgent(userPrompt);
+      if (!reviewDecision) {
+        // The model stopped without calling submit_review. Ask once more with
+        // the transcript intact: the nudge applies to every provider, and the
+        // pinned tool_choice is best-effort on top. Support and wire shape vary
+        // per provider, so a rejected pin has to degrade to the bare nudge —
+        // never to a failed run. A normal stop with no decision is deliberately
+        // not retried bare: the pin carries no evidence of being the cause, so
+        // an identical third call would not differ.
+        try {
+          forceSubmit = true;
+          await runAgent(SUBMIT_NUDGE);
+        } catch (error) {
+          logger.warn(
+            "review.agent.forced_call_failed",
+            "Pinned submit_review call failed; retrying with the nudge alone",
+            { error: error instanceof Error ? error.message : String(error) },
+          );
+          forceSubmit = false;
+          await runAgent(SUBMIT_NUDGE).catch((retryError) => {
+            logger.warn("review.agent.retry_failed", "Re-prompt failed", {
+              error: retryError instanceof Error ? retryError.message : String(retryError),
+            });
+          });
+        } finally {
+          forceSubmit = false;
+        }
+      }
     } finally {
       await writeThinkingTrace();
     }
