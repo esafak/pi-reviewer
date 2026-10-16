@@ -28,7 +28,7 @@ export interface PullRequestContext {
   title?: string;
   body?: string;
 }
-export interface PrSummaryOptions {
+export interface ReviewPromptOptions {
   /** Request the pr_summary/pr_diagram overview fields. Defaults to false. */
   summaryEnabled?: boolean;
 }
@@ -109,9 +109,11 @@ function buildSharedBase(minSeverity: MinSeverity): string[] {
 // ── System prompts ────────────────────────────────────────────────────────────
 
 /**
- * JSON system prompt — used by local mode and SSH+UI.
- * Agent must return a structured JSON ReviewResult.
- * Conventions and review rules are injected from context when available.
+ * Review system prompt — used by local mode and SSH+UI.
+ * The agent must deliver the review by calling the submit_review tool; the
+ * prompt never asks for a JSON-text review because that instruction competes
+ * with the tool call. Conventions and review rules are injected from context
+ * when available.
  */
 export function buildJSONSystemPrompt(
   context: ContextResult | string,
@@ -121,15 +123,12 @@ export function buildJSONSystemPrompt(
   priorSummary?: string,
   resolvedFindings: ResolvedFindingContext[] = [],
   prContext?: PullRequestContext,
-  prSummary?: PrSummaryOptions,
+  prSummary?: ReviewPromptOptions,
 ): string {
   const baseLines = [
     ...buildSharedBase(minSeverity),
-    ...PROMPTS.review.jsonIntro,
-    "",
-    "If a submit_review tool is available, prefer calling it to submit your review as structured data instead of emitting JSON text.",
-    "Return only a JSON object matching this schema exactly (no markdown fences, no extra text, no extra fields — do not include the diff or any other field):",
-    ...PROMPTS.review.jsonFormat,
+    ...PROMPTS.review.toolIntro,
+    PROMPTS.review.actionRule,
     "",
     "Field rules:",
     ...PROMPTS.review.fieldRules,

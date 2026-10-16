@@ -552,6 +552,40 @@ describe("parseAgentResponse", () => {
     expect(response.rejectionReason).toBe("invalid comments");
   });
 
+  it("defaults a missing side to RIGHT in the text fallback", () => {
+    const response = parseAgentResponseWithStatus(
+      JSON.stringify({
+        summary: "review",
+        comments: [{ file: "src/a.ts", line: 12, severity: "WARN", body: "Missing null check" }],
+      }),
+    );
+
+    expect(response.parsed).toBe(true);
+    expect(response.result.comments).toEqual([
+      expect.objectContaining({ file: "src/a.ts", line: 12, side: "RIGHT", severity: "WARN" }),
+    ]);
+  });
+
+  it("does not default an unrecognized side in the text fallback", () => {
+    const response = parseAgentResponseWithStatus(
+      JSON.stringify({
+        summary: "review",
+        comments: [
+          {
+            file: "src/a.ts",
+            line: 12,
+            side: "right",
+            severity: "WARN",
+            body: "Missing null check",
+          },
+        ],
+      }),
+    );
+
+    expect(response.parsed).toBe(false);
+    expect(response.rejectionReason).toBe("invalid comments");
+  });
+
   it("marks invalid JSON as unparsed with a safe diagnostic", () => {
     const rejected = parseAgentResponseWithStatus("not-json");
     expect(rejected.result).toEqual({ summary: "not-json", comments: [] });
@@ -1281,7 +1315,10 @@ printf("first\\nsecond")
   });
 
   it("logs formatted content to console for terminal target", async () => {
-    await sendOutput({ target: "terminal", content: "hello review" });
+    await sendOutput({
+      target: "terminal",
+      structuredResult: { summary: "hello review", comments: [] },
+    });
 
     expect(logSpy).toHaveBeenCalledWith("== Review Summary ==\nhello review");
   });
@@ -1292,7 +1329,12 @@ printf("first\\nsecond")
 
     await sendOutput({
       target: "comment",
-      content: JSON.stringify({ summary: "LGTM", comments: [] }),
+      structuredResult: {
+        summary: "LGTM",
+        comments: [
+          { file: "src/a.ts", line: 1, side: "RIGHT", severity: "WARN", body: "Handle it" },
+        ],
+      },
       githubToken: "token123",
       prNumber: 42,
       repo: "owner/repo",
@@ -1315,12 +1357,12 @@ printf("first\\nsecond")
 
     await sendOutput({
       target: "comment",
-      content: JSON.stringify({
+      structuredResult: {
         summary: "LGTM",
         pr_summary: "What: x. Why: y. Risks: z.",
         pr_diagram: "sequenceDiagram\nA->>B: hi",
         comments: [],
-      }),
+      },
       githubToken: "token123",
       prNumber: 42,
       repo: "owner/repo",
@@ -1352,11 +1394,11 @@ printf("first\\nsecond")
 
     await sendOutput({
       target: "comment",
-      content: JSON.stringify({
+      structuredResult: {
         summary: "LGTM",
         pr_summary: "What: x. Why: y. Risks: z.",
         comments: [],
-      }),
+      },
       githubToken: "token123",
       prNumber: 42,
       repo: "owner/repo",
@@ -1398,18 +1440,23 @@ printf("first\\nsecond")
 
     await sendOutput({
       target: "comment",
-      content: JSON.stringify({ summary: "Findings without overview", comments: [] }),
+      structuredResult: {
+        summary: "Findings without overview",
+        comments: [
+          { file: "src/a.ts", line: 1, side: "RIGHT", severity: "WARN", body: "Handle it" },
+        ],
+      },
       githubToken: "token123",
       prNumber: 42,
       repo: "owner/repo",
-      reactOnNoFindings: false,
       summaryEnabled: true,
       isFirstReview: true,
     });
 
     const body = JSON.parse((fetchMock.mock.calls[0][1] as { body: string }).body).body as string;
     expect(body).toContain("Findings without overview");
-    expect(body).not.toContain("<details>");
+    // The AI-fix footer is its own <details>; assert on the summary block only.
+    expect(body).not.toContain("<summary>Summary");
     expect(body).not.toContain("/pi-summary");
     expect(body).not.toContain("/pi-review");
   });
@@ -1425,7 +1472,13 @@ printf("first\\nsecond")
 
       await sendOutput({
         target: "comment",
-        content: JSON.stringify({ summary: "LGTM", pr_summary: "What: x.", comments: [] }),
+        structuredResult: {
+          summary: "LGTM",
+          pr_summary: "What: x.",
+          comments: [
+            { file: "src/a.ts", line: 1, side: "RIGHT", severity: "WARN", body: "Handle it" },
+          ],
+        },
         githubToken: "token123",
         prNumber: 42,
         repo: "owner/repo",
@@ -1433,7 +1486,7 @@ printf("first\\nsecond")
       });
 
       const body = JSON.parse((fetchMock.mock.calls[0][1] as { body: string }).body).body as string;
-      expect(body).not.toContain("<details>");
+      expect(body).not.toContain("<summary>Summary");
       expect(body).not.toContain("/pi-summary");
     }
   });
@@ -1444,7 +1497,12 @@ printf("first\\nsecond")
 
     await sendOutput({
       target: "comment",
-      content: JSON.stringify({ summary: "Current [web:1] [web:999] [web:2]", comments: [] }),
+      structuredResult: {
+        summary: "Current [web:1] [web:999] [web:2]",
+        comments: [
+          { file: "src/a.ts", line: 1, side: "RIGHT", severity: "WARN", body: "Handle it" },
+        ],
+      },
       githubToken: "token123",
       prNumber: 42,
       repo: "owner/repo",
@@ -1494,13 +1552,15 @@ printf("first\\nsecond")
     }));
     await sendOutput({
       target: "comment",
-      content: JSON.stringify({
+      structuredResult: {
         summary: `${"[web:1] ".repeat(3)}${evidence
           .slice(1)
           .map((entry) => `[${entry.id}]`)
           .join(" ")}`,
-        comments: [],
-      }),
+        comments: [
+          { file: "src/a.ts", line: 1, side: "RIGHT", severity: "WARN", body: "Handle it" },
+        ],
+      },
       githubToken: "token123",
       prNumber: 42,
       repo: "owner/repo",
@@ -1516,10 +1576,10 @@ printf("first\\nsecond")
     vi.stubGlobal("fetch", fetchMock);
     await sendOutput({
       target: "comment",
-      content: JSON.stringify({
+      structuredResult: {
         summary: "review",
         comments: [{ file: "src/a.ts", line: 3, side: "RIGHT", severity: "WARN", body: "problem" }],
-      }),
+      },
       githubToken: "token123",
       prNumber: 42,
       repo: "owner/repo",
@@ -1552,7 +1612,6 @@ printf("first\\nsecond")
     vi.stubGlobal("fetch", fetchMock);
     await sendOutput({
       target: "comment",
-      content: "",
       structuredResult: {
         summary: "review",
         comments: [
@@ -1606,7 +1665,6 @@ printf("first\\nsecond")
     vi.stubGlobal("fetch", fetchMock);
     await sendOutput({
       target: "comment",
-      content: "",
       structuredResult: {
         summary: "review",
         comments: [
@@ -1654,7 +1712,6 @@ printf("first\\nsecond")
     vi.stubGlobal("fetch", fetchMock);
     await sendOutput({
       target: "comment",
-      content: "",
       structuredResult: {
         summary: "review",
         comments: [
@@ -1696,7 +1753,7 @@ printf("first\\nsecond")
 
     await sendOutput({
       target: "comment",
-      content: JSON.stringify({
+      structuredResult: {
         summary: "Needs fixes [web:1]",
         comments: [
           {
@@ -1707,7 +1764,7 @@ printf("first\\nsecond")
             body: "Missing null check",
           },
         ],
-      }),
+      },
       githubToken: "token123",
       prNumber: 42,
       repo: "owner/repo",
@@ -1747,7 +1804,7 @@ printf("first\\nsecond")
 
     await sendOutput({
       target: "comment",
-      content: JSON.stringify({
+      structuredResult: {
         summary: "Review",
         comments: [
           {
@@ -1787,7 +1844,7 @@ printf("first\\nsecond")
             suggestion: "",
           },
         ],
-      }),
+      },
       githubToken: "token123",
       prNumber: 42,
       repo: "owner/repo",
@@ -1824,7 +1881,7 @@ printf("first\\nsecond")
 
     await sendOutput({
       target: "comment",
-      content: JSON.stringify({
+      structuredResult: {
         summary: "Review",
         comments: [
           {
@@ -1836,7 +1893,7 @@ printf("first\\nsecond")
             suggestion: "replacement",
           },
         ],
-      }),
+      },
       githubToken: "token123",
       prNumber: 42,
       repo: "owner/repo",
@@ -1877,7 +1934,12 @@ printf("first\\nsecond")
 
     await sendOutput({
       target: "comment",
-      content: JSON.stringify({ summary: "Current [web:1]", comments: [] }),
+      structuredResult: {
+        summary: "Current [web:1]",
+        comments: [
+          { file: "src/a.ts", line: 1, side: "RIGHT", severity: "WARN", body: "Handle it" },
+        ],
+      },
       githubToken: "token123",
       prNumber: 42,
       repo: "owner/repo",
@@ -1932,7 +1994,6 @@ printf("first\\nsecond")
       githubToken: "token",
       prNumber: 42,
       repo: "owner/repo",
-      reactOnNoFindings: true,
     });
 
     expect(fetchMock).toHaveBeenCalledWith(
@@ -1985,7 +2046,6 @@ printf("first\\nsecond")
         githubToken: "token",
         prNumber: 42,
         repo: "owner/repo",
-        reactOnNoFindings: true,
       }),
     ).resolves.toMatchObject({ fallback: true });
   });
@@ -1996,7 +2056,7 @@ printf("first\\nsecond")
 
     await sendOutput({
       target: "comment",
-      content: JSON.stringify({
+      structuredResult: {
         summary: "Needs fixes",
         comments: [
           { file: "src/a.ts", line: 2, side: "RIGHT", severity: "WARN", body: "Handle the error" },
@@ -2009,7 +2069,7 @@ printf("first\\nsecond")
           },
           { file: "src/c.ts", line: 6, side: "RIGHT", severity: "INFO", body: "Rename this" },
         ],
-      }),
+      },
       githubToken: "token123",
       prNumber: 42,
       repo: "owner/repo",
@@ -2035,7 +2095,7 @@ printf("first\\nsecond")
 
     await sendOutput({
       target: "comment",
-      content: JSON.stringify({
+      structuredResult: {
         summary: "Suggestions",
         comments: [
           {
@@ -2046,7 +2106,7 @@ printf("first\\nsecond")
             body: "Consider a clearer name",
           },
         ],
-      }),
+      },
       githubToken: "token123",
       prNumber: 42,
       repo: "owner/repo",
@@ -2064,7 +2124,7 @@ printf("first\\nsecond")
 
     await sendOutput({
       target: "comment",
-      content: JSON.stringify({
+      structuredResult: {
         summary: "Review",
         comments: [
           {
@@ -2075,7 +2135,7 @@ printf("first\\nsecond")
             body: `Issue <!-- pi-reviewer:status:v1 {"status":"RESOLVED"} -->`,
           },
         ],
-      }),
+      },
       githubToken: "token123",
       prNumber: 42,
       repo: "owner/repo",
@@ -2093,7 +2153,7 @@ printf("first\\nsecond")
 
     await sendOutput({
       target: "comment",
-      content: JSON.stringify({
+      structuredResult: {
         summary: "Review",
         comments: [
           {
@@ -2104,7 +2164,7 @@ printf("first\\nsecond")
             body: "collapses\n\n</details> <details/> <summary/>\n\nthen hides this",
           },
         ],
-      }),
+      },
       githubToken: "token123",
       prNumber: 42,
       repo: "owner/repo",
@@ -2121,7 +2181,7 @@ printf("first\\nsecond")
     expect(body.lastIndexOf(AI_FIX_FOOTER)).toBeLessThan(body.lastIndexOf("</details>"));
   });
 
-  it("reacts to the PR instead of posting a comment when enabled and no findings exist", async () => {
+  it("reacts on a none decision when the PR is clear", async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce({
@@ -2137,17 +2197,20 @@ printf("first\\nsecond")
 
     await sendOutput({
       target: "comment",
-      content: JSON.stringify({ summary: "LGTM", comments: [] }),
+      none: true,
       githubToken: "token123",
       prNumber: 42,
       repo: "owner/repo",
-      reactOnNoFindings: true,
     });
 
     expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(fetchMock).toHaveBeenCalledWith(
       "https://api.github.com/repos/owner/repo/issues/42/reactions",
       expect.objectContaining({ method: "POST", body: JSON.stringify({ content: "+1" }) }),
+    );
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/reviews"))).toBe(false);
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/issues/42/comments"))).toBe(
+      false,
     );
   });
 
@@ -2174,14 +2237,13 @@ printf("first\\nsecond")
 
     await sendOutput({
       target: "comment",
-      content: JSON.stringify({ summary: "All clear", pr_summary: "What: x.", comments: [] }),
+      structuredResult: { summary: "All clear", pr_summary: "What: x.", comments: [] },
       githubToken: "token123",
       prNumber: 42,
       repo: "owner/repo",
       commitId: "head",
       baseCommitId: "base",
       batchMarker: marker,
-      reactOnNoFindings: true,
       summaryEnabled: true,
       isFirstReview: true,
     });
@@ -2202,7 +2264,27 @@ printf("first\\nsecond")
     );
   });
 
-  it("keeps the reaction path when summaries are disabled", async () => {
+  it("stays silent on a none decision when findings remain open", async () => {
+    const fetchMock = okFetch();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await sendOutput({
+      target: "comment",
+      none: true,
+      githubToken: "token123",
+      prNumber: 42,
+      repo: "owner/repo",
+      existingFindings: [{ commentId: 7 }],
+    });
+
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/reactions"))).toBe(false);
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/reviews"))).toBe(false);
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/issues/42/comments"))).toBe(
+      false,
+    );
+  });
+
+  it("acknowledges a findings-free review with a reaction", async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce({
@@ -2216,15 +2298,14 @@ printf("first\\nsecond")
       });
     vi.stubGlobal("fetch", fetchMock);
 
+    // The reaction is keyed on state, not on the model declaring "none": a
+    // review that only produces a "nothing to report" summary still reacts.
     await sendOutput({
       target: "comment",
-      content: JSON.stringify({ summary: "LGTM", pr_summary: "What: x.", comments: [] }),
+      structuredResult: { summary: "Nothing to flag", comments: [] },
       githubToken: "token123",
       prNumber: 42,
       repo: "owner/repo",
-      reactOnNoFindings: true,
-      summaryEnabled: false,
-      isFirstReview: true,
     });
 
     expect(fetchMock).toHaveBeenCalledWith(
@@ -2235,6 +2316,46 @@ printf("first\\nsecond")
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/issues/42/comments"))).toBe(
       false,
     );
+  });
+
+  it("posts the body for a findings-free review that leaves findings open", async () => {
+    const fetchMock = okFetch();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await sendOutput({
+      target: "comment",
+      structuredResult: { summary: "Nothing new", comments: [] },
+      githubToken: "token123",
+      prNumber: 42,
+      repo: "owner/repo",
+      existingFindings: [{ commentId: 7 }],
+    });
+
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/issues/42/comments"))).toBe(
+      true,
+    );
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/reactions"))).toBe(false);
+  });
+
+  it("publishes the emit-once overview instead of reacting", async () => {
+    const fetchMock = okFetch();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await sendOutput({
+      target: "comment",
+      structuredResult: { summary: "Overview only", pr_summary: "What: x.", comments: [] },
+      githubToken: "token123",
+      prNumber: 42,
+      repo: "owner/repo",
+      commitId: "head",
+      summaryEnabled: true,
+      isFirstReview: true,
+    });
+
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/pulls/42/reviews"))).toBe(
+      true,
+    );
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/reactions"))).toBe(false);
   });
 
   it("strips the rendered summary block from historic bodies", () => {
@@ -2347,12 +2468,11 @@ printf("first\\nsecond")
 
     await sendOutput({
       target: "comment",
-      content: JSON.stringify({ summary: "Still open", comments: [] }),
+      structuredResult: { summary: "Still open", comments: [] },
       githubToken: "token123",
       prNumber: 42,
       repo: "owner/repo",
       commitId: "head",
-      reactOnNoFindings: true,
       existingFindings: [{ commentId: 9 }],
     });
 
@@ -2360,41 +2480,40 @@ printf("first\\nsecond")
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/reviews"))).toBe(true);
   });
 
-  it("falls back to a normal comment when the reaction cannot be posted", async () => {
+  it("stays silent when the acknowledgement reaction cannot be posted", async () => {
     const fetchMock = vi
       .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        text: vi.fn().mockResolvedValue(JSON.stringify({ login: "review-bot" })),
+      })
+      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue(JSON.stringify([])) })
       .mockResolvedValueOnce({
         ok: false,
         status: 403,
         statusText: "Forbidden",
         text: vi.fn().mockResolvedValue(""),
-      })
-      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue("") });
+      });
     vi.stubGlobal("fetch", fetchMock);
 
     await sendOutput({
       target: "comment",
-      content: JSON.stringify({ summary: "LGTM", comments: [] }),
+      none: true,
       githubToken: "token123",
       prNumber: 42,
       repo: "owner/repo",
-      reactOnNoFindings: true,
     });
 
-    expect(fetchMock.mock.calls[1][0]).toContain("/issues/42/comments");
+    // No comment fallback: a failed reaction leaves nothing visible behind.
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/issues/42/comments"))).toBe(
+      false,
+    );
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/reviews"))).toBe(false);
   });
 
-  it("falls back to the normal review when batch marker creation fails", async () => {
+  it("does not fall back to a review when the batch marker cannot be created", async () => {
     const marker =
       '<!-- pi-reviewer:batch:v1 {"version":1,"fromSha":"base","toSha":"head","kind":"synchronize","actor":"review-bot","reviewId":0} -->';
-    const successfulReview = {
-      ok: true,
-      text: vi.fn().mockResolvedValue(""),
-      json: vi.fn().mockResolvedValue({ id: 2 }),
-      clone() {
-        return this;
-      },
-    };
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce({
@@ -2415,22 +2534,25 @@ printf("first\\nsecond")
         status: 500,
         statusText: "Server Error",
         text: vi.fn().mockResolvedValue(""),
-      })
-      .mockResolvedValueOnce(successfulReview);
+      });
     vi.stubGlobal("fetch", fetchMock);
 
     await sendOutput({
       target: "comment",
-      content: JSON.stringify({ summary: "LGTM", comments: [] }),
+      none: true,
       githubToken: "token123",
       prNumber: 42,
       repo: "owner/repo",
       commitId: "head",
       batchMarker: marker,
-      reactOnNoFindings: true,
     });
 
-    expect(fetchMock.mock.calls[5][0]).toContain("/pulls/42/reviews");
+    // The failed marker attempt is the last call; nothing is posted after it.
+    expect(fetchMock).toHaveBeenCalledTimes(5);
+    expect(fetchMock.mock.calls[4][0]).toContain("/pulls/42/reviews");
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/issues/42/comments"))).toBe(
+      false,
+    );
   });
 
   it("refuses to post when the PR head changed during review", async () => {
@@ -2443,7 +2565,7 @@ printf("first\\nsecond")
     await expect(
       sendOutput({
         target: "comment",
-        content: JSON.stringify({ summary: "stale", comments: [] }),
+        structuredResult: { summary: "stale", comments: [] },
         githubToken: "token123",
         prNumber: 42,
         repo: "owner/repo",
@@ -2453,6 +2575,81 @@ printf("first\\nsecond")
     ).rejects.toThrow("PR head changed while the review was running");
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock.mock.calls[0][0]).toBe("https://api.github.com/repos/owner/repo/pulls/42");
+  });
+
+  it("refuses to acknowledge a stale head on a none decision without a batch marker", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      text: vi.fn().mockResolvedValue(JSON.stringify({ head: { sha: "new-head" } })),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      sendOutput({
+        target: "comment",
+        none: true,
+        githubToken: "token123",
+        prNumber: 42,
+        repo: "owner/repo",
+        commitId: "reviewed-head",
+      }),
+    ).rejects.toThrow("PR head changed while the review was running");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toBe("https://api.github.com/repos/owner/repo/pulls/42");
+  });
+
+  it("acknowledges a none decision once the pinned head is confirmed", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        text: vi.fn().mockResolvedValue(JSON.stringify({ head: { sha: "reviewed-head" } })),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        text: vi.fn().mockResolvedValue(JSON.stringify({ login: "review-bot" })),
+      })
+      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue(JSON.stringify([])) })
+      .mockResolvedValueOnce({
+        ok: true,
+        text: vi.fn().mockResolvedValue(JSON.stringify({ id: 1, content: "+1" })),
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await sendOutput({
+      target: "comment",
+      none: true,
+      githubToken: "token123",
+      prNumber: 42,
+      repo: "owner/repo",
+      commitId: "reviewed-head",
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.github.com/repos/owner/repo/issues/42/reactions",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
+  it("refuses a stale head even when the none decision posts nothing visible", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      text: vi.fn().mockResolvedValue(JSON.stringify({ head: { sha: "new-head" } })),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      sendOutput({
+        target: "comment",
+        none: true,
+        githubToken: "token123",
+        prNumber: 42,
+        repo: "owner/repo",
+        commitId: "reviewed-head",
+        existingFindings: [{ commentId: 7 }],
+      }),
+    ).rejects.toThrow("PR head changed while the review was running");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("retries once as body-only review when Reviews API returns 422", async () => {
@@ -2465,12 +2662,18 @@ printf("first\\nsecond")
         statusText: "Unprocessable Entity",
         text: vi.fn().mockResolvedValue(""),
       })
-      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue("") });
+      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue("") })
+      // Stale-thumbs-up cleanup after posting with findings.
+      .mockResolvedValueOnce({
+        ok: true,
+        text: vi.fn().mockResolvedValue(JSON.stringify({ login: "review-bot" })),
+      })
+      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue(JSON.stringify([])) });
     vi.stubGlobal("fetch", fetchMock);
 
     await sendOutput({
       target: "comment",
-      content: JSON.stringify({
+      structuredResult: {
         summary: "Needs fixes [web:1]",
         comments: [
           {
@@ -2482,7 +2685,7 @@ printf("first\\nsecond")
             suggestion: "if (user) use(user);",
           },
         ],
-      }),
+      },
       githubToken: "token123",
       prNumber: 42,
       repo: "owner/repo",
@@ -2503,7 +2706,7 @@ printf("first\\nsecond")
 
     // First call: inline review (rejected 422). Second call: body-only retry,
     // NOT the Issues API — every comment moved to the body, comments: [].
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
     expect(fetchMock.mock.calls[0][0]).toBe(
       "https://api.github.com/repos/owner/repo/pulls/42/reviews",
     );
@@ -2540,12 +2743,18 @@ printf("first\\nsecond")
         statusText: "Unprocessable Entity",
         text: vi.fn().mockResolvedValue(""),
       })
-      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue("") });
+      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue("") })
+      // Stale-thumbs-up cleanup after posting with findings.
+      .mockResolvedValueOnce({
+        ok: true,
+        text: vi.fn().mockResolvedValue(JSON.stringify({ login: "review-bot" })),
+      })
+      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue(JSON.stringify([])) });
     vi.stubGlobal("fetch", fetchMock);
 
     await sendOutput({
       target: "comment",
-      content: JSON.stringify({
+      structuredResult: {
         summary: "Needs fixes",
         comments: [
           {
@@ -2557,14 +2766,14 @@ printf("first\\nsecond")
             suggestion: "if (user) use(user);",
           },
         ],
-      }),
+      },
       githubToken: "token123",
       prNumber: 42,
       repo: "owner/repo",
       commitId: "abc123",
     });
 
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock).toHaveBeenCalledTimes(5);
     expect(fetchMock.mock.calls[2][0]).toBe(
       "https://api.github.com/repos/owner/repo/issues/42/comments",
     );
@@ -2603,7 +2812,7 @@ printf("first\\nsecond")
 
     await sendOutput({
       target: "comment",
-      content: JSON.stringify({
+      structuredResult: {
         summary: "Review",
         comments: [
           {
@@ -2621,7 +2830,7 @@ printf("first\\nsecond")
             body: "unpositionable",
           },
         ],
-      }),
+      },
       githubToken: "token123",
       prNumber: 42,
       repo: "owner/repo",
@@ -2629,7 +2838,7 @@ printf("first\\nsecond")
       diff,
     });
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(fetchMock.mock.calls[0][0]).toBe(
       "https://api.github.com/repos/owner/repo/pulls/42/reviews",
     );
@@ -2670,12 +2879,12 @@ printf("first\\nsecond")
 
     await sendOutput({
       target: "comment",
-      content: JSON.stringify({
+      structuredResult: {
         summary: "Review",
         comments: [
           { file: "src/other.ts", line: 5, side: "RIGHT", severity: "WARN", body: "not in diff" },
         ],
-      }),
+      },
       githubToken: "token123",
       prNumber: 42,
       repo: "owner/repo",
@@ -2683,7 +2892,7 @@ printf("first\\nsecond")
       diff,
     });
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
     const payload = JSON.parse((fetchMock.mock.calls[0][1] as { body: string }).body);
     expect(payload.comments).toEqual([]);
     expect(payload.body).toContain("Comments Not Attached to the Diff");
@@ -2696,7 +2905,7 @@ printf("first\\nsecond")
 
     await sendOutput({
       target: "comment",
-      content: JSON.stringify({
+      structuredResult: {
         summary: "Needs fixes",
         comments: [
           {
@@ -2707,14 +2916,14 @@ printf("first\\nsecond")
             body: "Missing null check",
           },
         ],
-      }),
+      },
       githubToken: "token123",
       prNumber: 42,
       repo: "owner/repo",
       commitId: "abc123",
     });
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(fetchMock.mock.calls[0][0]).toBe(
       "https://api.github.com/repos/owner/repo/pulls/42/reviews",
     );
@@ -2728,7 +2937,12 @@ printf("first\\nsecond")
 
     await sendOutput({
       target: "comment",
-      content: JSON.stringify({ summary: "Looks mostly good", comments: [] }),
+      structuredResult: {
+        summary: "Looks mostly good",
+        comments: [
+          { file: "src/a.ts", line: 1, side: "RIGHT", severity: "WARN", body: "Handle it" },
+        ],
+      },
       githubToken: "token123",
       prNumber: 42,
       repo: "owner/repo",
@@ -2741,28 +2955,11 @@ printf("first\\nsecond")
     );
   });
 
-  it("refuses to post unparseable model output", async () => {
-    const fetchMock = okFetch();
-    vi.stubGlobal("fetch", fetchMock);
-
-    await expect(
-      sendOutput({
-        target: "comment",
-        content: "Looks mostly good",
-        githubToken: "token123",
-        prNumber: 42,
-        repo: "owner/repo",
-        commitId: "abc123",
-      }),
-    ).rejects.toThrow("refusing to post raw model output");
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
   it("throws when githubToken is missing", async () => {
     await expect(
       sendOutput({
         target: "comment",
-        content: "text",
+        structuredResult: { summary: "text", comments: [] },
         prNumber: 1,
         repo: "owner/repo",
       }),
@@ -2773,7 +2970,7 @@ printf("first\\nsecond")
     await expect(
       sendOutput({
         target: "comment",
-        content: "text",
+        structuredResult: { summary: "text", comments: [] },
         githubToken: "token",
         repo: "owner/repo",
       }),
@@ -2784,7 +2981,7 @@ printf("first\\nsecond")
     await expect(
       sendOutput({
         target: "comment",
-        content: "text",
+        structuredResult: { summary: "text", comments: [] },
         githubToken: "token",
         prNumber: 1,
       }),
@@ -2803,7 +3000,12 @@ printf("first\\nsecond")
     await expect(
       sendOutput({
         target: "comment",
-        content: JSON.stringify({ summary: "text", comments: [] }),
+        structuredResult: {
+          summary: "text",
+          comments: [
+            { file: "src/a.ts", line: 1, side: "RIGHT", severity: "WARN", body: "Handle it" },
+          ],
+        },
         githubToken: "token",
         prNumber: 1,
         repo: "owner/repo",
@@ -2816,12 +3018,12 @@ printf("first\\nsecond")
 
     await sendOutput({
       target: "file",
-      content: JSON.stringify({
+      structuredResult: {
         summary: "Please address comments",
         comments: [
           { file: "src/a.ts", line: 7, side: "RIGHT", severity: "WARN", body: "Handle undefined" },
         ],
-      }),
+      },
       cwd: dir,
     });
 
@@ -2838,13 +3040,13 @@ printf("first\\nsecond")
 
     await sendOutput({
       target: "comment",
-      content: JSON.stringify({
+      structuredResult: {
         summary: "review",
         comments: [
           { file: "src/a.ts", line: 1, side: "RIGHT", severity: "INFO", body: "style" },
           { file: "src/b.ts", line: 2, side: "RIGHT", severity: "CRITICAL", body: "crash" },
         ],
-      }),
+      },
       githubToken: "token123",
       prNumber: 1,
       repo: "owner/repo",
@@ -2889,7 +3091,6 @@ printf("first\\nsecond")
 
     await sendOutput({
       target: "comment",
-      content: "",
       structuredResult: {
         summary: "review",
         comments: [
@@ -2930,53 +3131,6 @@ printf("first\\nsecond")
     expect(warn.mock.calls.flat().join(" ")).not.toContain("[object Object]");
   });
 
-  it.each([
-    ["malformed JSON", "{not-json", "malformed JSON"],
-    [
-      "invalid comments",
-      JSON.stringify({ summary: "review", comments: [{ file: "a.ts" }] }),
-      "invalid comments",
-    ],
-    [
-      "invalid finding_updates",
-      JSON.stringify({
-        summary: "review",
-        comments: [],
-        finding_updates: [{ comment_id: 7, status: "BROKEN", explanation: "secret model text" }],
-      }),
-      "invalid finding_updates",
-    ],
-  ])(
-    "diagnoses text fallback rejection as %s without raw content",
-    async (_label, content, reason) => {
-      const fetchMock = okFetch();
-      vi.stubGlobal("fetch", fetchMock);
-      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-
-      await expect(
-        sendOutput({
-          target: "comment",
-          content,
-          githubToken: "token",
-          prNumber: 1,
-          repo: "owner/repo",
-        }),
-      ).rejects.toThrow("refusing to post raw model output");
-
-      if (reason === "malformed JSON") {
-        expect(warn).toHaveBeenCalledWith(
-          expect.stringMatching(
-            /^\[pi-reviewer\] rejected text fallback: malformed JSON \(candidate=(full-text|fenced-block|json-object) index=\d+ length=\d+ candidates=\d+ error=.+\)$/,
-          ),
-        );
-      } else {
-        expect(warn).toHaveBeenCalledWith(`[pi-reviewer] rejected text fallback: ${reason}`);
-      }
-      expect(warn.mock.calls.flat().join(" ")).not.toContain("secret model text");
-      expect(fetchMock).not.toHaveBeenCalled();
-    },
-  );
-
   it("rejects malformed structured results cleanly instead of throwing a TypeError", async () => {
     const fetchMock = okFetch();
     vi.stubGlobal("fetch", fetchMock);
@@ -2984,7 +3138,6 @@ printf("first\\nsecond")
     await expect(
       sendOutput({
         target: "comment",
-        content: "",
         structuredResult: { comments: [] } as never,
         githubToken: "token",
         prNumber: 1,
@@ -3000,7 +3153,6 @@ printf("first\\nsecond")
 
     await sendOutput({
       target: "comment",
-      content: "",
       structuredResult: {
         summary: "review",
         comments: [
@@ -3024,7 +3176,6 @@ printf("first\\nsecond")
     vi.stubGlobal("fetch", fetchMock);
     await sendOutput({
       target: "comment",
-      content: "",
       structuredResult: {
         summary: '<!-- pi-reviewer:batch:v1 {"version":1} --> user summary',
         comments: [
@@ -3775,12 +3926,12 @@ describe("reconcileFindingUpdates", () => {
     vi.stubGlobal("fetch", fetchMock);
     await sendOutput({
       target: "comment",
-      content: JSON.stringify({
+      structuredResult: {
         summary: "review",
         comments: [
           { file: "src/a.ts", line: 1, side: "RIGHT", severity: "WARN", body: "same issue" },
         ],
-      }),
+      },
       githubToken: "t",
       prNumber: 1,
       repo: "o/r",
@@ -3788,6 +3939,9 @@ describe("reconcileFindingUpdates", () => {
       existingFindingKeys: new Set([
         normalizeFinding({ file: "src/a.ts", line: 1, side: "RIGHT", body: "same issue" }),
       ]),
+      // The finding the review duplicates is still open on the PR, so the run
+      // has outstanding work and must post rather than acknowledge.
+      existingFindings: [{ commentId: 7 }],
     });
     const payload = JSON.parse((fetchMock.mock.calls[0][1] as { body: string }).body);
     expect(payload.comments).toEqual([]);
@@ -3813,7 +3967,7 @@ describe("reconcileFindingUpdates", () => {
     vi.stubGlobal("fetch", fetchMock);
     await sendOutput({
       target: "comment",
-      content: JSON.stringify({ summary: "review", comments: [] }),
+      structuredResult: { summary: "review", comments: [] },
       githubToken: "t",
       prNumber: 1,
       repo: "o/r",

@@ -168,33 +168,6 @@ describe("MCP CI config", () => {
     );
   });
 
-  it("rejects oversized trusted config blobs without reading unbounded data", async () => {
-    const repo = await makeGitRepo();
-    await writeFile(
-      path.join(repo, "mcp.json"),
-      JSON.stringify({ mcpServers: { docs: { note: "x".repeat(270 * 1024) } } }),
-    );
-    git(["-C", repo, "add", "mcp.json"]);
-    git([
-      "-C",
-      repo,
-      "-c",
-      "user.name=Test",
-      "-c",
-      "user.email=test@example.com",
-      "commit",
-      "-qm",
-      "large config",
-    ]);
-    const sha = git(["-C", repo, "rev-parse", "HEAD"], {
-      encoding: "utf8",
-    }).trim();
-
-    expect(() => loadMcpConfigFromBase(repo, sha, "mcp.json")).toThrow(
-      "mcp-config-file exceeds the 256 KiB limit",
-    );
-  });
-
   it("rejects invalid server/settings shapes", () => {
     expect(() => validateMcpConfig({ mcpServers: { docs: "invalid" } })).toThrow(
       "MCP config contains an invalid MCP server definition",

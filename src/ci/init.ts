@@ -46,7 +46,7 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
-      issues: write # Required when react-on-no-findings is enabled.
+      issues: write # Required to post comments and reactions.
 
     concurrency:
       group: pi-reviewer-\${{ github.repository }}-\${{ github.event.pull_request.number || github.event.issue.number || inputs.pr-number || github.run_id }}
@@ -67,7 +67,6 @@ jobs:
           thinking: off
           min-severity: \${{ inputs.min-severity || 'info' }}
           review-drafts: '${reviewDrafts ? "true" : "false"}'
-          react-on-no-findings: 'true'
           # summary: 'false' # opt out of PR summaries (enabled by default)
           # Optional workflow_dispatch inputs:
           # pr-number: 123

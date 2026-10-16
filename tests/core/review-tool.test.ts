@@ -11,6 +11,7 @@ function toolCall(args: Record<string, unknown>) {
 
 function validArgs() {
   return {
+    action: "review" as const,
     summary: "Looks good overall.",
     comments: [
       {
@@ -32,20 +33,20 @@ function validArgs() {
 }
 
 describe("createReviewTool", () => {
-  it("execute populates getResult() with the submitted review", async () => {
+  it("execute populates getResult() with the review decision", async () => {
     const { tool, getResult } = createReviewTool();
 
     expect(getResult()).toBeUndefined();
 
-    const args = validArgs();
-    await tool.execute("tc-1", args);
+    await tool.execute("tc-1", validArgs());
 
-    const result = getResult();
-    expect(result).toBeDefined();
-    expect(result!.summary).toBe("Looks good overall.");
-    expect(result!.comments).toHaveLength(2);
-    expect(result!.comments[0].file).toBe("src/a.ts");
-    expect(result!.comments[1].severity).toBe("CRITICAL");
+    const decision = getResult();
+    expect(decision?.action).toBe("review");
+    if (decision?.action !== "review") throw new Error("expected a review decision");
+    expect(decision.result.summary).toBe("Looks good overall.");
+    expect(decision.result.comments).toHaveLength(2);
+    expect(decision.result.comments[0].file).toBe("src/a.ts");
+    expect(decision.result.comments[1].severity).toBe("CRITICAL");
   });
 
   it("execute returns terminate: true", async () => {
@@ -66,12 +67,35 @@ describe("createReviewTool", () => {
 
   it("accepts an empty comments array", async () => {
     const { tool, getResult } = createReviewTool();
-    const args = { summary: "LGTM", comments: [] };
-    await tool.execute("tc-1", args);
+    await tool.execute("tc-1", { action: "review", summary: "LGTM", comments: [] });
 
-    const result = getResult();
-    expect(result!.summary).toBe("LGTM");
-    expect(result!.comments).toEqual([]);
+    const decision = getResult();
+    if (decision?.action !== "review") throw new Error("expected a review decision");
+    expect(decision.result.summary).toBe("LGTM");
+    expect(decision.result.comments).toEqual([]);
+  });
+
+  it("rejects action review with no summary at runtime", async () => {
+    const { tool } = createReviewTool();
+    await expect(tool.execute("tc-1", { action: "review", comments: [] })).rejects.toThrow(
+      /"summary" is required/,
+    );
+  });
+
+  // ── None action ────────────────────────────────────────────────────────
+
+  it("captures a none decision", async () => {
+    const { tool, getResult } = createReviewTool();
+    await tool.execute("tc-1", { action: "none" });
+
+    expect(getResult()).toEqual({ action: "none" });
+  });
+
+  it("rejects none carrying review fields", async () => {
+    const { tool } = createReviewTool();
+    await expect(
+      tool.execute("tc-1", { action: "none", summary: "sneaky" } as never),
+    ).rejects.toThrow(/must not carry review fields/);
   });
 
   // ── Schema validation (via validateToolArguments) ──────────────────────
@@ -79,6 +103,19 @@ describe("createReviewTool", () => {
   it("schema accepts valid arguments", () => {
     const { tool } = createReviewTool();
     expect(() => validateToolArguments(tool, toolCall(validArgs()))).not.toThrow();
+  });
+
+  it("schema rejects a missing action", () => {
+    const { tool } = createReviewTool();
+    const { action: _action, ...withoutAction } = validArgs();
+    expect(() => validateToolArguments(tool, toolCall(withoutAction))).toThrow(/Validation failed/);
+  });
+
+  it("schema rejects an unknown action", () => {
+    const { tool } = createReviewTool();
+    expect(() =>
+      validateToolArguments(tool, toolCall({ ...validArgs(), action: "dismiss" })),
+    ).toThrow(/Validation failed/);
   });
 
   it("schema accepts an optional PR summary and diagram", () => {
@@ -137,13 +174,6 @@ describe("createReviewTool", () => {
     const { tool } = createReviewTool();
     const args = validArgs();
     (args.comments[0] as Record<string, unknown>).line = 10.5;
-
-    expect(() => validateToolArguments(tool, toolCall(args))).toThrow(/Validation failed/);
-  });
-
-  it("schema rejects a missing summary", () => {
-    const { tool } = createReviewTool();
-    const args = { comments: [] } as Record<string, unknown>;
 
     expect(() => validateToolArguments(tool, toolCall(args))).toThrow(/Validation failed/);
   });

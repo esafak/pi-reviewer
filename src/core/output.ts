@@ -111,8 +111,7 @@ export interface ParsedAgentResponse {
 
 export interface OutputOptions {
   target: OutputTarget;
-  content?: string;
-  /** Schema-validated result from submit_review. When present, content is not parsed. */
+  /** Schema-validated review content; present unless the model chose "none". */
   structuredResult?: ReviewResult;
   cwd?: string;
   githubToken?: string;
@@ -131,8 +130,12 @@ export interface OutputOptions {
   existingFindingKeys?: ReadonlySet<string>;
   allowedFindingIds?: ReadonlySet<number>;
   resolvedFindings?: ResolvedFinding[];
-  /** React to the pull request instead of posting a comment when no findings remain. */
-  reactOnNoFindings?: boolean;
+  /**
+   * The model chose the "none" action: it has nothing to publish. The harness
+   * acknowledges the PR itself — a thumbs-up when it has no open findings,
+   * otherwise a marker-only no-op — and never posts a review body.
+   */
+  none?: boolean;
   /** Render the collapsible PR summary block when the result carries an overview. */
   summaryEnabled?: boolean;
   /** True when no prior authenticated review with a body exists (first review). */
@@ -623,6 +626,22 @@ function isReviewComment(value: unknown): value is ReviewComment {
   );
 }
 
+/**
+ * Text-fallback recovery: a model that omits `side` almost always means an
+ * added/context line, which is RIGHT. Only a genuinely absent side is filled
+ * in — an unrecognized value fails closed rather than guessing. The
+ * submit_review tool schema requires `side`, so schema-validated output never
+ * relies on this default.
+ */
+function withDefaultCommentSide(comments: readonly unknown[]): unknown[] {
+  return comments.map((comment) => {
+    if (!comment || typeof comment !== "object") return comment;
+    const record = comment as Record<string, unknown>;
+    if (record.side !== undefined && record.side !== null && record.side !== "") return comment;
+    return { ...record, side: "RIGHT" };
+  });
+}
+
 /** A candidate substring tagged with its start index in the original text. */
 interface Candidate {
   content: string;
@@ -752,21 +771,6 @@ function sanitizeDiagnosticExcerpt(content: string, errorPosition?: number): str
     .replace(/[A-Za-z0-9_\-+/=]{20,}/g, "[redacted]");
   if (redacted.length <= MAX_DIAGNOSTIC_EXCERPT_LENGTH) return redacted;
   return `${redacted.slice(0, MAX_DIAGNOSTIC_EXCERPT_LENGTH)}…`;
-}
-
-/** Single-line, secret-safe summary for the rejection warning; never the full response. */
-export function formatFallbackDiagnostic(detail?: FallbackParseDiagnostic): string {
-  if (!detail || detail.candidateSource === "none") return "no JSON candidate found";
-  const parts = [
-    `candidate=${detail.candidateSource}`,
-    `index=${detail.candidateIndex}`,
-    `length=${detail.candidateLength}`,
-    `candidates=${detail.candidateCount}`,
-  ];
-  if (detail.error) parts.push(`error=${detail.error}`);
-  if (detail.errorPosition !== undefined) parts.push(`position=${detail.errorPosition}`);
-  if (detail.excerpt) parts.push(`excerpt=${detail.excerpt}`);
-  return parts.join(" ");
 }
 
 interface JsonParseAttempt {
@@ -907,6 +911,15 @@ export function parseAgentResponseWithStatus(
   for (const { content, index, source } of candidates) {
     const attempt = tryParseJSONDetailed(content);
     const parsed = attempt.parsed;
+    // Lenient parse for local/SSH display only: this parser never feeds the CI
+    // posting path, which requires the submit_review schema where `side` is
+    // mandatory. A missing side therefore defaults here but is never guessed
+    // for anything that gets posted.
+    const comments =
+      parsed && Array.isArray(parsed.comments)
+        ? withDefaultCommentSide(parsed.comments)
+        : undefined;
+    const commentsValid = comments !== undefined && comments.every(isReviewComment);
     // Empty candidates carry no signal; skipping them keeps an empty fence
     // from outranking a position-less full-text failure.
     if (!parsed && content.length > 0) {
@@ -933,7 +946,7 @@ export function parseAgentResponseWithStatus(
       rejectionReason =
         typeof parsed.summary !== "string"
           ? "invalid summary"
-          : !Array.isArray(parsed.comments) || !parsed.comments.every(isReviewComment)
+          : !commentsValid
             ? "invalid comments"
             : parsed.finding_updates !== undefined &&
                 (!Array.isArray(parsed.finding_updates) ||
@@ -948,20 +961,14 @@ export function parseAgentResponseWithStatus(
     const updatesValid = rawUpdates.every(
       (u) => findingUpdateRejection(u, allowedFindingIds).update !== undefined,
     );
-    if (
-      parsed &&
-      typeof parsed.summary === "string" &&
-      Array.isArray(parsed.comments) &&
-      parsed.comments.every(isReviewComment) &&
-      updatesValid
-    ) {
+    if (parsed && typeof parsed.summary === "string" && commentsValid && updatesValid) {
       const diff = typeof parsed.diff === "string" ? parsed.diff : undefined;
       const prSummary = typeof parsed.pr_summary === "string" ? parsed.pr_summary : undefined;
       const prDiagram = typeof parsed.pr_diagram === "string" ? parsed.pr_diagram : undefined;
       const review = normalizeReviewResult(
         {
           summary: parsed.summary,
-          comments: parsed.comments as ReviewComment[],
+          comments: comments as ReviewComment[],
           finding_updates: rawUpdates as FindingUpdate[],
           ...(prSummary !== undefined ? { pr_summary: prSummary } : {}),
           ...(prDiagram !== undefined ? { pr_diagram: prDiagram } : {}),
@@ -974,7 +981,7 @@ export function parseAgentResponseWithStatus(
       // Base the preference on what the model emitted, not on what remains
       // after minSeverity filtering. A genuine review whose findings are all
       // below the configured threshold must still beat an earlier draft.
-      if (parsed.comments.length > 0) resultWithComments = review;
+      if (comments.length > 0) resultWithComments = review;
     }
   }
 
@@ -1460,29 +1467,104 @@ export function formatForTerminal(result: ReviewResult): string {
   return hasActionableFindings(result.comments) ? appendAiFixFooter(body) : body;
 }
 
-export async function sendOutput(options: OutputOptions): Promise<OutputMetadata> {
-  let parsedResponse: ParsedAgentResponse;
-  if (options.structuredResult !== undefined) {
-    const rejectionReason = structuredResultRejection(options.structuredResult);
-    if (rejectionReason) {
-      console.warn(`[pi-reviewer] rejected structured result: ${rejectionReason}`);
-      throw new Error(`Agent output was not a valid structured review: ${rejectionReason}`);
-    }
-    parsedResponse = {
-      result: normalizeReviewResult(options.structuredResult, options, true),
-      parsed: true,
-    };
-  } else {
-    parsedResponse = parseAgentResponseWithStatus(
-      options.content ?? "",
-      options.minSeverity,
-      options.allowedFindingIds,
-      options.existingFindingKeys,
-      options.resolvedFindings,
-      options,
-    );
+/**
+ * Acknowledge the PR without posting a review body: leave a thumbs-up when the
+ * review has nothing left to report, and record the reviewed range with the
+ * batch marker. The reaction is a function of state, so the caller decides it —
+ * a review with open findings must not be greeted with a thumbs-up.
+ */
+async function acknowledgeWithoutReview(options: OutputOptions, react: boolean): Promise<void> {
+  if (!options.githubToken || typeof options.prNumber !== "number" || !options.repo) return;
+  const client = new GitHubClient(options.githubToken);
+  const repo = options.repo;
+  const prNumber = options.prNumber;
+  // The acknowledgement claims "the reviewer looked at this commit", so head
+  // staleness is verified whenever a commit is pinned — whether or not a batch
+  // marker will be written.
+  if (options.commitId) {
+    const current = await client.getPullRequest(repo, prNumber);
+    if (current.head.sha !== options.commitId)
+      throw new Error(
+        "PR head changed while the review was running; refusing to post a stale review",
+      );
   }
-  const result = parsedResponse.result;
+  if (!react) {
+    console.log("[pi-reviewer] open findings remain — recording the range without a reaction");
+  } else {
+    try {
+      const identity = await client.getUser();
+      const reactions = await client.listReactions(repo, prNumber);
+      if (
+        !reactions.some(
+          (reaction) => reaction.content === "+1" && reaction.user?.login === identity.login,
+        )
+      ) {
+        await client.createReaction(repo, prNumber);
+        console.log("[pi-reviewer] no findings — left a thumbs-up reaction on the PR");
+      } else {
+        console.log("[pi-reviewer] no findings — thumbs-up reaction already exists on the PR");
+      }
+    } catch (error) {
+      console.warn(
+        `[pi-reviewer] could not leave a thumbs-up reaction: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+  if (options.batchMarker && options.commitId) {
+    try {
+      const markerReview = await client.createReview(
+        repo,
+        prNumber,
+        options.batchMarker,
+        options.commitId,
+        [],
+      );
+      if (markerReview.id) {
+        const finalized = options.batchMarker.replace(
+          /("reviewId"\s*:\s*)0/,
+          `$1${markerReview.id}`,
+        );
+        if (finalized !== options.batchMarker)
+          await client
+            .updateReview(repo, prNumber, markerReview.id, finalized)
+            .catch((error) =>
+              console.warn(
+                `[pi-reviewer] could not finalize batch marker: ${error instanceof Error ? error.message : String(error)}`,
+              ),
+            );
+      }
+    } catch (error) {
+      console.warn(
+        `[pi-reviewer] could not create batch marker: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+}
+
+export async function sendOutput(options: OutputOptions): Promise<OutputMetadata> {
+  if (options.none) {
+    if (options.target === "comment") {
+      if (!options.githubToken) throw new Error("GITHUB_TOKEN is required to post a comment");
+      if (typeof options.prNumber !== "number")
+        throw new Error("PR number is required to post a comment");
+      if (!options.repo) throw new Error("Repository (owner/repo) is required to post a comment");
+      await acknowledgeWithoutReview(options, (options.existingFindings?.length ?? 0) === 0);
+    } else {
+      console.log("[pi-reviewer] no findings to report");
+    }
+    return { commentIds: [], fallback: false };
+  }
+
+  const structuredResult = options.structuredResult;
+  if (structuredResult === undefined) {
+    throw new Error("Agent output was not a valid structured review: invalid summary");
+  }
+  const rejectionReason = structuredResultRejection(structuredResult);
+  if (rejectionReason) {
+    console.warn(`[pi-reviewer] rejected structured result: ${rejectionReason}`);
+    throw new Error(`Agent output was not a valid structured review: ${rejectionReason}`);
+  }
+  const result = normalizeReviewResult(structuredResult, options, true);
 
   if (options.target === "terminal") {
     console.log(formatForTerminal(result));
@@ -1500,18 +1582,6 @@ export async function sendOutput(options: OutputOptions): Promise<OutputMetadata
 
     if (!options.repo) {
       throw new Error("Repository (owner/repo) is required to post a comment");
-    }
-
-    if (!parsedResponse.parsed) {
-      const reason = parsedResponse.rejectionReason ?? "invalid structured review";
-      const diagnostic =
-        parsedResponse.rejectionReason === "malformed JSON" && parsedResponse.rejectionDetail
-          ? ` (${formatFallbackDiagnostic(parsedResponse.rejectionDetail)})`
-          : "";
-      console.warn(`[pi-reviewer] rejected text fallback: ${reason}${diagnostic}`);
-      throw new Error(
-        "Agent output was not a valid structured review; refusing to post raw model output",
-      );
     }
 
     const headers = {
@@ -1549,33 +1619,20 @@ export async function sendOutput(options: OutputOptions): Promise<OutputMetadata
       .filter(Boolean)
       .join("\n\n");
 
-    if (
-      options.commitId &&
-      (options.batchMarker || (options.reactOnNoFindings && result.comments.length === 0))
-    ) {
-      const current = await new GitHubClient(options.githubToken).getPullRequest(
-        options.repo,
-        options.prNumber,
-      );
-      if (current.head.sha !== options.commitId)
-        throw new Error(
-          "PR head changed while the review was running; refusing to post a stale batch",
-        );
-    }
-
+    // A review with nothing to report — no new comments and nothing left
+    // outstanding — is acknowledged with a thumbs-up instead of a body. The
+    // reaction is a function of state, not of which action the model declared,
+    // so a model that writes a "nothing to flag" summary still gets one. The
+    // emit-once overview is the one body a findings-free review still publishes,
+    // so the acknowledgement stands down for that run.
     let outstandingFindings = new Set<number>(options.existingFindings?.map((f) => f.commentId));
-    let findingUpdatesReconciled = false;
-    // Emit-once summaries post a body even with zero findings: the first
-    // review carries the overview, so the reaction fast-path must stand down
-    // for that run (finding_updates still reconcile via the post-post path).
-    const postsSummaryBody = Boolean(
-      options.summaryEnabled && options.isFirstReview && result.pr_summary?.trim(),
-    );
+    // Only reconcile when the model actually supplied updates: with none, the
+    // outstanding set is unchanged and the call would be pure overhead.
     if (
-      options.reactOnNoFindings &&
       result.comments.length === 0 &&
-      options.existingFindings &&
-      options.commitId
+      options.existingFindings?.length &&
+      options.commitId &&
+      result.finding_updates?.length
     ) {
       outstandingFindings = await reconcileFindingUpdates({
         token: options.githubToken,
@@ -1585,76 +1642,24 @@ export async function sendOutput(options: OutputOptions): Promise<OutputMetadata
         updates: result.finding_updates ?? [],
         findings: options.existingFindings,
       });
-      findingUpdatesReconciled = true;
+    }
+    const postsSummaryBody = Boolean(
+      options.summaryEnabled && options.isFirstReview && result.pr_summary?.trim(),
+    );
+    if (result.comments.length === 0 && outstandingFindings.size === 0 && !postsSummaryBody) {
+      await acknowledgeWithoutReview(options, true);
+      return { commentIds: [], fallback: false };
     }
 
-    if (
-      options.reactOnNoFindings &&
-      result.comments.length === 0 &&
-      outstandingFindings.size === 0 &&
-      !postsSummaryBody
-    ) {
-      const client = new GitHubClient(options.githubToken);
-      let reactionSucceeded = false;
-      try {
-        const identity = await client.getUser();
-        const reactions = await client.listReactions(options.repo, options.prNumber);
-        if (
-          !reactions.some(
-            (reaction) => reaction.content === "+1" && reaction.user?.login === identity.login,
-          )
-        ) {
-          await client.createReaction(options.repo, options.prNumber);
-          console.log("[pi-reviewer] no findings — left a thumbs-up reaction on the PR");
-        } else {
-          console.log("[pi-reviewer] no findings — thumbs-up reaction already exists on the PR");
-        }
-        reactionSucceeded = true;
-      } catch (error) {
-        console.warn(
-          `[pi-reviewer] could not leave a thumbs-up reaction: ${error instanceof Error ? error.message : String(error)}`,
+    if (options.commitId && options.batchMarker) {
+      const current = await new GitHubClient(options.githubToken).getPullRequest(
+        options.repo,
+        options.prNumber,
+      );
+      if (current.head.sha !== options.commitId)
+        throw new Error(
+          "PR head changed while the review was running; refusing to post a stale batch",
         );
-      }
-      if (!reactionSucceeded) {
-        console.warn("[pi-reviewer] falling back to the normal no-findings comment");
-      } else {
-        // Keep the authenticated batch marker without adding visible review text.
-        // Reactions have no metadata, so the hidden review marker remains the
-        // durable range state used by the lifecycle reconciler.
-        let markerCreated = true;
-        if (options.batchMarker && options.commitId) {
-          try {
-            const markerReview = await client.createReview(
-              options.repo,
-              options.prNumber,
-              options.batchMarker,
-              options.commitId,
-              [],
-            );
-            if (markerReview.id) {
-              const finalized = options.batchMarker.replace(
-                /("reviewId"\s*:\s*)0/,
-                `$1${markerReview.id}`,
-              );
-              if (finalized !== options.batchMarker)
-                await client
-                  .updateReview(options.repo, options.prNumber, markerReview.id, finalized)
-                  .catch((error) =>
-                    console.warn(
-                      `[pi-reviewer] could not finalize batch marker: ${error instanceof Error ? error.message : String(error)}`,
-                    ),
-                  );
-            }
-          } catch (error) {
-            markerCreated = false;
-            console.warn(
-              `[pi-reviewer] could not create batch marker: ${error instanceof Error ? error.message : String(error)}`,
-            );
-          }
-        }
-        if (markerCreated) return { commentIds: [], fallback: false };
-        console.warn("[pi-reviewer] falling back to the normal no-findings comment");
-      }
     }
 
     // Try PR Reviews API first (supports inline comments and a body).
@@ -1701,7 +1706,6 @@ export async function sendOutput(options: OutputOptions): Promise<OutputMetadata
           }
         }
         if (
-          !findingUpdatesReconciled &&
           result.finding_updates?.length &&
           options.existingFindings &&
           options.githubToken &&
@@ -1718,7 +1722,7 @@ export async function sendOutput(options: OutputOptions): Promise<OutputMetadata
             findings: options.existingFindings,
           });
         }
-        if (options.reactOnNoFindings && comments.length > 0)
+        if (comments.length > 0)
           await clearStaleThumbsUp(options.githubToken, options.repo, options.prNumber);
         const posted = await responseJson(reviewResponse);
         return {
@@ -1783,7 +1787,6 @@ export async function sendOutput(options: OutputOptions): Promise<OutputMetadata
             }
           }
           if (
-            !findingUpdatesReconciled &&
             result.finding_updates?.length &&
             options.existingFindings &&
             options.githubToken &&
@@ -1799,7 +1802,7 @@ export async function sendOutput(options: OutputOptions): Promise<OutputMetadata
               updates: result.finding_updates,
               findings: options.existingFindings,
             });
-          if (options.reactOnNoFindings && comments.length > 0)
+          if (comments.length > 0)
             await clearStaleThumbsUp(options.githubToken, options.repo, options.prNumber);
           const posted = await responseJson(reviewResponse);
           return {
@@ -1838,7 +1841,7 @@ export async function sendOutput(options: OutputOptions): Promise<OutputMetadata
     }
 
     console.log("[pi-reviewer] review comment posted");
-    if (options.reactOnNoFindings && comments.length > 0)
+    if (comments.length > 0)
       await clearStaleThumbsUp(options.githubToken, options.repo, options.prNumber);
     const posted = await responseJson(issueResponse);
     return { commentIds: posted?.id ? [posted.id] : [], fallback: true };

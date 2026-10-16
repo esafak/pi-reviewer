@@ -423,7 +423,6 @@ async function main(): Promise<void> {
       piApiKey: process.env.PI_API_KEY,
       githubToken: token,
       repo,
-      reactOnNoFindings: process.env.REACT_ON_NO_FINDINGS === "true",
       summary: parseSummaryFlag(process.env.PI_REVIEWER_SUMMARY),
       isFirstReview: !hasPriorBodiedReview,
       mcpConfig,

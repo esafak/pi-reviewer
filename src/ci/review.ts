@@ -19,7 +19,7 @@ import {
   extractLastAssistantText,
   normalizeFinding,
   normalizeReviewResult,
-  parseAgentResponseWithStatus,
+  type OutputOptions,
   type OutputTarget,
   type Severity,
 } from "../core/output.js";
@@ -31,7 +31,7 @@ import {
   type ActiveFindingContext,
   type ResolvedFindingContext,
 } from "../core/prompt-builder.js";
-import { createReviewTool } from "../core/review-tool.js";
+import { createReviewTool, type ReviewDecision } from "../core/review-tool.js";
 import { ALLOWED_REACTIONS, createReplyTool, type ReplyAction } from "../core/reply-tool.js";
 import { normalizeMarkdownText } from "../core/ai-fix-footer.js";
 import { PROMPTS } from "../core/prompts.js";
@@ -51,8 +51,30 @@ import { probeGhCli } from "./github-research/gh-runner.js";
 import { KNOWN_CI_TOOL_NAMES, MCP_TOOL_NAME } from "./tool-names.js";
 import type { CiMcpConfig } from "./mcp-config.js";
 import { formatServerNamespace, getServerPrefix } from "pi-mcp-adapter/types";
-import { log, logAssistantFallback } from "./log.js";
+import { log } from "./log.js";
 import type { Logger } from "../logging/index.js";
+
+/**
+ * Maps the model's typed decision to the output call. The dispatch is
+ * exhaustive: an action the harness does not understand is a bug, never a
+ * silent fall-through.
+ */
+function decisionToOutput(
+  decision: ReviewDecision,
+): Pick<OutputOptions, "structuredResult" | "none"> {
+  switch (decision.action) {
+    case "review":
+      return { structuredResult: decision.result };
+    case "none":
+      return { none: true };
+    default: {
+      const unexpected: never = decision;
+      throw new Error(
+        `Unexpected review action: ${String((unexpected as { action?: unknown }).action)}`,
+      );
+    }
+  }
+}
 
 export interface ReviewOptions {
   logger?: Logger;
@@ -79,7 +101,6 @@ export interface ReviewOptions {
   resolvedFindings?: ResolvedFindingContext[];
   allowEmptyDiff?: boolean;
   priorSummary?: string;
-  reactOnNoFindings?: boolean;
   title?: string | null;
   body?: string | null;
   /** Emit the opt-out PR summary (What/Why/Risk) on the first bodied CI review. */
@@ -799,8 +820,8 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
   let unsubscribe: (() => void) | undefined;
 
   try {
-    let finalResponse = "";
-    let structuredResult: ReturnType<typeof getResult>;
+    let reviewDecision: ReviewDecision | undefined;
+    let runMessages: unknown[] = [];
     const thinkingTrace: Array<Record<string, unknown>> = [];
     let pendingThinking: { timestamp: string; text: string } | undefined;
     let thinkingDeltaCount = 0;
@@ -978,6 +999,7 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
 
         const ev = event as { messages?: unknown; stopReason?: string; errorMessage?: string };
         const msgs = Array.isArray(ev.messages) ? ev.messages : [];
+        runMessages = msgs;
         const lastAssistant = [...msgs]
           .reverse()
           .find((m) => (m as { role?: string })?.role === "assistant") as
@@ -1011,54 +1033,10 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
           return;
         }
 
-        // Prefer the submit_review tool result (schema-validated happy path).
-        // Fall back to text extraction + the fixed parser for models that don't
-        // call the tool.
-        const toolResult = getResult();
-        if (toolResult) {
-          structuredResult = toolResult;
-          logger.info("review.agent.completed", "Agent completed via submit_review tool", {
-            comments: toolResult.comments.length,
-          });
-          resolve();
-          return;
-        }
-
-        finalResponse = extractLastAssistantText(ev.messages);
-
-        if (!finalResponse.trim()) {
-          let shape: unknown = typeof lastAssistant?.content;
-          if (Array.isArray(lastAssistant?.content)) {
-            shape = (lastAssistant!.content as Array<Record<string, unknown>>).map((p) => ({
-              type: p?.type ?? typeof p,
-              len:
-                typeof p?.text === "string"
-                  ? p.text.length
-                  : typeof p?.thinking === "string"
-                    ? p.thinking.length
-                    : 0,
-            }));
-          }
-          logger.error("review.agent.empty_response", "Agent returned an empty response", {
-            stopReason: ev.stopReason ?? "unknown",
-            assistantMessages: msgs.filter((m) => (m as { role?: string })?.role === "assistant")
-              .length,
-            lastAssistantContent: shape,
-          });
-          reject(new Error("Agent returned an empty response"));
-          return;
-        }
-
-        // Preserve the exact text fallback in CI logs. Prefix every line so
-        // model-generated `::command` text cannot be interpreted as a GitHub
-        // Actions command. This is the only artifact available when a model
-        // emits a textual/tool-protocol response instead of calling
-        // submit_review.
-        logger.warn("review.text_fallback", "submit_review was not called; using text fallback");
-        logAssistantFallback(finalResponse, logger);
-        logger.info("review.agent.completed_fallback", "Agent completed with text fallback", {
-          responseLength: finalResponse.length,
-        });
+        // submit_review is the only structured contract; a text-only response is
+        // a failed review, so the harness never parses model prose.
+        const decision = getResult();
+        if (decision) reviewDecision = decision;
         resolve();
       });
     });
@@ -1069,6 +1047,27 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
     } finally {
       await writeThinkingTrace();
     }
+
+    if (!reviewDecision) {
+      // The model finished without calling submit_review. The prose review it
+      // may have emitted is deliberately not parsed, so there is nothing to
+      // post. Log a bounded, command-inert excerpt for diagnosis, then fail.
+      const lastText = extractLastAssistantText(runMessages);
+      const excerpt = lastText
+        .slice(-4000)
+        .split("\n")
+        .map((line) => (line.startsWith("::") ? ` ${line}` : line))
+        .join("\n");
+      logger.error("review.agent.no_decision", "Agent finished without calling submit_review", {
+        textLength: lastText.length,
+        textExcerpt: excerpt,
+      });
+      throw new Error("Agent finished without calling submit_review");
+    }
+    logger.info("review.agent.completed", "Agent completed via submit_review tool", {
+      action: reviewDecision.action,
+      comments: reviewDecision.action === "review" ? reviewDecision.result.comments.length : 0,
+    });
     if (failedMcpCalls.size > 0) {
       const entries = [...failedMcpCalls.values()].slice(0, 5);
       // Parallel arrays: servers repeats per entry ("unknown" when the
@@ -1097,19 +1096,25 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
     // and posts nothing: any comments or findings the model emitted are
     // discarded, so a whole-diff pass can never file findings on old commits.
     if (options.summaryOnly) {
-      const normalized = structuredResult
-        ? normalizeReviewResult(structuredResult, { minSeverity: options.minSeverity }, false)
-        : parseAgentResponseWithStatus(finalResponse, options.minSeverity).result;
+      // The overview only exists on a "review" decision; a "none" decision
+      // carries no summary fields.
+      const normalized =
+        reviewDecision.action === "review"
+          ? normalizeReviewResult(
+              reviewDecision.result,
+              { minSeverity: options.minSeverity },
+              false,
+            )
+          : undefined;
       const overview: SummaryOverview = {};
-      if (normalized.pr_summary?.trim()) overview.pr_summary = normalized.pr_summary;
-      if (normalized.pr_diagram?.trim()) overview.pr_diagram = normalized.pr_diagram;
+      if (normalized?.pr_summary?.trim()) overview.pr_summary = normalized.pr_summary;
+      if (normalized?.pr_diagram?.trim()) overview.pr_diagram = normalized.pr_diagram;
       return overview;
     }
 
     await sendOutput({
       target,
-      content: finalResponse,
-      structuredResult,
+      ...decisionToOutput(reviewDecision),
       cwd,
       githubToken,
       prNumber: options.pr,
@@ -1141,7 +1146,6 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
       ),
       allowedFindingIds: new Set(options.activeFindings?.map((f) => f.commentId)),
       resolvedFindings,
-      reactOnNoFindings: options.reactOnNoFindings,
       summaryEnabled,
       isFirstReview: options.isFirstReview ?? true,
       evidence: searchClient?.snapshot(),

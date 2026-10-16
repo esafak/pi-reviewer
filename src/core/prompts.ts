@@ -13,28 +13,22 @@ export const PROMPTS = {
       "- Only flag what is actually wrong in the diff — no hypotheticals",
       "- If nothing is wrong, say so clearly",
     ],
-    jsonIntro: [
+    // The review agent always registers the submit_review tool, so the prompt
+    // makes that the one structured-output contract. A parallel "return JSON
+    // text" instruction competes with the tool call and lets models satisfy the
+    // (louder, more concrete) text format instead of ever calling the tool.
+    toolIntro: [
       "- Do not repeat what the project conventions already enforce",
-      "If a submit_review tool is available, prefer calling it to submit your review as structured data instead of emitting JSON text.",
-      "Return only a JSON object matching this schema exactly (no markdown fences, no extra text, no extra fields — do not include the diff or any other field):",
+      "Deliver your decision by calling the submit_review tool exactly once as your final action.",
+      "Never print the review, or a JSON object representing it, as text. A response that does not call submit_review is treated as a failed review and its content is discarded.",
     ],
-    jsonFormat: [
-      "<output_format>",
-      "{",
-      '  "summary": "Overall review in **Markdown**. Use bullet points, `code spans`, and **bold** for clarity.",',
-      '  "pr_summary": "Optional What/Why/Risk overview of the shown diff (omit when disabled or for follow-up batches).",',
-      '  "pr_diagram": "Optional raw Mermaid source, no fences (omit for localized changes).",',
-      '  "comments": [',
-      '    { "file": "src/auth.ts", "line": 42, "side": "RIGHT", "severity": "CRITICAL", "body": "Inline comment in Markdown." },',
-      '    { "file": "src/cache.ts", "line": 18, "side": "RIGHT", "severity": "WARN", "body": "Another finding.", "suggestion": "Optional replacement code when useful." }',
-      "  ]",
-      '  ,"finding_updates": [{ "comment_id": 123, "status": "RESOLVED", "explanation": "The null check now handles this path." }]',
-      "}",
-      "</output_format>",
-    ],
+    // The action field is the tool's one decision point; it names only what the
+    // model has (content or nothing), never a harness outcome.
+    actionRule:
+      '- action: "review" to publish your findings and/or summary, or "none" (with no other fields) when there is nothing to publish. Use "review" even with no new comments when recording the resolution status of existing findings.',
     fieldRules: [
       "- summary: overall review written in Markdown",
-      "- pr_summary: What/Why/Risk overview of the shown diff for the PR summary block — never merge it into summary",
+      "- pr_summary: What/Why/Risk overview of the shown diff for the PR summary block; structure it with `### What`, `### Why`, and `### Risks` Markdown headings",
       "- comments: inline comments attached to specific diff lines (may be empty [])",
       "- finding_updates: optional array for existing findings only; comment_id must match an active finding supplied below",
       "- PARTIALLY_RESOLVED explanations must state both what changed and what remains unresolved",
@@ -50,7 +44,7 @@ export const PROMPTS = {
   },
   prSummary: [
     "When the PR summary block is enabled, also return pr_summary and, when useful, pr_diagram:",
-    "- pr_summary: What (bulleted file/feature changes in the shown diff), Why (inferred intent from the title/body/diff, labeled as inference), Risks (edge cases and follow-ups). Markdown, at most 2000 characters.",
+    "- pr_summary: What (bulleted file/feature changes in the shown diff), Why (inferred intent from the title/body/diff, labeled as inference), Risks (edge cases and follow-ups). Use `### What`, `### Why`, and `### Risks` Markdown headings for the three sections — never bold. Markdown, at most 2000 characters.",
     "- pr_diagram: raw Mermaid source with no fences, at most 1500 characters. Emit only when a diagram would change a reviewer's understanding: the diff introduces or alters a multi-component interaction — a new subsystem, a new or changed flow across two or more files (request path, data flow, call sequence), or a changed state machine. Omit for localized changes: single-file fixes, renames, config/dependency bumps, docs-only diffs, and refactors with identical structure. Prefer flowchart TD for structure and data flow, sequenceDiagram for call order.",
     "- Keep the findings summary strictly to the findings verdict: what is wrong, where, and how severe — one line when there is nothing to report. Never re-describe the PR itself there; all change explanation belongs in pr_summary.",
     "- Never include secrets, tokens, private source beyond the diff, or the full diff text. Never invent citation IDs.",
