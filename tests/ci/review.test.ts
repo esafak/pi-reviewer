@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { createLogger, createMemorySink, formatGroup } from "../../src/logging/index.js";
+import { createLogger, createMemorySink } from "../../src/logging/index.js";
 
 vi.mock("node:fs/promises", async (importActual) => {
   const actual = await importActual<typeof import("node:fs/promises")>();
@@ -261,7 +261,7 @@ describe("review", () => {
         parameters: {},
         execute: vi.fn(),
       },
-      getResult: () => undefined,
+      getResult: () => ({ action: "review", result: { summary: "LGTM", comments: [] } }),
     });
     createReplyToolMock.mockReturnValue({
       tool: {
@@ -359,7 +359,7 @@ describe("review", () => {
     expect(sendOutputMock).toHaveBeenCalledWith(
       expect.objectContaining({
         target: "terminal",
-        content: "LGTM",
+        structuredResult: { summary: "LGTM", comments: [] },
         cwd: "/repo",
       }),
     );
@@ -1667,16 +1667,12 @@ describe("review", () => {
     ).rejects.toThrow(/malformed reply action/);
   });
 
-  it("passes final agent response to sendOutput", async () => {
-    AgentMock.mockImplementation(function () {
-      return makeFakeAgent("Please fix null checks in src/a.ts") as any;
-    });
-
+  it("posts the typed decision's result to sendOutput", async () => {
     await review({ cwd: "/repo" });
 
     expect(sendOutputMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        content: "Please fix null checks in src/a.ts",
+        structuredResult: { summary: "LGTM", comments: [] },
       }),
     );
   });
@@ -1696,7 +1692,7 @@ describe("review", () => {
         parameters: {},
         execute: vi.fn(),
       },
-      getResult: () => toolReview,
+      getResult: () => ({ action: "review", result: toolReview }),
     });
     AgentMock.mockImplementation(function () {
       return makeFakeAgent("") as any;
@@ -1728,7 +1724,7 @@ describe("review", () => {
         parameters: {},
         execute: vi.fn(),
       },
-      getResult: () => toolReview,
+      getResult: () => ({ action: "review", result: toolReview }),
     });
     AgentMock.mockImplementation(function () {
       return makeFakeAgent("") as any;
@@ -1770,7 +1766,7 @@ describe("review", () => {
         parameters: {},
         execute: vi.fn(),
       },
-      getResult: () => toolReview,
+      getResult: () => ({ action: "review", result: toolReview }),
     });
     AgentMock.mockImplementation(function () {
       return makeFakeAgent("") as any;
@@ -1823,7 +1819,10 @@ describe("review", () => {
         parameters: {},
         execute: vi.fn(),
       },
-      getResult: () => ({ summary: "Tool-based review", comments: [] }),
+      getResult: () => ({
+        action: "review",
+        result: { summary: "Tool-based review", comments: [] },
+      }),
     });
     AgentMock.mockImplementation(function () {
       return makeFakeAgent("") as any;
@@ -1834,7 +1833,7 @@ describe("review", () => {
     expect(sendOutputMock).toHaveBeenCalledWith(expect.objectContaining({ resolvedFindings }));
   });
 
-  it("falls back to text extraction when the model did not call submit_review", async () => {
+  it("fails without posting when the model did not call submit_review", async () => {
     createReviewToolMock.mockReturnValue({
       tool: {
         name: "submit_review",
@@ -1849,16 +1848,13 @@ describe("review", () => {
       return makeFakeAgent("Text-based review without tool") as any;
     });
 
-    await review({ cwd: "/repo" });
-
-    expect(sendOutputMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        content: "Text-based review without tool",
-      }),
+    await expect(review({ cwd: "/repo" })).rejects.toThrow(
+      "Agent finished without calling submit_review",
     );
+    expect(sendOutputMock).not.toHaveBeenCalled();
   });
 
-  it("records text fallback semantically and keeps rendered group lines inert", async () => {
+  it("logs a command-inert excerpt when submit_review was not called", async () => {
     const { sink, records } = createMemorySink();
     createReviewToolMock.mockReturnValue({
       tool: {
@@ -1874,36 +1870,19 @@ describe("review", () => {
       return makeFakeAgent("first line\n::warning::not-a-command") as any;
     });
 
-    await review({ cwd: "/repo", logger: createLogger({ sink }) });
+    await expect(review({ cwd: "/repo", logger: createLogger({ sink }) })).rejects.toThrow(
+      "Agent finished without calling submit_review",
+    );
 
-    expect(
-      records
-        .filter(
-          ({ event }) =>
-            event.startsWith("review.text_fallback") || event === "review.agent.completed_fallback",
-        )
-        .map(({ event, level, kind, fields }) => ({ event, level, kind, fields })),
-    ).toEqual([
-      { event: "review.text_fallback", level: "warn", kind: undefined, fields: {} },
-      {
-        event: "review.text_fallback.content",
-        level: "info",
-        kind: "group",
-        fields: { content: "first line\n::warning::not-a-command" },
-      },
-      {
-        event: "review.agent.completed_fallback",
-        level: "info",
-        kind: undefined,
-        fields: { responseLength: 35 },
-      },
-    ]);
-    expect(formatGroup("response", "first line\n::warning::not-a-command")).toEqual([
-      "::group::response",
-      "| first line",
-      "| ::warning::not-a-command",
-      "::endgroup::",
-    ]);
+    expect(records.find(({ event }) => event === "review.agent.no_decision")).toEqual(
+      expect.objectContaining({
+        level: "error",
+        fields: expect.objectContaining({
+          textLength: 35,
+          textExcerpt: "first line\n ::warning::not-a-command",
+        }),
+      }),
+    );
   });
 });
 

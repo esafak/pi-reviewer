@@ -28,12 +28,19 @@ describe("prompt-builder", () => {
 
     // A parallel "return JSON text" instruction competes with the tool call and
     // lets models satisfy the text format instead of calling the tool.
-    expect(prompt).toContain("Deliver the review by calling the submit_review tool");
+    expect(prompt).toContain("Deliver your decision by calling the submit_review tool");
     expect(prompt).toContain(
       "A response that does not call submit_review is treated as a failed review",
     );
     expect(prompt).not.toContain("<output_format>");
     expect(prompt).not.toContain("prefer calling it");
+  });
+
+  it("states the review | none action contract", () => {
+    const prompt = buildJSONSystemPrompt({ conventions: [], reviewRules: [] });
+    expect(prompt).toContain(
+      '- action: "review" to publish your findings and/or summary, or "none"',
+    );
   });
 
   it("injects bounded active findings and prior summary", () => {

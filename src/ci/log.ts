@@ -1,5 +1,4 @@
 import { consoleSink, createLogger } from "../logging/index.js";
-import type { Logger } from "../logging/index.js";
 
 const githubActions = process.env.GITHUB_ACTIONS === "true";
 
@@ -16,11 +15,3 @@ export const log = createLogger({
     },
   }),
 });
-
-export function logAssistantFallback(content: string, logger: Logger = log): void {
-  logger.group(
-    "review.text_fallback.content",
-    "Pi Reviewer raw assistant response (text fallback)",
-    content,
-  );
-}

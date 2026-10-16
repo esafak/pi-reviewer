@@ -28,7 +28,7 @@ export interface PullRequestContext {
   title?: string;
   body?: string;
 }
-export interface PrSummaryOptions {
+export interface ReviewPromptOptions {
   /** Request the pr_summary/pr_diagram overview fields. Defaults to false. */
   summaryEnabled?: boolean;
 }
@@ -123,11 +123,12 @@ export function buildJSONSystemPrompt(
   priorSummary?: string,
   resolvedFindings: ResolvedFindingContext[] = [],
   prContext?: PullRequestContext,
-  prSummary?: PrSummaryOptions,
+  prSummary?: ReviewPromptOptions,
 ): string {
   const baseLines = [
     ...buildSharedBase(minSeverity),
     ...PROMPTS.review.toolIntro,
+    PROMPTS.review.actionRule,
     "",
     "Field rules:",
     ...PROMPTS.review.fieldRules,

@@ -50,8 +50,8 @@ describe("init", () => {
     expect(content).toContain("pull-requests: write");
     expect(content).toContain("issues: write");
     expect(content).not.toContain("reactions: write");
+    expect(content).not.toContain("react-on-no-findings");
     expect(content).toContain("review-drafts: 'false'");
-    expect(content).toContain("          react-on-no-findings: 'true'");
   });
 
   it("creates intermediate directories when missing", async () => {
