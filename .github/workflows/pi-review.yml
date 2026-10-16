@@ -111,7 +111,6 @@ jobs:
           model: ${{ vars.MODEL_NAME }}
           thinking: off
           review-drafts: false
-          react-on-no-findings: true
           min-severity: ${{ inputs.min-severity || 'warn' }}
           github-scope: ${{ vars.PI_REVIEWER_GITHUB_SCOPE }}
           ai-search-provider: ${{ vars.PI_REVIEWER_AI_SEARCH_PROVIDER }}

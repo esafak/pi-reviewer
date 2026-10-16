@@ -49,7 +49,7 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
-      issues: write # Required when react-on-no-findings is enabled.
+      issues: write # Required to post comments and reactions.
     concurrency:
       group: pi-reviewer-${{ github.repository }}-${{ github.event.pull_request.number || github.event.issue.number || inputs.pr-number || github.run_id }}
       cancel-in-progress: false
@@ -69,7 +69,6 @@ jobs:
           # debug: 'true'
           min-severity: ${{ inputs.min-severity || 'info' }}
           review-drafts: 'false'
-          react-on-no-findings: 'true'
           # summary: 'false' # opt out of PR summaries (enabled by default)
           # Optional workflow_dispatch inputs:
           # pr-number: 123
@@ -299,7 +298,7 @@ without printing key material. It deliberately defaults all workflow runs to
 
 ## Usage
 
-Replies to Pi Reviewer findings use a strict assistant action: the provider-visible, schema-validated `submit_reply` tool is preferred, while model-requested JSON validated by `parseReplyAction` remains a compatibility fallback for models that do not call tools. Low-information acknowledgements, thanks, agreement, and completion notices receive one GitHub review-comment reaction; substantive questions, requests, disagreements, uncertainty, and technical information receive a concise root-targeted reply. Review-comment reactions are authorized by `pull-requests: write`; pull-request no-findings reactions are authorized by `issues: write`. There is no separate `reactions: write` GitHub Actions permission. Reactions are deduplicated by GitHub per comment, user, and reaction content; replies use an authenticated marker. If a no-findings reaction fails, the action warns and posts the normal no-findings comment; if a review-comment reaction fails, the action warns and skips that acknowledgement, so a reaction failure never discards the review. Code reviews continue to use the separate structured `submit_review` tool.
+Replies to Pi Reviewer findings use a strict assistant action: the provider-visible, schema-validated `submit_reply` tool is preferred, while model-requested JSON validated by `parseReplyAction` remains a compatibility fallback for models that do not call tools. Low-information acknowledgements, thanks, agreement, and completion notices receive one GitHub review-comment reaction; substantive questions, requests, disagreements, uncertainty, and technical information receive a concise root-targeted reply. Review-comment reactions are authorized by `pull-requests: write`; pull-request no-findings reactions are authorized by `issues: write`. There is no separate `reactions: write` GitHub Actions permission. Reactions are deduplicated by GitHub per comment, user, and reaction content; replies use an authenticated marker. If a no-findings reaction fails, the action warns and stays silent; nothing visible is posted. If a review-comment reaction fails, the action warns and skips that acknowledgement, so a reaction failure never discards the review. Code reviews continue to use the separate structured `submit_review` tool.
 
 On `pull_request: synchronize`, the action also scans the authenticated, paginated review-comment and thread snapshot for the oldest unprocessed direct human reply to each unresolved Pi Reviewer finding. This recovers replies whose `pull_request_review_comment` workflow was canceled or superseded. Recovery runs before the normal diff review and once more after it; each candidate is re-fetched and head-checked before model generation and every mutation, and failures for one finding do not abort the review. A later push is required: if no synchronize event runs after a canceled reply, it remains unprocessed until a future push or manual intervention. A conversational `reply` or `react` action does not resolve the finding; only the assistant's guarded `resolve` action does so.
 
@@ -342,7 +341,6 @@ To refresh the summary after the PR evolves, comment `/pi-summary` in the PR con
 | `thinking` | no | Thinking budget: `off`, `minimal`, `low`, `medium`, `high`, or `xhigh` (default: `off`) |
 | `debug` | no | Log tool calls and upload available model thinking as a one-day artifact (default: `false`). Thinking may contain sensitive context. |
 | `min-severity` | no | Minimum severity: `info`, `warn`, or `critical` (default: `info`) |
-| `react-on-no-findings` | no | Leave a thumbs-up reaction on the PR instead of posting a comment when no new findings remain and all existing findings are resolved (default: `true`) |
 | `summary` | no | Post a collapsed PR summary (What/Why/Risk with an optional Mermaid diagram) on the PR's first review (default: `true`). Set to `'false'` to opt out. CI comment reviews only. |
 | `doc-dirs` | no | Comma-separated dirs to scan for docs to inject into the review (default: empty — inject nothing) |
 | `web-search` | no | Enable regular CI web search (default: false) |
