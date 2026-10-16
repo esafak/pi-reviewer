@@ -92,6 +92,7 @@ import {
   defuseReplyMetadata,
   extractMcpErrorSignal,
   extractMcpToolIdentity,
+  FORCED_SUBMIT_TOOL,
   generateReplyResponse,
   parseReplyAction,
   resolveProviderApiKey,
@@ -195,18 +196,37 @@ const createReplyToolMock = vi.mocked(createReplyTool);
 let fakeAgentEvents: unknown[] = [];
 let fakeMcpSession: ReturnType<typeof makeFakeMcpSession>;
 
-function makeFakeAgent(text = "LGTM") {
-  return {
+interface FakeAgent {
+  subscribe: ReturnType<typeof vi.fn>;
+  prompt: ReturnType<typeof vi.fn>;
+  state: { tools: unknown[] };
+  streamFunction: ReturnType<typeof vi.fn>;
+}
+
+function makeFakeAgent(text = "LGTM"): FakeAgent {
+  let listener: ((event: unknown) => void) | undefined;
+  const agent: FakeAgent = {
     subscribe: vi.fn((cb: (event: unknown) => void) => {
-      for (const event of fakeAgentEvents) cb(event);
-      cb({
+      listener = cb;
+      return vi.fn();
+    }),
+    // Events are delivered per run, not at subscribe time: the review loop can
+    // start a second run (the retry turn), and each run has to end on its own
+    // agent_end. The prompt also calls the *installed* stream function — the
+    // review wrapper once review() has run — so a test can observe the request
+    // the run would have sent.
+    prompt: vi.fn(async () => {
+      agent.streamFunction({} as never, {} as never, {} as never);
+      for (const event of fakeAgentEvents) listener?.(event);
+      listener?.({
         type: "agent_end",
         messages: [{ role: "assistant", content: [{ type: "text", text }] }],
       });
-      return vi.fn();
     }),
-    prompt: vi.fn().mockResolvedValue(undefined),
+    state: { tools: [] },
+    streamFunction: vi.fn(),
   };
+  return agent;
 }
 
 function makeFakeMcpSession() {
@@ -1515,9 +1535,14 @@ describe("review", () => {
 
   it("surfaces a provider error attached to the last assistant message", async () => {
     AgentMock.mockImplementation(function () {
+      let listener: ((event: unknown) => void) | undefined;
       return {
         subscribe: vi.fn((cb: (event: unknown) => void) => {
-          cb({
+          listener = cb;
+          return vi.fn();
+        }),
+        prompt: vi.fn(async () => {
+          listener?.({
             type: "agent_end",
             // agent_end has no top-level error; it lives on the message (e.g. 402)
             messages: [
@@ -1530,9 +1555,9 @@ describe("review", () => {
               },
             ],
           });
-          return vi.fn();
         }),
-        prompt: vi.fn().mockResolvedValue(undefined),
+        state: { tools: [] as unknown[] },
+        streamFunction: vi.fn(),
       } as any;
     });
 
@@ -1883,6 +1908,187 @@ describe("review", () => {
         }),
       }),
     );
+  });
+
+  it("re-prompts once, without narrowing the declared tools, when submit_review was not called", async () => {
+    process.env.GITHUB_ACTIONS = "true";
+    process.env.PI_REVIEWER_WEB_SEARCH = "true";
+    process.env.PI_REVIEWER_SEARCH_PROVIDER = "duckduckgo";
+    process.env.PI_REVIEWER_CODE_EXEC = "true";
+
+    const agent = makeFakeAgent("prose only");
+    AgentMock.mockImplementation(function (options: { initialState?: { tools?: unknown[] } }) {
+      // Mirror the real constructor: the declared set comes from initialState.
+      agent.state.tools = [...(options?.initialState?.tools ?? [])];
+      return agent as never;
+    });
+    let decisionReads = 0;
+    createReviewToolMock.mockReturnValue({
+      tool: {
+        name: "submit_review",
+        label: "submit_review",
+        description: "test",
+        parameters: {},
+        execute: vi.fn(),
+      },
+      // The first run produces nothing; the retry produces the decision.
+      getResult: () => (decisionReads++ === 0 ? undefined : { action: "none" }),
+    });
+
+    // Record what each request declares. The retry must not narrow the tool
+    // set: the request has to keep matching the transcript it carries.
+    const toolsDeclaredPerPrompt: number[] = [];
+    const prompt = agent.prompt;
+    agent.prompt = vi.fn(async (message: string) => {
+      toolsDeclaredPerPrompt.push((agent.state.tools as unknown[]).length);
+      return prompt(message);
+    });
+
+    await review({
+      cwd: "/repo",
+      pr: 42,
+      githubToken: "token",
+      repo: "owner/repo",
+      output: "comment",
+    });
+
+    expect(agent.prompt).toHaveBeenCalledTimes(2);
+    expect(String(agent.prompt.mock.calls[1][0])).toContain("submit_review");
+    expect(toolsDeclaredPerPrompt[0]).toBeGreaterThan(1);
+    expect(toolsDeclaredPerPrompt[1]).toBe(toolsDeclaredPerPrompt[0]);
+  });
+
+  it("degrades to the bare nudge when the pinned call is rejected", async () => {
+    const { sink, records } = createMemorySink();
+    const agent = makeFakeAgent("prose only");
+    AgentMock.mockImplementation(function () {
+      return agent as never;
+    });
+    let decisionReads = 0;
+    createReviewToolMock.mockReturnValue({
+      tool: {
+        name: "submit_review",
+        label: "submit_review",
+        description: "test",
+        parameters: {},
+        execute: vi.fn(),
+      },
+      getResult: () => (decisionReads++ === 0 ? undefined : { action: "none" }),
+    });
+
+    // The pinned retry is rejected at the transport (e.g. a provider that wants
+    // a different tool_choice shape); the nudge alone must still be attempted.
+    let calls = 0;
+    const prompt = agent.prompt;
+    agent.prompt = vi.fn(async (message: string) => {
+      calls += 1;
+      if (calls === 2) throw new Error("400 Invalid API parameter");
+      return prompt(message);
+    });
+
+    await review({ cwd: "/repo", logger: createLogger({ sink }) });
+
+    expect(agent.prompt).toHaveBeenCalledTimes(3);
+    expect(records.find(({ event }) => event === "review.agent.forced_call_failed")).toEqual(
+      expect.objectContaining({
+        level: "warn",
+        fields: expect.objectContaining({ error: "400 Invalid API parameter" }),
+      }),
+    );
+  });
+
+  it("propagates a bare-retry failure instead of reporting a missing decision", async () => {
+    const { sink, records } = createMemorySink();
+    const agent = makeFakeAgent("prose only");
+    AgentMock.mockImplementation(function () {
+      return agent as never;
+    });
+    createReviewToolMock.mockReturnValue({
+      tool: {
+        name: "submit_review",
+        label: "submit_review",
+        description: "test",
+        parameters: {},
+        execute: vi.fn(),
+      },
+      getResult: () => undefined,
+    });
+
+    // The pinned attempt is rejected (degrade), then the bare retry fails for a
+    // different, genuine reason: that error must surface rather than being
+    // relabelled as "the model finished without calling submit_review".
+    let calls = 0;
+    const prompt = agent.prompt;
+    agent.prompt = vi.fn(async (message: string) => {
+      calls += 1;
+      if (calls === 2) throw new Error("400 Invalid API parameter");
+      if (calls === 3) throw new Error("503 upstream unavailable");
+      return prompt(message);
+    });
+
+    await expect(review({ cwd: "/repo", logger: createLogger({ sink }) })).rejects.toThrow(
+      /503 upstream unavailable/,
+    );
+    expect(records.some(({ event }) => event === "review.agent.no_decision")).toBe(false);
+    expect(records.find(({ event }) => event === "review.agent.forced_call_failed")).toEqual(
+      expect.objectContaining({
+        fields: expect.objectContaining({ error: "400 Invalid API parameter" }),
+      }),
+    );
+  });
+
+  it("pins the nested chat-completions tool_choice shape", () => {
+    // The named form upstream types for this adapter is the nested function
+    // object; other shapes are rejected rather than converted (an
+    // Anthropic-shaped { type: "tool", name } 400s on zai —
+    // earendil-works/pi#5154).
+    expect(FORCED_SUBMIT_TOOL).toEqual({
+      type: "function",
+      function: { name: "submit_review" },
+    });
+  });
+
+  it("sends the pinned tool_choice on the retry only", async () => {
+    const agent = makeFakeAgent("prose only");
+    // Captured before review() installs its wrapper, so these are the calls the
+    // wrapper makes with the options it would put on the wire.
+    const base = agent.streamFunction;
+    AgentMock.mockImplementation(function () {
+      return agent as never;
+    });
+    let decisionReads = 0;
+    createReviewToolMock.mockReturnValue({
+      tool: {
+        name: "submit_review",
+        label: "submit_review",
+        description: "test",
+        parameters: {},
+        execute: vi.fn(),
+      },
+      getResult: () => (decisionReads++ === 0 ? undefined : { action: "none" }),
+    });
+
+    await review({ cwd: "/repo" });
+
+    // Guard for the wrapper itself: deleting the toolChoice spread would leave
+    // every other test green while silently reducing the retry to nudge-only.
+    expect(base).toHaveBeenCalledTimes(2);
+    expect((base.mock.calls[0][2] as { toolChoice?: unknown }).toolChoice).toBeUndefined();
+    expect((base.mock.calls[1][2] as { toolChoice?: unknown }).toolChoice).toEqual(
+      FORCED_SUBMIT_TOOL,
+    );
+  });
+
+  it("does not re-prompt when the first run produced a decision", async () => {
+    let agent: ReturnType<typeof makeFakeAgent>;
+    AgentMock.mockImplementation(function () {
+      agent = makeFakeAgent("");
+      return agent as never;
+    });
+
+    await review({ cwd: "/repo" });
+
+    expect(agent!.prompt).toHaveBeenCalledTimes(1);
   });
 });
 
