@@ -205,8 +205,8 @@ importers:
         specifier: ^11.11.1
         version: 11.12.0
       pi-mcp-adapter:
-        specifier: 4.0.0
-        version: 4.0.0(@earendil-works/pi-ai@1.2.0(@aws-sdk/credential-provider-node@3.972.84)(@modelcontextprotocol/sdk@1.30.0(zod@4.6.5))(@smithy/signature-v4@5.7.4)(undici@8.10.2)(ws@8.21.0)(zod@4.6.5))(@earendil-works/pi-tui@1.2.0)(typebox@1.3.7)(zod@4.6.5)
+        specifier: 5.0.0
+        version: 5.0.0(@earendil-works/pi-ai@1.2.0(@aws-sdk/credential-provider-node@3.972.84)(@modelcontextprotocol/sdk@1.30.0(zod@4.6.5))(@smithy/signature-v4@5.7.4)(undici@8.10.2)(ws@8.21.0)(zod@4.6.5))(@earendil-works/pi-tui@1.2.0)(typebox@1.3.7)(zod@4.6.5)
       tsx:
         specifier: ^4.20.5
         version: 4.23.15
@@ -2611,8 +2611,8 @@ packages:
   pathe@2.0.3:
     resolution: {integrity: sha512-WUjGcAqP1gQacoQe+OBJsFA7Ld4DyXuUIjZ5cc75cLHvJ7dtNsTugphxIADwspS+AraAUePCKrSVtPLFj/F88w==}
 
-  pi-mcp-adapter@4.0.0:
-    resolution: {integrity: sha512-R01UeUDmlrNCSbWQRUim3XR1oCWJQf7UnFCjFUS70z0V9qBq4llwPW0D+iztp53EBQQ6dja1ISpaK17yUGehEQ==}
+  pi-mcp-adapter@5.0.0:
+    resolution: {integrity: sha512-/3vWQLSXwud+VX1vV/dFfKpp6I40guCeqiaP/XMdXIyon+frIm+sPXGArLlmvY5PIwL2ChJ3AhELIusroGA8Ng==}
     engines: {node: '>=20'}
     hasBin: true
     peerDependencies:
@@ -5127,7 +5127,7 @@ snapshots:
 
   pathe@2.0.3: {}
 
-  pi-mcp-adapter@4.0.0(@earendil-works/pi-ai@1.2.0(@aws-sdk/credential-provider-node@3.972.84)(@modelcontextprotocol/sdk@1.30.0(zod@4.6.5))(@smithy/signature-v4@5.7.4)(undici@8.10.2)(ws@8.21.0)(zod@4.6.5))(@earendil-works/pi-tui@1.2.0)(typebox@1.3.7)(zod@4.6.5):
+  pi-mcp-adapter@5.0.0(@earendil-works/pi-ai@1.2.0(@aws-sdk/credential-provider-node@3.972.84)(@modelcontextprotocol/sdk@1.30.0(zod@4.6.5))(@smithy/signature-v4@5.7.4)(undici@8.10.2)(ws@8.21.0)(zod@4.6.5))(@earendil-works/pi-tui@1.2.0)(typebox@1.3.7)(zod@4.6.5):
     dependencies:
       '@modelcontextprotocol/client': 2.0.0
       '@modelcontextprotocol/core': 2.0.0
