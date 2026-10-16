@@ -106,6 +106,24 @@ function ensureCommit(sha: string, ref: string | undefined, cwd = process.cwd())
   if (!hasCommit(sha, cwd)) throw new Error(`Git commit ${sha} is unavailable after fetching`);
 }
 
+function isShallowRepository(cwd = process.cwd()): boolean {
+  try {
+    return (
+      execFileSync("git", ["rev-parse", "--is-shallow-repository"], {
+        cwd,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+      }).trim() === "true"
+    );
+  } catch {
+    return false;
+  }
+}
+
+function unshallowRepository(cwd = process.cwd()): void {
+  execFileSync("git", [...gitAuthArgs(), "fetch", "--unshallow", "--no-tags", "origin"], { cwd });
+}
+
 function repositoryDefaultBranch(payload: unknown): string | undefined {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) return undefined;
   const repository = (payload as Record<string, unknown>).repository;
@@ -277,6 +295,21 @@ async function main(): Promise<void> {
     login: identity.login,
   });
   const head = event.targetHead ?? pr.head.sha;
+  // Marker ranges are incremental only when their prior endpoint remains in the local ancestry.
+  if (latest) {
+    try {
+      ensureCommit(latest.toSha, undefined);
+    } catch (error) {
+      log.warn(
+        "review.marker_history.unavailable",
+        "Prior marker commit is unavailable; reviewing the full range",
+        {
+          sha: latest.toSha,
+          error: error instanceof Error ? error.message : String(error),
+        },
+      );
+    }
+  }
   // The default-branch checkout used by issue-comment and dispatch events may
   // not have the PR ref in its fetch refspec. Fetch the authenticated head
   // explicitly before any merge-base, ancestry, or worktree operation.
@@ -299,7 +332,27 @@ async function main(): Promise<void> {
         encoding: "utf8",
       }).trim() || mergeBase;
   } catch {
-    log.warn("review.merge_base.unavailable", "Could not compute merge-base; using PR base SHA");
+    if (isShallowRepository()) {
+      log.info(
+        "review.history.unshallow",
+        "Merge-base unavailable in shallow checkout; fetching full history once",
+      );
+      try {
+        unshallowRepository();
+        mergeBase =
+          execFileSync("git", ["merge-base", pr.base.sha, head], {
+            cwd: process.cwd(),
+            encoding: "utf8",
+          }).trim() || mergeBase;
+      } catch {
+        log.warn(
+          "review.merge_base.unavailable",
+          "Could not compute merge-base after unshallow fetch; using PR base SHA",
+        );
+      }
+    } else {
+      log.warn("review.merge_base.unavailable", "Could not compute merge-base; using PR base SHA");
+    }
   }
   const range = selectBatchRange(mergeBase, head, latest, ancestor, mergeHead);
   if (!isEventRangeConsistent(event, latest?.toSha ?? mergeBase, head))

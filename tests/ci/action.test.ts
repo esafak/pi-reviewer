@@ -16,19 +16,19 @@ describe("GitHub Action Vite+ setup", () => {
     expect(action).toContain('rm -rf -- "${{ steps.executable-temp.outputs.path }}"');
   });
 
-  it("fetches full git history before resolving review SHAs", async () => {
+  it("fetches targeted review history and only unshallows as a fallback", async () => {
     const action = await readFile(path.join(process.cwd(), "action.yml"), "utf8");
+    const entry = await readFile(path.join(process.cwd(), "src/ci/action-entry.ts"), "utf8");
 
-    expect(action).toContain("- name: Ensure review history");
-    expect(action).toContain("working-directory: ${{ github.workspace }}");
-    expect(action).toContain("GITHUB_TOKEN: ${{ inputs.github-token }}");
-    expect(action).toContain("if [ -f .git/shallow ]; then");
-    expect(action).toContain("http.https://github.com/.extraheader");
-    expect(action).toContain('http.https://github.com/.extraheader="');
-    expect(action).toMatch(/fetch --unshallow --no-tags\s+origin/);
-    expect(action.indexOf("- name: Ensure review history")).toBeLessThan(
-      action.indexOf("- name: Run review"),
-    );
+    expect(action).not.toContain("Ensure review history");
+    expect(action).not.toContain("fetch --unshallow");
+    expect(entry).toContain("ensureCommit(latest.toSha, undefined)");
+    expect(entry).toContain("ensureCommit(head, `refs/pull/${event.pr}/head`)");
+    expect(entry).toContain("ensureCommit(pr.base.sha, undefined)");
+    expect(entry).toContain("--is-shallow-repository");
+    expect(entry).toContain("if (isShallowRepository())");
+    expect(entry).toContain("review.marker_history.unavailable");
+    expect(entry).toContain('"fetch", "--unshallow", "--no-tags", "origin"');
   });
 
   it("allows provider selection through caller environment when inputs are omitted", async () => {
