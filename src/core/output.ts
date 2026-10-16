@@ -1468,13 +1468,12 @@ export function formatForTerminal(result: ReviewResult): string {
 }
 
 /**
- * Handle the model's "none" decision: acknowledge the PR without posting a
- * review body. A thumbs-up is left only when the PR has no open findings —
- * reacting while findings remain open would contradict them. The authenticated
- * batch marker is still written so the reviewed range is recorded even when
- * nothing visible is posted.
+ * Acknowledge the PR without posting a review body: leave a thumbs-up when the
+ * review has nothing left to report, and record the reviewed range with the
+ * batch marker. The reaction is a function of state, so the caller decides it —
+ * a review with open findings must not be greeted with a thumbs-up.
  */
-async function acknowledgeWithoutReview(options: OutputOptions): Promise<void> {
+async function acknowledgeWithoutReview(options: OutputOptions, react: boolean): Promise<void> {
   if (!options.githubToken || typeof options.prNumber !== "number" || !options.repo) return;
   const client = new GitHubClient(options.githubToken);
   const repo = options.repo;
@@ -1489,7 +1488,7 @@ async function acknowledgeWithoutReview(options: OutputOptions): Promise<void> {
         "PR head changed while the review was running; refusing to post a stale review",
       );
   }
-  if ((options.existingFindings?.length ?? 0) > 0) {
+  if (!react) {
     console.log("[pi-reviewer] open findings remain — recording the range without a reaction");
   } else {
     try {
@@ -1549,7 +1548,7 @@ export async function sendOutput(options: OutputOptions): Promise<OutputMetadata
       if (typeof options.prNumber !== "number")
         throw new Error("PR number is required to post a comment");
       if (!options.repo) throw new Error("Repository (owner/repo) is required to post a comment");
-      await acknowledgeWithoutReview(options);
+      await acknowledgeWithoutReview(options, (options.existingFindings?.length ?? 0) === 0);
     } else {
       console.log("[pi-reviewer] no findings to report");
     }
@@ -1619,6 +1618,38 @@ export async function sendOutput(options: OutputOptions): Promise<OutputMetadata
     const body = [options.batchMarker, buildReviewBody(result, moved, comments, options)]
       .filter(Boolean)
       .join("\n\n");
+
+    // A review with nothing to report — no new comments and nothing left
+    // outstanding — is acknowledged with a thumbs-up instead of a body. The
+    // reaction is a function of state, not of which action the model declared,
+    // so a model that writes a "nothing to flag" summary still gets one. The
+    // emit-once overview is the one body a findings-free review still publishes,
+    // so the acknowledgement stands down for that run.
+    let outstandingFindings = new Set<number>(options.existingFindings?.map((f) => f.commentId));
+    // Only reconcile when the model actually supplied updates: with none, the
+    // outstanding set is unchanged and the call would be pure overhead.
+    if (
+      result.comments.length === 0 &&
+      options.existingFindings?.length &&
+      options.commitId &&
+      result.finding_updates?.length
+    ) {
+      outstandingFindings = await reconcileFindingUpdates({
+        token: options.githubToken,
+        repo: options.repo,
+        prNumber: options.prNumber,
+        targetSha: options.commitId,
+        updates: result.finding_updates ?? [],
+        findings: options.existingFindings,
+      });
+    }
+    const postsSummaryBody = Boolean(
+      options.summaryEnabled && options.isFirstReview && result.pr_summary?.trim(),
+    );
+    if (result.comments.length === 0 && outstandingFindings.size === 0 && !postsSummaryBody) {
+      await acknowledgeWithoutReview(options, true);
+      return { commentIds: [], fallback: false };
+    }
 
     if (options.commitId && options.batchMarker) {
       const current = await new GitHubClient(options.githubToken).getPullRequest(
