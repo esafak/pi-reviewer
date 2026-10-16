@@ -13,24 +13,14 @@ export const PROMPTS = {
       "- Only flag what is actually wrong in the diff — no hypotheticals",
       "- If nothing is wrong, say so clearly",
     ],
-    jsonIntro: [
+    // The review agent always registers the submit_review tool, so the prompt
+    // makes that the one structured-output contract. A parallel "return JSON
+    // text" instruction competes with the tool call and lets models satisfy the
+    // (louder, more concrete) text format instead of ever calling the tool.
+    toolIntro: [
       "- Do not repeat what the project conventions already enforce",
-      "If a submit_review tool is available, prefer calling it to submit your review as structured data instead of emitting JSON text.",
-      "Return only a JSON object matching this schema exactly (no markdown fences, no extra text, no extra fields — do not include the diff or any other field):",
-    ],
-    jsonFormat: [
-      "<output_format>",
-      "{",
-      '  "summary": "Overall review in **Markdown**. Use bullet points, `code spans`, and **bold** for clarity.",',
-      '  "pr_summary": "Optional What/Why/Risk overview of the shown diff (omit when disabled or for follow-up batches).",',
-      '  "pr_diagram": "Optional raw Mermaid source, no fences (omit for localized changes).",',
-      '  "comments": [',
-      '    { "file": "src/auth.ts", "line": 42, "side": "RIGHT", "severity": "CRITICAL", "body": "Inline comment in Markdown." },',
-      '    { "file": "src/cache.ts", "line": 18, "side": "RIGHT", "severity": "WARN", "body": "Another finding.", "suggestion": "Optional replacement code when useful." }',
-      "  ]",
-      '  ,"finding_updates": [{ "comment_id": 123, "status": "RESOLVED", "explanation": "The null check now handles this path." }]',
-      "}",
-      "</output_format>",
+      "Deliver the review by calling the submit_review tool exactly once as your final action, passing the complete review as its arguments.",
+      "Never print the review, or a JSON object representing it, as text. A response that does not call submit_review is treated as a failed review and its content is discarded.",
     ],
     fieldRules: [
       "- summary: overall review written in Markdown",

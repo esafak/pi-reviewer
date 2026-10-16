@@ -552,6 +552,40 @@ describe("parseAgentResponse", () => {
     expect(response.rejectionReason).toBe("invalid comments");
   });
 
+  it("defaults a missing side to RIGHT in the text fallback", () => {
+    const response = parseAgentResponseWithStatus(
+      JSON.stringify({
+        summary: "review",
+        comments: [{ file: "src/a.ts", line: 12, severity: "WARN", body: "Missing null check" }],
+      }),
+    );
+
+    expect(response.parsed).toBe(true);
+    expect(response.result.comments).toEqual([
+      expect.objectContaining({ file: "src/a.ts", line: 12, side: "RIGHT", severity: "WARN" }),
+    ]);
+  });
+
+  it("does not default an unrecognized side in the text fallback", () => {
+    const response = parseAgentResponseWithStatus(
+      JSON.stringify({
+        summary: "review",
+        comments: [
+          {
+            file: "src/a.ts",
+            line: 12,
+            side: "right",
+            severity: "WARN",
+            body: "Missing null check",
+          },
+        ],
+      }),
+    );
+
+    expect(response.parsed).toBe(false);
+    expect(response.rejectionReason).toBe("invalid comments");
+  });
+
   it("marks invalid JSON as unparsed with a safe diagnostic", () => {
     const rejected = parseAgentResponseWithStatus("not-json");
     expect(rejected.result).toEqual({ summary: "not-json", comments: [] });

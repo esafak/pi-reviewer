@@ -16,11 +16,24 @@ describe("prompt-builder", () => {
     const prompt = buildJSONSystemPrompt({ conventions: [], reviewRules: [] });
 
     expect(prompt).toContain("You are a code reviewer");
-    expect(prompt).toContain("Return only a JSON object matching this schema exactly");
-    expect(prompt).toContain('"suggestion": "Optional replacement code when useful."');
+    expect(prompt).toContain("calling the submit_review tool exactly once as your final action");
+    expect(prompt).not.toContain("Return only a JSON object");
     expect(prompt).toContain("An empty string means delete the anchored line");
     expect(prompt).not.toContain("<conventions>");
     expect(prompt).not.toContain("<review_rules>");
+  });
+
+  it("mandates the submit_review tool and keeps no text-JSON contract", () => {
+    const prompt = buildJSONSystemPrompt({ conventions: [], reviewRules: [] });
+
+    // A parallel "return JSON text" instruction competes with the tool call and
+    // lets models satisfy the text format instead of calling the tool.
+    expect(prompt).toContain("Deliver the review by calling the submit_review tool");
+    expect(prompt).toContain(
+      "A response that does not call submit_review is treated as a failed review",
+    );
+    expect(prompt).not.toContain("<output_format>");
+    expect(prompt).not.toContain("prefer calling it");
   });
 
   it("injects bounded active findings and prior summary", () => {
@@ -96,7 +109,7 @@ describe("prompt-builder", () => {
 
   it("does not document re-raise fields when resolved history is absent", () => {
     const prompt = buildJSONSystemPrompt({ conventions: [], reviewRules: [] }, "INFO");
-    expect(prompt).toContain("no extra fields");
+    expect(prompt).toContain("Field rules:");
     expect(prompt).not.toContain("re_raise_reason");
   });
 
@@ -185,11 +198,11 @@ describe("prompt-builder", () => {
     expect(prompt).not.toContain("not reviewed");
   });
 
-  it("system prompt includes JSON keys summary and comments", () => {
+  it("documents the summary and comments fields", () => {
     const prompt = buildJSONSystemPrompt({ conventions: [], reviewRules: [] });
 
-    expect(prompt).toContain('"summary"');
-    expect(prompt).toContain('"comments"');
+    expect(prompt).toContain("- summary:");
+    expect(prompt).toContain("- comments:");
   });
 
   it("buildJSONSystemPrompt with minSeverity WARN adds skip-INFO rule", () => {

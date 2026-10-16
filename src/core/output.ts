@@ -623,6 +623,22 @@ function isReviewComment(value: unknown): value is ReviewComment {
   );
 }
 
+/**
+ * Text-fallback recovery: a model that omits `side` almost always means an
+ * added/context line, which is RIGHT. Only a genuinely absent side is filled
+ * in — an unrecognized value fails closed rather than guessing. The
+ * submit_review tool schema requires `side`, so schema-validated output never
+ * relies on this default.
+ */
+function withDefaultCommentSide(comments: readonly unknown[]): unknown[] {
+  return comments.map((comment) => {
+    if (!comment || typeof comment !== "object") return comment;
+    const record = comment as Record<string, unknown>;
+    if (record.side !== undefined && record.side !== null && record.side !== "") return comment;
+    return { ...record, side: "RIGHT" };
+  });
+}
+
 /** A candidate substring tagged with its start index in the original text. */
 interface Candidate {
   content: string;
@@ -907,6 +923,11 @@ export function parseAgentResponseWithStatus(
   for (const { content, index, source } of candidates) {
     const attempt = tryParseJSONDetailed(content);
     const parsed = attempt.parsed;
+    const comments =
+      parsed && Array.isArray(parsed.comments)
+        ? withDefaultCommentSide(parsed.comments)
+        : undefined;
+    const commentsValid = comments !== undefined && comments.every(isReviewComment);
     // Empty candidates carry no signal; skipping them keeps an empty fence
     // from outranking a position-less full-text failure.
     if (!parsed && content.length > 0) {
@@ -933,7 +954,7 @@ export function parseAgentResponseWithStatus(
       rejectionReason =
         typeof parsed.summary !== "string"
           ? "invalid summary"
-          : !Array.isArray(parsed.comments) || !parsed.comments.every(isReviewComment)
+          : !commentsValid
             ? "invalid comments"
             : parsed.finding_updates !== undefined &&
                 (!Array.isArray(parsed.finding_updates) ||
@@ -948,20 +969,14 @@ export function parseAgentResponseWithStatus(
     const updatesValid = rawUpdates.every(
       (u) => findingUpdateRejection(u, allowedFindingIds).update !== undefined,
     );
-    if (
-      parsed &&
-      typeof parsed.summary === "string" &&
-      Array.isArray(parsed.comments) &&
-      parsed.comments.every(isReviewComment) &&
-      updatesValid
-    ) {
+    if (parsed && typeof parsed.summary === "string" && commentsValid && updatesValid) {
       const diff = typeof parsed.diff === "string" ? parsed.diff : undefined;
       const prSummary = typeof parsed.pr_summary === "string" ? parsed.pr_summary : undefined;
       const prDiagram = typeof parsed.pr_diagram === "string" ? parsed.pr_diagram : undefined;
       const review = normalizeReviewResult(
         {
           summary: parsed.summary,
-          comments: parsed.comments as ReviewComment[],
+          comments: comments as ReviewComment[],
           finding_updates: rawUpdates as FindingUpdate[],
           ...(prSummary !== undefined ? { pr_summary: prSummary } : {}),
           ...(prDiagram !== undefined ? { pr_diagram: prDiagram } : {}),
@@ -974,7 +989,7 @@ export function parseAgentResponseWithStatus(
       // Base the preference on what the model emitted, not on what remains
       // after minSeverity filtering. A genuine review whose findings are all
       // below the configured threshold must still beat an earlier draft.
-      if (parsed.comments.length > 0) resultWithComments = review;
+      if (comments.length > 0) resultWithComments = review;
     }
   }
 
