@@ -2474,6 +2474,81 @@ printf("first\\nsecond")
     expect(fetchMock.mock.calls[0][0]).toBe("https://api.github.com/repos/owner/repo/pulls/42");
   });
 
+  it("refuses to acknowledge a stale head on a none decision without a batch marker", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      text: vi.fn().mockResolvedValue(JSON.stringify({ head: { sha: "new-head" } })),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      sendOutput({
+        target: "comment",
+        none: true,
+        githubToken: "token123",
+        prNumber: 42,
+        repo: "owner/repo",
+        commitId: "reviewed-head",
+      }),
+    ).rejects.toThrow("PR head changed while the review was running");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toBe("https://api.github.com/repos/owner/repo/pulls/42");
+  });
+
+  it("acknowledges a none decision once the pinned head is confirmed", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        text: vi.fn().mockResolvedValue(JSON.stringify({ head: { sha: "reviewed-head" } })),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        text: vi.fn().mockResolvedValue(JSON.stringify({ login: "review-bot" })),
+      })
+      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue(JSON.stringify([])) })
+      .mockResolvedValueOnce({
+        ok: true,
+        text: vi.fn().mockResolvedValue(JSON.stringify({ id: 1, content: "+1" })),
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await sendOutput({
+      target: "comment",
+      none: true,
+      githubToken: "token123",
+      prNumber: 42,
+      repo: "owner/repo",
+      commitId: "reviewed-head",
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.github.com/repos/owner/repo/issues/42/reactions",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
+  it("refuses a stale head even when the none decision posts nothing visible", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      text: vi.fn().mockResolvedValue(JSON.stringify({ head: { sha: "new-head" } })),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      sendOutput({
+        target: "comment",
+        none: true,
+        githubToken: "token123",
+        prNumber: 42,
+        repo: "owner/repo",
+        commitId: "reviewed-head",
+        existingFindings: [{ commentId: 7 }],
+      }),
+    ).rejects.toThrow("PR head changed while the review was running");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("retries once as body-only review when Reviews API returns 422", async () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     const fetchMock = vi

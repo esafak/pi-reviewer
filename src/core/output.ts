@@ -1479,11 +1479,14 @@ async function acknowledgeWithoutReview(options: OutputOptions): Promise<void> {
   const client = new GitHubClient(options.githubToken);
   const repo = options.repo;
   const prNumber = options.prNumber;
-  if (options.commitId && options.batchMarker) {
+  // The acknowledgement claims "the reviewer looked at this commit", so head
+  // staleness is verified whenever a commit is pinned — whether or not a batch
+  // marker will be written.
+  if (options.commitId) {
     const current = await client.getPullRequest(repo, prNumber);
     if (current.head.sha !== options.commitId)
       throw new Error(
-        "PR head changed while the review was running; refusing to post a stale batch",
+        "PR head changed while the review was running; refusing to post a stale review",
       );
   }
   if ((options.existingFindings?.length ?? 0) > 0) {
