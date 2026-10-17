@@ -32,7 +32,7 @@ export async function handleDryRun(opts: HandleDryRunOptions): Promise<void> {
     return;
   }
 
-  const { diff, source, skippedFiles } = await resolveDiff({
+  const { diff, source, skippedFiles, changedFiles } = await resolveDiff({
     cwd,
     diff: parsed.diff,
     branch: parsed.branch ?? readDefaultBranch(),
@@ -50,7 +50,7 @@ export async function handleDryRun(opts: HandleDryRunOptions): Promise<void> {
     drySkillDirs.length > 0
       ? await loadSkillContext({
           cwd: parsed.dir ? path.resolve(cwd, parsed.dir) : cwd,
-          diffFiles: dryDiffFiles,
+          trustFiles: changedFiles,
           gitRoot: parsed.dir ? cwd : undefined,
           skillDirs: drySkillDirs,
         })
@@ -59,6 +59,10 @@ export async function handleDryRun(opts: HandleDryRunOptions): Promise<void> {
     (g) => g.files,
   );
   notify(`Diff source: ${source}`);
+  if (drySkillContext && drySkillContext.skills.length > 0) {
+    notify(`Skills:\n${drySkillContext.skills.map((s) => `  ${s.name}`).join("\n")}`);
+  }
+  for (const warning of drySkillContext?.warnings ?? []) notify(warning, "warning");
   const systemPrompt = buildJSONSystemPrompt(
     context,
     minSeverity,

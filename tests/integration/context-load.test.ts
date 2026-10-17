@@ -77,6 +77,7 @@ beforeEach(() => {
   vi.mocked(resolveDiff).mockResolvedValue({
     diff: "diff --git a/src/foo.ts b/src/foo.ts\n--- a/src/foo.ts\n+++ b/src/foo.ts\n@@ -1 +1 @@\n-old\n+new\n",
     source: "feat vs main",
+    changedFiles: ["src/foo.ts"],
   });
 });
 

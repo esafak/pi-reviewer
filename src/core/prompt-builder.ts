@@ -51,7 +51,7 @@ export const RESOLVED_HISTORY_COUNT_LIMIT = 50;
 export const PR_TITLE_LIMIT = 500;
 export const PR_BODY_LIMIT = 8000;
 
-function escapePromptMarkup(value: string): string {
+export function escapePromptMarkup(value: string): string {
   return value.replaceAll("<", "\\u003c").replaceAll(">", "\\u003e");
 }
 
@@ -158,7 +158,11 @@ export function buildJSONSystemPrompt(
   if (skills?.formatted.trim())
     sections.push(`<skills>\n${skills.formatted}\n</skills>\n${PROMPTS.skills.trusted}`);
   if (skills && skills.untrusted.length > 0) {
-    const bodies = skills.untrusted.map((f) => `--- ${f.path} ---\n${f.content}`).join("\n\n");
+    // Untrusted bodies are PR-authored: escape markup so a fenced section or
+    // a spoofed file boundary cannot break out of the container.
+    const bodies = skills.untrusted
+      .map((f) => `--- ${escapePromptMarkup(f.path)} ---\n${escapePromptMarkup(f.content)}`)
+      .join("\n\n");
     sections.push(
       `<new_skills_under_review>\n${bodies}\n</new_skills_under_review>\n${PROMPTS.skills.untrusted}`,
     );
@@ -245,7 +249,11 @@ export function buildMarkdownSystemPrompt(
   if (skills?.formatted.trim())
     sections.push(`<skills>\n${skills.formatted}\n</skills>\n${PROMPTS.skills.trusted}`);
   if (skills && skills.untrusted.length > 0) {
-    const bodies = skills.untrusted.map((f) => `--- ${f.path} ---\n${f.content}`).join("\n\n");
+    // Untrusted bodies are PR-authored: escape markup so a fenced section or
+    // a spoofed file boundary cannot break out of the container.
+    const bodies = skills.untrusted
+      .map((f) => `--- ${escapePromptMarkup(f.path)} ---\n${escapePromptMarkup(f.content)}`)
+      .join("\n\n");
     sections.push(
       `<new_skills_under_review>\n${bodies}\n</new_skills_under_review>\n${PROMPTS.skills.untrusted}`,
     );

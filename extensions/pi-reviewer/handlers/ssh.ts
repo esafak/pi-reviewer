@@ -171,8 +171,10 @@ export async function handleSSHReview(opts: HandleSSHReviewOptions): Promise<voi
   if (sshDiffWarning) notify(sshDiffWarning, "warning");
 
   // Context follows the filtered diff so providers and conventions describe
-  // the files actually under review, matching local mode and CI.
+  // the files actually under review, matching local mode and CI. Trust uses
+  // the raw list: files dropped by filterDiff stay attacker-controlled.
   const sshDiffFiles = extractDiffFiles(sshDiff);
+  const sshTrustFiles = extractDiffFiles(rawSshDiff);
   const sshContext = sshState
     ? await loadContextSSH(
         sshState.remote,
@@ -192,16 +194,26 @@ export async function handleSSHReview(opts: HandleSSHReviewOptions): Promise<voi
                 fs: providerFs,
                 remoteCwd: sshRemoteCwd,
                 gitRoot: parsed.dir ? sshState.remoteCwd : undefined,
-                diffFiles: sshDiffFiles,
+                trustFiles: sshTrustFiles,
                 skillDirs: sshSkillDirs,
               })
             : loadSkillContext({
                 cwd: ctx.cwd,
-                diffFiles: sshDiffFiles,
+                trustFiles: sshTrustFiles,
                 skillDirs: sshSkillDirs,
               })
-        ).catch(() => null)
+        ).catch((error) => {
+          notify(
+            `Skills skipped: ${error instanceof Error ? error.message : String(error)}`,
+            "warning",
+          );
+          return null;
+        })
       : null;
+  if (sshSkillContext && sshSkillContext.skills.length > 0) {
+    notify(`Skills:\n${sshSkillContext.skills.map((s) => `  ${s.name}`).join("\n")}`);
+  }
+  for (const warning of sshSkillContext?.warnings ?? []) notify(warning, "warning");
 
   const source = buildSSHSource(parsed, {
     branch: readDefaultBranch(),

@@ -8,7 +8,7 @@ import {
   type Skill,
 } from "@earendil-works/pi-coding-agent";
 
-import { findGitRoot } from "./context.js";
+import { canonicalize, findGitRoot } from "./context.js";
 import type { ContextFile } from "./context.js";
 import { sshExec, type FsOps } from "./ssh.js";
 
@@ -29,25 +29,28 @@ export function parseSkillDirs(raw: string | undefined): string[] {
 
 /**
  * Resolves the effective skill dirs: an explicit list wins (empty disables),
- * otherwise PI_REVIEWER_SKILLS_DIRS when non-blank, otherwise the pi-style
- * default set.
+ * the "none" sentinel disables, otherwise PI_REVIEWER_SKILLS_DIRS when
+ * non-blank, otherwise the pi-style default set.
  */
 export function resolveSkillDirs(explicit?: string[]): string[] {
   if (explicit !== undefined) return explicit;
   const raw = process.env.PI_REVIEWER_SKILLS_DIRS?.trim();
-  return raw ? parseSkillDirs(raw) : DEFAULT_SKILL_DIRS;
+  if (!raw) return DEFAULT_SKILL_DIRS;
+  if (raw.toLowerCase() === "none") return [];
+  return parseSkillDirs(raw);
 }
 
 export interface LoadSkillContextOptions {
   cwd: string;
-  diffFiles: string[];
+  /**
+   * Unfiltered changed-file list backing the trust partition. Required: files
+   * dropped by filterDiff caps or noise patterns stay attacker-controlled and
+   * must never launder a skill into the trusted set.
+   */
+  trustFiles: string[];
   gitRoot?: string;
-  /** Root diff paths are relative to; defaults to the diff-taken-here rule. */
-  diffRoot?: string;
   /** Dirs relative to cwd; defaults to DEFAULT_SKILL_DIRS. Empty disables. */
   skillDirs?: string[];
-  /** Override for tests; defaults to disk reads. */
-  readSkillFile?: (absPath: string) => Promise<string | null>;
 }
 
 export interface LoadSkillContextRemoteOptions {
@@ -55,7 +58,8 @@ export interface LoadSkillContextRemoteOptions {
   fs: FsOps;
   remoteCwd: string;
   gitRoot?: string;
-  diffFiles: string[];
+  /** Unfiltered changed-file list backing the trust partition. Required. */
+  trustFiles: string[];
   skillDirs?: string[];
 }
 
@@ -76,59 +80,99 @@ function underDir(fileAbs: string, dirAbs: string): boolean {
   return file === dir || file.startsWith(`${dir}/`);
 }
 
-// A skill's trust granularity is its root, which pi's loader reports as
-// baseDir (the SKILL.md directory, or the loose file's own directory).
+// A skill owns its file, or its directory when that file is a SKILL.md.
+// pi reports loose .md skills with a shared parent baseDir, so deriving the
+// root from the file keeps one touched sibling from untrusting the rest.
 function skillRoot(skill: Skill): string {
-  if (skill.baseDir) return skill.baseDir.replace(/\\/g, "/");
   const normalized = skill.filePath.replace(/\\/g, "/");
   return normalized.endsWith("/SKILL.md") ? normalized.slice(0, -"/SKILL.md".length) : normalized;
+}
+
+/** A touched path paired with its absolute form; kept together, never indexed in parallel. */
+interface TouchedFile {
+  path: string;
+  abs: string;
 }
 
 interface AssembleSkillContextOptions {
   skills: Skill[];
   warnings: string[];
   skillDirAbsList: string[];
-  diffAbsList: string[];
-  diffFiles: string[];
+  touched: TouchedFile[];
   readSkillFile: (absPath: string) => Promise<string | null>;
 }
+
+// Trust-relevant caps: untrusted bodies are review evidence, not guidance,
+// bounded like the other untrusted channels (100k diff, 8k PR body).
+const MAX_UNTRUSTED_FILES = 20;
+const MAX_UNTRUSTED_BODY_CHARS = 20_000;
+const MAX_UNTRUSTED_TOTAL_CHARS = 100_000;
 
 // First-wins dedupe, trust partition, prompt formatting, and untrusted body
 // collection in one place so local and remote transports cannot diverge.
 async function assembleSkillContext(
   options: AssembleSkillContextOptions,
 ): Promise<SkillContextResult> {
-  const { skillDirAbsList, diffAbsList, diffFiles, readSkillFile } = options;
+  const { skillDirAbsList, touched, readSkillFile } = options;
   const skills: Skill[] = [];
   const warnings = [...options.warnings];
-  const seen = new Set<string>();
+  const winners = new Map<string, string>();
   for (const skill of options.skills) {
-    if (seen.has(skill.name)) {
-      warnings.push(`skill "${skill.name}" from ${skill.filePath} ignored: already defined`);
+    const winner = winners.get(skill.name);
+    if (winner !== undefined) {
+      warnings.push(
+        `skill "${skill.name}" from ${skill.filePath} ignored: already defined at ${winner}`,
+      );
       continue;
     }
-    seen.add(skill.name);
+    winners.set(skill.name, skill.filePath);
     skills.push(skill);
   }
 
-  const isTouchedFile = (diffAbs: string): boolean =>
-    /\.md$/i.test(diffAbs) && skillDirAbsList.some((dir) => underDir(diffAbs, dir));
+  const isTouchedFile = (abs: string): boolean =>
+    /\.md$/i.test(abs) && skillDirAbsList.some((dir) => underDir(abs, dir));
   const isTouchedRoot = (rootAbs: string): boolean =>
-    diffAbsList.some((diffAbs) => underDir(diffAbs, rootAbs));
+    touched.some(({ abs }) => underDir(abs, rootAbs));
 
   // pi's loader only returns absolute filePaths for absolute search dirs, so
-  // roots compare directly against the absolute diff list.
-  const actionable = skills.filter((skill) => !isTouchedRoot(skillRoot(skill)));
+  // roots compare directly against the absolute touched list. Disabled skills
+  // never reach the model (formatSkillsForPrompt drops them), so they leave
+  // the actionable list too; their changed files still join untrusted below.
+  const actionable = skills.filter(
+    (skill) => !skill.disableModelInvocation && !isTouchedRoot(skillRoot(skill)),
+  );
 
   const untrusted: ContextFile[] = [];
-  for (const [index, file] of diffFiles.entries()) {
-    if (!isTouchedFile(diffAbsList[index])) continue;
-    const content = await readSkillFile(diffAbsList[index]);
-    if (content === null) {
-      warnings.push(`${file}: touched skill file is unreadable, skipped`);
+  let skipped = 0;
+  let totalChars = 0;
+  for (const { path, abs } of touched) {
+    if (!isTouchedFile(abs)) continue;
+    if (untrusted.length >= MAX_UNTRUSTED_FILES || totalChars >= MAX_UNTRUSTED_TOTAL_CHARS) {
+      skipped += 1;
       continue;
     }
-    untrusted.push({ path: file, content });
+    let content = await readSkillFile(abs);
+    if (content === null) {
+      warnings.push(
+        `${path}: touched skill file absent or unreadable at head; the diff carries the change`,
+      );
+      continue;
+    }
+    if (content.length > MAX_UNTRUSTED_BODY_CHARS) {
+      content = `${content.slice(0, MAX_UNTRUSTED_BODY_CHARS)}\n[...truncated]`;
+      warnings.push(`${path}: untrusted body truncated to ${MAX_UNTRUSTED_BODY_CHARS} chars`);
+    }
+    if (totalChars + content.length > MAX_UNTRUSTED_TOTAL_CHARS && untrusted.length > 0) {
+      skipped += 1;
+      continue;
+    }
+    totalChars += content.length;
+    untrusted.push({ path, content });
+  }
+  if (skipped > 0) {
+    warnings.push(
+      `${skipped} touched skill files skipped by the untrusted budget (${MAX_UNTRUSTED_FILES} files / ${MAX_UNTRUSTED_TOTAL_CHARS} chars)`,
+    );
   }
 
   return {
@@ -157,17 +201,20 @@ async function readDiskSkillFile(absPath: string): Promise<string | null> {
 export async function loadSkillContext(
   options: LoadSkillContextOptions,
 ): Promise<SkillContextResult> {
-  const { cwd, diffFiles } = options;
+  const empty: SkillContextResult = { formatted: "", untrusted: [], skills: [], warnings: [] };
   const skillDirs = options.skillDirs ?? DEFAULT_SKILL_DIRS;
-  if (skillDirs.length === 0) {
-    return { formatted: "", untrusted: [], skills: [], warnings: [] };
-  }
+  if (skillDirs.length === 0) return empty;
 
+  // Canonicalize once: git reports physical paths while callers may pass an
+  // unresolved cwd, and the trust partition compares the two namespaces.
+  // Every absolute path below this point is canonical; never compare against
+  // uncanonicalized caller input.
+  const cwd = canonicalize(options.cwd);
+  const gitRoot = options.gitRoot ? canonicalize(options.gitRoot) : (findGitRoot(cwd) ?? cwd);
   // git prints paths relative to the repo toplevel even when the diff runs
   // in a subdirectory; an explicit gitRoot override means the diff was taken
   // inside the nested repo at cwd.
-  const gitRoot = options.gitRoot ?? findGitRoot(cwd) ?? cwd;
-  const diffRoot = options.diffRoot ?? (options.gitRoot ? cwd : gitRoot);
+  const diffRoot = options.gitRoot ? cwd : gitRoot;
 
   const skillDirAbsList = skillDirs.map((d) => join(cwd, d));
   const discovered: Skill[] = [];
@@ -184,14 +231,13 @@ export async function loadSkillContext(
     skills: discovered,
     warnings,
     skillDirAbsList,
-    diffAbsList: diffFiles.map((f) => join(diffRoot, f)),
-    diffFiles,
-    readSkillFile: options.readSkillFile ?? readDiskSkillFile,
+    touched: options.trustFiles.map((path) => ({ path, abs: join(diffRoot, path) })),
+    readSkillFile: readDiskSkillFile,
   });
 }
 
-// Remote discovery cannot use pi's loader directly (it reads local disk),
-// so each skill dir's markdown is mirrored to a temp dir first. Display paths
+// Remote discovery cannot use pi's loader directly (it reads local disk), so
+// each skill dir's markdown is mirrored to a temp dir first. Display paths
 // are remapped to remote locations before formatting, so the model reads the
 // remote files with its own tools.
 const MAX_REMOTE_SKILL_DEPTH = 4;
@@ -209,11 +255,16 @@ async function fetchSkillMarkdown(
   localAbs: string,
   depth: number,
   budget: FetchBudget,
-): Promise<void> {
-  if (depth > MAX_REMOTE_SKILL_DEPTH || budget.files <= 0 || budget.bytes <= 0) return;
+): Promise<boolean> {
+  if (depth > MAX_REMOTE_SKILL_DEPTH) return false;
   const entries = await fs.list(remoteAbs);
+  let capped = false;
   for (const entry of [...entries].sort()) {
-    if (budget.files <= 0 || budget.bytes <= 0) break;
+    if (entry === ".." || entry.includes("/") || entry.includes("\\")) continue;
+    if (budget.files <= 0 || budget.bytes <= 0) {
+      capped = true;
+      break;
+    }
     const remotePath = fs.join(remoteAbs, entry);
     if (entry.toLowerCase().endsWith(".md")) {
       const content = await fs.read(remotePath);
@@ -223,20 +274,33 @@ async function fetchSkillMarkdown(
       budget.files -= 1;
       budget.bytes -= content.length;
     } else if (depth < MAX_REMOTE_SKILL_DEPTH && !entry.startsWith(".")) {
-      await fetchSkillMarkdown(fs, remotePath, join(localAbs, entry), depth + 1, budget);
+      if (await fetchSkillMarkdown(fs, remotePath, join(localAbs, entry), depth + 1, budget)) {
+        capped = true;
+      }
     }
   }
+  return capped;
 }
 
 export async function loadSkillContextRemote(
   options: LoadSkillContextRemoteOptions,
 ): Promise<SkillContextResult> {
-  const { remote, fs, remoteCwd, diffFiles } = options;
+  const { remote, fs, trustFiles } = options;
   const skillDirs = options.skillDirs ?? DEFAULT_SKILL_DIRS;
   if (skillDirs.length === 0) {
     return { formatted: "", untrusted: [], skills: [], warnings: [] };
   }
 
+  // The trust partition compares physical paths, so any logical input is
+  // resolved here first. One extra round trip per review.
+  const warnings: string[] = [];
+  let remoteCwd: string;
+  try {
+    remoteCwd = (await sshExec(remote, `cd ${JSON.stringify(options.remoteCwd)} && pwd -P`)).trim();
+  } catch {
+    remoteCwd = options.remoteCwd;
+    warnings.push("remote cwd could not be canonicalized; skill trust uses logical paths");
+  }
   const resolvedGitRoot =
     options.gitRoot ??
     (await sshExec(remote, `git -C ${JSON.stringify(remoteCwd)} rev-parse --show-toplevel`)
@@ -247,45 +311,54 @@ export async function loadSkillContextRemote(
   const tmpRoot = await mkdtemp(join(tmpdir(), "pi-reviewer-skills-"));
   try {
     const discovered: Skill[] = [];
-    const warnings: string[] = [];
     const skillDirAbsList = skillDirs.map((d) => fs.join(remoteCwd, d));
+    // One budget across all dirs: the listed set is small and curated.
+    const budget: FetchBudget = { files: MAX_REMOTE_SKILL_FILES, bytes: MAX_REMOTE_SKILL_BYTES };
+    let capped = false;
     for (const [index, remoteAbs] of skillDirAbsList.entries()) {
       const tmpSub = join(tmpRoot, String(index));
-      await fetchSkillMarkdown(fs, remoteAbs, tmpSub, 0, {
-        files: MAX_REMOTE_SKILL_FILES,
-        bytes: MAX_REMOTE_SKILL_BYTES,
-      });
+      if (await fetchSkillMarkdown(fs, remoteAbs, tmpSub, 0, budget)) capped = true;
       const { skills, diagnostics } = loadSkillsFromDir({
         dir: tmpSub,
         source: `repo:${remoteAbs}`,
       });
       for (const diagnostic of diagnostics) {
-        const relocated =
-          typeof diagnostic.path === "string" && diagnostic.path.startsWith(tmpSub + sep)
-            ? remoteAbs + diagnostic.path.slice(tmpSub.length)
-            : remoteAbs;
-        warnings.push(`${relocated}: ${diagnostic.message}`);
+        warnings.push(
+          `${relocate(tmpSub, remoteAbs, diagnostic.path) ?? remoteAbs}: ${diagnostic.message}`,
+        );
       }
       for (const skill of skills) {
-        const relocate = (p: string): string =>
-          p === tmpSub || p.startsWith(tmpSub + sep) ? remoteAbs + p.slice(tmpSub.length) : p;
-        discovered.push({
-          ...skill,
-          filePath: relocate(skill.filePath),
-          baseDir: relocate(skill.baseDir),
-        });
+        const filePath = relocate(tmpSub, remoteAbs, skill.filePath);
+        const baseDir = relocate(tmpSub, remoteAbs, skill.baseDir);
+        if (filePath === null || baseDir === null) {
+          warnings.push(`skill "${skill.name}" escaped the fetch mirror, dropped`);
+          continue;
+        }
+        discovered.push({ ...skill, filePath, baseDir });
       }
     }
 
+    if (capped) {
+      warnings.push(
+        `skill fetch capped at ${MAX_REMOTE_SKILL_FILES} files / ${MAX_REMOTE_SKILL_BYTES} bytes; some skills may be missing`,
+      );
+    }
     return assembleSkillContext({
       skills: discovered,
       warnings,
       skillDirAbsList,
-      diffAbsList: diffFiles.map((f) => fs.join(diffRoot, f)),
-      diffFiles,
+      touched: trustFiles.map((path) => ({ path, abs: fs.join(diffRoot, path) })),
       readSkillFile: (absPath) => fs.read(absPath),
     });
   } finally {
     await rm(tmpRoot, { recursive: true, force: true });
   }
+}
+
+// Moves a temp-mirrored path back into the remote namespace; returns null
+// when the path escaped the mirror (defensive: entry names are filtered).
+function relocate(tmpSub: string, remoteAbs: string, p: string | undefined): string | null {
+  if (p === undefined) return null;
+  if (p === tmpSub || p.startsWith(tmpSub + sep)) return remoteAbs + p.slice(tmpSub.length);
+  return null;
 }

@@ -94,6 +94,7 @@ describe("context provider integration", () => {
     vi.mocked(resolveDiff).mockResolvedValue({
       diff: "diff --git a/src/foo.ts b/src/foo.ts\n--- a/src/foo.ts\n+++ b/src/foo.ts\n@@ -1 +1 @@\n-old\n+new\n",
       source: "feature vs origin/main",
+      changedFiles: ["src/foo.ts"],
     });
     vi.mocked(loadContext).mockResolvedValue({ conventions: [], reviewRules: [] });
 
@@ -185,6 +186,7 @@ describe("command routing", () => {
     vi.mocked(resolveDiff).mockResolvedValue({
       diff: "diff --git a/foo.ts\n",
       source: "feature vs main",
+      changedFiles: ["foo.ts"],
     });
     vi.mocked(loadContext).mockResolvedValue({ conventions: [], reviewRules: [] });
     vi.mocked(spawn).mockReturnValue(makeFakeProcess() as any);
@@ -281,7 +283,11 @@ describe("error handling", () => {
     const stopFn = vi.fn();
     vi.mocked(setReviewFooter).mockReturnValue(stopFn);
     // resolveDiff resolves so we get past the loader setup, then spawn fails
-    vi.mocked(resolveDiff).mockResolvedValue({ diff: "diff --git\n", source: "x" });
+    vi.mocked(resolveDiff).mockResolvedValue({
+      diff: "diff --git\n",
+      source: "x",
+      changedFiles: [],
+    });
     vi.mocked(spawn).mockReturnValue(
       (() => {
         const proc = Object.assign(new EventEmitter(), {

@@ -51,7 +51,7 @@ describe("loadSkillContextRemote", () => {
       remote: "user@host",
       fs,
       remoteCwd: "/remote/root",
-      diffFiles: [],
+      trustFiles: [],
       skillDirs: ["skills"],
     });
 
@@ -75,7 +75,7 @@ describe("loadSkillContextRemote", () => {
       remote: "user@host",
       fs,
       remoteCwd: "/remote/root",
-      diffFiles: ["skills/deploy/SKILL.md"],
+      trustFiles: ["skills/deploy/SKILL.md"],
       skillDirs: ["skills"],
     });
 
@@ -92,7 +92,7 @@ describe("loadSkillContextRemote", () => {
       remote: "user@host",
       fs,
       remoteCwd: "/remote/root",
-      diffFiles: [],
+      trustFiles: [],
       skillDirs: ["skills"],
     });
 
@@ -100,6 +100,10 @@ describe("loadSkillContextRemote", () => {
   });
 
   it("resolves touched paths against the repo root from a subdirectory", async () => {
+    vi.mocked(sshExec).mockImplementation(async (_remote: string, command: string) => {
+      if (command.includes("pwd -P")) return "/remote/root/packages/api\n";
+      return "/remote/root\n";
+    });
     const fs = makeFakeSshFs({
       "/remote/root/skills/web/SKILL.md": SKILL_BODY,
     });
@@ -108,11 +112,55 @@ describe("loadSkillContextRemote", () => {
       remote: "user@host",
       fs,
       remoteCwd: "/remote/root/packages/api",
-      diffFiles: ["skills/web/SKILL.md"],
+      trustFiles: ["skills/web/SKILL.md"],
       skillDirs: ["../../skills"],
     });
 
     expect(result.skills).toEqual([]);
     expect(result.untrusted).toHaveLength(1);
+  });
+
+  it("resolves a logical remote cwd against the physical git root", async () => {
+    vi.mocked(sshExec).mockImplementation(async (_remote: string, command: string) => {
+      if (command.includes("pwd -P")) return "/physical/root\n";
+      if (command.includes("rev-parse")) return "/physical/root\n";
+      return "";
+    });
+    const fs = makeFakeSshFs({
+      "/physical/root/skills/deploy/SKILL.md": SKILL_BODY,
+    });
+
+    const result = await loadSkillContextRemote({
+      remote: "user@host",
+      fs,
+      remoteCwd: "/logical/root",
+      trustFiles: ["skills/deploy/SKILL.md"],
+      skillDirs: ["skills"],
+    });
+
+    expect(result.skills).toEqual([]);
+    expect(result.untrusted).toHaveLength(1);
+    expect(result.untrusted[0].path).toBe("skills/deploy/SKILL.md");
+  });
+
+  it("caps remote fetching at the file budget and warns", async () => {
+    const files: Record<string, string> = {};
+    for (let i = 0; i < 150; i++) {
+      const name = `s${String(i).padStart(3, "0")}`;
+      files[`/remote/root/skills/${name}.md`] =
+        `---\nname: ${name}\ndescription: Skill ${name}\n---\n\nBody\n`;
+    }
+    const fs = makeFakeSshFs(files);
+
+    const result = await loadSkillContextRemote({
+      remote: "user@host",
+      fs,
+      remoteCwd: "/remote/root",
+      trustFiles: [],
+      skillDirs: ["skills"],
+    });
+
+    expect(result.skills).toHaveLength(100);
+    expect(result.warnings.some((w) => w.includes("capped"))).toBe(true);
   });
 });

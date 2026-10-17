@@ -502,7 +502,7 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
       "MCP disabled; only available for CI comment-output reviews",
     );
 
-  const { diff, source, warning, skippedFiles } = await resolveDiff({
+  const { diff, source, warning, skippedFiles, changedFiles } = await resolveDiff({
     pr: options.pr,
     diff: options.diff,
     branch: options.branch,
@@ -534,7 +534,9 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
 
   const skillDirs = resolveSkillDirs(options.skillDirs);
   const skillContext =
-    skillDirs.length > 0 ? await loadSkillContext({ cwd, diffFiles, skillDirs }) : null;
+    skillDirs.length > 0
+      ? await loadSkillContext({ cwd, trustFiles: changedFiles, skillDirs })
+      : null;
   if (skillContext && (skillContext.skills.length > 0 || skillContext.untrusted.length > 0)) {
     logger.info("review.skills.loaded", "Skills loaded", {
       skills: skillContext.skills.map((s) => s.name),

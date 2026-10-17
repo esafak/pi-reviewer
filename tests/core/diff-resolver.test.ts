@@ -208,6 +208,19 @@ describe("resolveDiff", () => {
       "No changes found. Make sure you are on a feature branch with commits ahead of the base.",
     );
   });
+
+  it("reports pre-filter changed files alongside the filtered diff", async () => {
+    const raw =
+      "diff --git a/src/a.ts b/src/a.ts\n--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1 +1 @@\n-old\n+new\n" +
+      "diff --git a/package-lock.json b/package-lock.json\n--- a/package-lock.json\n+++ b/package-lock.json\n@@ -1 +1 @@\n-old\n+new\n";
+    execFileSyncMock.mockReturnValue(raw);
+
+    const result = await resolveDiff({ fromSha: "base", toSha: "head", cwd: "/repo" });
+
+    expect(result.changedFiles).toEqual(["src/a.ts", "package-lock.json"]);
+    expect(result.diff).toContain("src/a.ts");
+    expect(result.diff).not.toContain("package-lock.json");
+  });
 });
 
 describe("extractDiffFiles", () => {

@@ -75,8 +75,8 @@ jobs:
           # Comma-separated dirs scanned for .md files with a 'description' frontmatter.
           # doc-dirs: '.pi/notes,docs/review'
           # Skills load by default from .pi/skills,.claude/skills,.agents/skills,skills;
-          # override with a comma-separated list. New/modified skills are reviewed
-          # as untrusted changes rather than followed.
+          # override with a comma-separated list, or 'none' to disable.
+          # New/modified skills are reviewed as untrusted changes rather than followed.
           # skills-dirs: '.pi/skills,docs/skills'
           # web-search: 'true' # optional
           # search-provider: 'brave' # optional
