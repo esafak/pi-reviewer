@@ -1,4 +1,5 @@
 import { hasControlCharacters, truncateUtf8WithMarker } from "../registry/helpers.js";
+import { defaultCacheDir, MAX_RANGE_LINES, saveCachedFile } from "./cache.js";
 import {
   createGhRunner,
   GH_TIMEOUT_MS,
@@ -42,6 +43,8 @@ export interface ReadParams {
   log?: boolean;
   exit_status?: boolean;
   attempt?: number;
+  offset?: number;
+  limit?: number;
 }
 export interface GitHubResearchClient {
   search(
@@ -214,7 +217,7 @@ function validateSearchOptions(kind: GitHubSearchKind, o: SearchOptions): void {
 // shared with tool.ts so the contract is defined once. Kinds without
 // enrichments map to [] so every GitHubReadKind stays compiler-checked.
 export const enrichmentsByKind: Record<GitHubReadKind, readonly string[]> = {
-  file: [],
+  file: ["offset", "limit"],
   pull_request: ["comments"],
   issue: ["comments"],
   discussion: [],
@@ -437,13 +440,23 @@ export function createGitHubResearchClient(
         "log",
         "exit_status",
         "attempt",
+        "offset",
+        "limit",
       ] as const;
-      if (enrichments.some((k) => p[k] !== undefined && !enrichmentsByKind[p.kind].includes(k)))
-        throw new Error("GitHub read option is invalid for this kind");
       if (p.branch !== undefined && !validRef(p.branch))
         throw new Error("GitHub branch ref is invalid");
       if (p.attempt !== undefined && (!Number.isInteger(p.attempt) || p.attempt < 1))
         throw new Error("GitHub run attempt is invalid");
+      if ((p.offset !== undefined || p.limit !== undefined) && p.kind !== "file")
+        throw new Error("Offset and limit are only valid for file reads");
+      if (
+        (p.offset !== undefined && (!Number.isInteger(p.offset) || p.offset < 1)) ||
+        (p.limit !== undefined &&
+          (!Number.isInteger(p.limit) || p.limit < 1 || p.limit > MAX_RANGE_LINES))
+      )
+        throw new Error("GitHub file range is invalid");
+      if (enrichments.some((k) => p[k] !== undefined && !enrichmentsByKind[p.kind].includes(k)))
+        throw new Error("GitHub read option is invalid for this kind");
       if (scope === "public") {
         const privacy = String(await call(["api", `repos/${repo}`, "--jq", ".private"])).trim();
         if (privacy !== "false")
@@ -494,12 +507,21 @@ export function createGitHubResearchClient(
         )
           throw new Error("GitHub file path is invalid");
         const endpoint = `repos/${repo}/contents/${p.path.split("/").map(encodeURIComponent).join("/")}${p.ref ? `?ref=${encodeURIComponent(p.ref)}` : ""}`;
-        const file = await bounded([
+        // Contents payloads bypass the runner's model-facing budget (raised
+        // fetch ceiling for the grep cache); parse here and enforce the
+        // model-facing cap on the truncated preview below.
+        const raw = await call([
           "api",
           endpoint,
           "--jq",
           "{path:.path,url:.html_url,content:.content}",
         ]);
+        let file: unknown;
+        try {
+          file = JSON.parse(raw);
+        } catch {
+          throw new Error("gh returned invalid JSON");
+        }
         if (
           !file ||
           typeof file !== "object" ||
@@ -513,10 +535,43 @@ export function createGitHubResearchClient(
           !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u.test(encoded)
         )
           throw new Error("GitHub file content is invalid base64");
-        result = {
-          ...(file as Record<string, unknown>),
-          content: Buffer.from(encoded, "base64").toString("utf8"),
-        };
+        const fullText = Buffer.from(encoded, "base64").toString("utf8");
+        // The full download is cached for repeated greps and ranged reads;
+        // the model receives a bounded slice plus full size/line counts so it
+        // can page or grep instead of ingesting more. Cache failures never
+        // fail the read itself.
+        await saveCachedFile(
+          defaultCacheDir(),
+          { owner: p.owner, repo: p.repo, ref: p.ref, path: p.path },
+          fullText,
+        ).catch(() => undefined);
+        const totalLines = fullText.split("\n").length;
+        const size = Buffer.byteLength(fullText);
+        if (p.offset !== undefined || p.limit !== undefined) {
+          const lines = fullText.split("\n");
+          const start = (p.offset ?? 1) - 1;
+          const rangeLimit = p.limit ?? MAX_RANGE_LINES;
+          const rawSlice = lines.slice(start, start + rangeLimit).join("\n");
+          const content = truncateUtf8WithMarker(rawSlice, 4 * 1024);
+          result = {
+            ...(file as Record<string, unknown>),
+            content,
+            size,
+            totalLines,
+            offset: p.offset ?? 1,
+            limit: p.limit ?? MAX_RANGE_LINES,
+            truncated: start > 0 || start + rangeLimit < lines.length || content !== rawSlice,
+          };
+        } else {
+          const preview = truncateUtf8WithMarker(fullText, 4 * 1024);
+          result = {
+            ...(file as Record<string, unknown>),
+            content: preview,
+            size,
+            totalLines,
+            truncated: preview.length < fullText.length,
+          };
+        }
       } else if (p.kind === "diff") {
         if (!num) throw new Error("A pull request number is required for this read");
         result = await call([
