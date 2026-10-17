@@ -18,6 +18,14 @@ vi.mock("../../src/core/doc-context.js", () => ({
   loadDocContext: vi.fn().mockResolvedValue([]),
 }));
 
+vi.mock("../../src/core/skill-context.js", () => ({
+  loadSkillContext: vi
+    .fn()
+    .mockResolvedValue({ formatted: "", untrusted: [], skills: [], warnings: [] }),
+  parseSkillDirs: vi.fn(() => []),
+  DEFAULT_SKILL_DIRS: [],
+}));
+
 vi.mock("../../src/core/context.js", () => ({
   loadContext: vi.fn(),
   mergeContextFiles: vi.fn((ctx) => [...(ctx.conventions ?? []), ...(ctx.reviewRules ?? [])]),

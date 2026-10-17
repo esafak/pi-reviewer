@@ -33,6 +33,12 @@ export interface ReviewPromptOptions {
   summaryEnabled?: boolean;
 }
 
+/** Progressive-disclosure skill guidance plus untrusted new-skill bodies. */
+export interface SkillPromptSection {
+  formatted: string;
+  untrusted: ContextFile[];
+}
+
 const SEVERITY_RULE: Record<MinSeverity, string | null> = {
   INFO: null,
   WARN: "- Only report CRITICAL and WARN issues — skip INFO",
@@ -124,6 +130,7 @@ export function buildJSONSystemPrompt(
   resolvedFindings: ResolvedFindingContext[] = [],
   prContext?: PullRequestContext,
   prSummary?: ReviewPromptOptions,
+  skills?: SkillPromptSection,
 ): string {
   const baseLines = [
     ...buildSharedBase(minSeverity),
@@ -146,6 +153,14 @@ export function buildJSONSystemPrompt(
   const sections: string[] = [base];
   if (conventionsStr.trim()) sections.push(`<conventions>\n${conventionsStr}\n</conventions>`);
   if (reviewRulesStr.trim()) sections.push(`<review_rules>\n${reviewRulesStr}\n</review_rules>`);
+  if (skills?.formatted.trim())
+    sections.push(`<skills>\n${skills.formatted}\n</skills>\n${PROMPTS.skills.trusted}`);
+  if (skills && skills.untrusted.length > 0) {
+    const bodies = skills.untrusted.map((f) => `--- ${f.path} ---\n${f.content}`).join("\n\n");
+    sections.push(
+      `<new_skills_under_review>\n${bodies}\n</new_skills_under_review>\n${PROMPTS.skills.untrusted}`,
+    );
+  }
   if (contextFiles && contextFiles.length > 0)
     sections.push(contextFiles.map((f) => f.content).join("\n\n"));
   // Author-stated intent precedes history so findings are read in context.
@@ -208,6 +223,7 @@ export function buildMarkdownSystemPrompt(
   minSeverity: MinSeverity = "INFO",
   context?: ContextResult | string,
   contextFiles?: ContextFile[],
+  skills?: SkillPromptSection,
 ): string {
   const base = [...buildSharedBase(minSeverity), "", ...PROMPTS.markdownReview].join("\n");
 
@@ -224,6 +240,14 @@ export function buildMarkdownSystemPrompt(
   const sections: string[] = [base];
   if (conventionsStr.trim()) sections.push(`<conventions>\n${conventionsStr}\n</conventions>`);
   if (reviewRulesStr.trim()) sections.push(`<review_rules>\n${reviewRulesStr}\n</review_rules>`);
+  if (skills?.formatted.trim())
+    sections.push(`<skills>\n${skills.formatted}\n</skills>\n${PROMPTS.skills.trusted}`);
+  if (skills && skills.untrusted.length > 0) {
+    const bodies = skills.untrusted.map((f) => `--- ${f.path} ---\n${f.content}`).join("\n\n");
+    sections.push(
+      `<new_skills_under_review>\n${bodies}\n</new_skills_under_review>\n${PROMPTS.skills.untrusted}`,
+    );
+  }
   if (contextFiles && contextFiles.length > 0)
     sections.push(contextFiles.map((f) => f.content).join("\n\n"));
   return sections.join("\n\n");

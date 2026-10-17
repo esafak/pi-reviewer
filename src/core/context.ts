@@ -41,7 +41,7 @@ export interface ContextProviderEvent {
   register: (name: string, provider: ContextProvider) => void;
 }
 
-function findGitRoot(cwd: string): string | null {
+export function findGitRoot(cwd: string): string | null {
   try {
     return execSync("git rev-parse --show-toplevel", {
       cwd,

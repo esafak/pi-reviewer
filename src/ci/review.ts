@@ -14,6 +14,7 @@ import path from "node:path";
 import { loadContext, mergeContextFiles } from "../core/context.js";
 import { resolveDiff, extractDiffFiles } from "../core/diff-resolver.js";
 import { loadDocContext } from "../core/doc-context.js";
+import { DEFAULT_SKILL_DIRS, loadSkillContext, parseSkillDirs } from "../core/skill-context.js";
 import {
   sendOutput,
   extractLastAssistantText,
@@ -138,6 +139,7 @@ export interface ReviewOptions {
   debug?: boolean;
   minSeverity?: MinSeverity;
   docDirs?: string[]; // dirs to scan for doc-context; empty = inject nothing (opt-in)
+  skillDirs?: string[]; // dirs to scan for skills; defaults to pi-style set, empty = disable
   mcpConfig?: CiMcpConfig;
   mcpServerCwd?: string;
   fromSha?: string;
@@ -530,6 +532,24 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
     });
   }
 
+  // Blank env (including the action's empty default) means the pi-style set;
+  // only an explicitly non-empty value overrides it. Programmatic callers
+  // disable with skillDirs: [].
+  const rawSkillDirs = process.env.PI_REVIEWER_SKILLS_DIRS?.trim();
+  const skillDirs =
+    options.skillDirs ?? (rawSkillDirs ? parseSkillDirs(rawSkillDirs) : DEFAULT_SKILL_DIRS);
+  const skillContext =
+    skillDirs.length > 0 ? await loadSkillContext({ cwd, diffFiles, skillDirs }) : null;
+  if (skillContext && (skillContext.skills.length > 0 || skillContext.untrusted.length > 0)) {
+    logger.info("review.skills.loaded", "Skills loaded", {
+      skills: skillContext.skills.map((s) => s.name),
+      untrusted: skillContext.untrusted.map((f) => f.path),
+    });
+  }
+  for (const warning of skillContext?.warnings ?? []) {
+    logger.warn("review.skills.warning", warning);
+  }
+
   const resolvedFindings = selectResolvedFindings(options.resolvedFindings ?? []);
   // PR summaries are CI-comment-only like search/registry: local terminal/file
   // runs must not grow the prompt merely because CI configuration leaked into
@@ -553,6 +573,7 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
     resolvedFindings,
     prTitle || prBody ? { title: prTitle, body: prBody } : undefined,
     { summaryEnabled },
+    skillContext ?? undefined,
   );
   // Search is deliberately CI-comment-only. Local terminal/file runs must not
   // receive network tools merely because CI configuration leaked into env.
