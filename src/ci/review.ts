@@ -512,7 +512,7 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
   logger.info("review.diff.resolved", "Diff resolved", { source, size: diff.length });
   if (warning) logger.warn("review.diff.warning", warning);
 
-  const context = await loadContext({ cwd });
+  const context = await loadContext({ cwd, diffFiles: extractDiffFiles(diff) });
   const loadedPaths = mergeContextFiles(context).map((f) => f.path);
   if (loadedPaths.length > 0) {
     logger.info("review.context.loaded", "Context loaded", { paths: loadedPaths });

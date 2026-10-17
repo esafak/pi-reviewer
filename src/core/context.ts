@@ -6,6 +6,7 @@ const CONFIG_DIRS = [".pi", ".claude", ".agents"];
 export interface ContextOptions {
   cwd?: string;
   gitRoot?: string; // override auto-detected git root (e.g. outer monorepo root when --dir is a nested repo)
+  diffFiles?: string[]; // repo-relative touched paths; parents contribute conventions
 }
 
 export interface ContextFile {
@@ -109,6 +110,66 @@ export function mergeContextFiles(result: ContextResult): ContextFile[] {
   return [...result.conventions, ...result.reviewRules];
 }
 
+/**
+ * Collects convention files from the parents of touched paths.
+ * Skips files already in `visited` so the base chain is never duplicated.
+ */
+export async function collectTouchedContextFiles(
+  fs: FsOps,
+  cwd: string,
+  diffFiles: string[],
+  filenames: string[],
+  gitRoot: string,
+  visited: Set<string>,
+): Promise<ContextFile[]> {
+  const dirs = new Set<string>();
+  for (const file of diffFiles) {
+    const slash = file.lastIndexOf("/");
+    if (slash <= 0) continue; // root-level file adds nothing beyond the base chain
+    let current = fs.join(cwd, file.slice(0, slash));
+    while (true) {
+      dirs.add(current);
+      if (current === gitRoot) break;
+      const parent = fs.dirname(current);
+      if (parent === current) break;
+      current = parent;
+    }
+  }
+
+  const result: ContextFile[] = [];
+  for (const dir of [...dirs].sort()) {
+    for (const filename of filenames) {
+      const found = await readContextFile(fs, dir, filename);
+      if (found === null || visited.has(found.path)) continue;
+      visited.add(found.path);
+      result.push({ path: fs.relative(cwd, found.path), content: found.content });
+      break; // one file per directory level
+    }
+  }
+
+  return result;
+}
+
+async function appendTouchedFiles(
+  fs: FsOps,
+  cwd: string,
+  gitRoot: string,
+  conventions: ContextFile[],
+  reviewRules: ContextFile[],
+  diffFiles: string[],
+): Promise<void> {
+  const visited = new Set<string>([
+    ...conventions.map((f) => fs.join(cwd, f.path)),
+    ...reviewRules.map((f) => fs.join(cwd, f.path)),
+  ]);
+  const [touchedConventions, touchedRules] = await Promise.all([
+    collectTouchedContextFiles(fs, cwd, diffFiles, ["AGENTS.md", "CLAUDE.md"], gitRoot, visited),
+    collectTouchedContextFiles(fs, cwd, diffFiles, ["REVIEW.md"], gitRoot, visited),
+  ]);
+  conventions.push(...touchedConventions);
+  reviewRules.push(...touchedRules);
+}
+
 export interface MinimalEventBus {
   emit(channel: string, data: unknown): void;
   on(channel: string, handler: (data: unknown) => void): () => void;
@@ -154,6 +215,11 @@ export async function loadContext(options: ContextOptions = {}): Promise<Context
     walkUpContextFiles(fs, cwd, ["REVIEW.md"], gitRoot),
   ]);
 
+  const diffFiles = options.diffFiles ?? [];
+  if (diffFiles.length > 0) {
+    await appendTouchedFiles(fs, cwd, gitRoot, conventions, reviewRules, diffFiles);
+  }
+
   return { conventions, reviewRules };
 }
 
@@ -161,6 +227,7 @@ export async function loadContextSSH(
   remote: string,
   remoteCwd: string,
   gitRoot?: string,
+  diffFiles: string[] = [],
 ): Promise<ContextResult> {
   const fs = sshFs(remote);
   const resolvedGitRoot =
@@ -173,6 +240,10 @@ export async function loadContextSSH(
     walkUpContextFiles(fs, remoteCwd, ["AGENTS.md", "CLAUDE.md"], resolvedGitRoot),
     walkUpContextFiles(fs, remoteCwd, ["REVIEW.md"], resolvedGitRoot),
   ]);
+
+  if (diffFiles.length > 0) {
+    await appendTouchedFiles(fs, remoteCwd, resolvedGitRoot, conventions, reviewRules, diffFiles);
+  }
 
   return { conventions, reviewRules };
 }
