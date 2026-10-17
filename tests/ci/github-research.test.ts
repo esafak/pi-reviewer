@@ -856,11 +856,29 @@ describe("github file cache, ranges, and grep", () => {
     const dir = await mkdtemp(path.join(tmpdir(), "pi-reviewer-grep-test-"));
     await saveCachedFile(dir, { owner: "o", repo: "r", path: "a.md" }, "hello needle one\nplain\n");
     await saveCachedFile(dir, { owner: "o", repo: "other", path: "b.md" }, "needle two\n");
+    // The inner workspace grep is stubbed: unit tests assert scope mapping
+    // and reframing, never the ripgrep binary (resolved over the network on
+    // runners without it). Stub text mirrors the inner tool's relative-path
+    // line format for each scope root.
+    const executeGrep = async (_id: string, input: Record<string, unknown>) => ({
+      content: [
+        {
+          type: "text",
+          text: String(input.path ?? "")
+            .replace(/\\/gu, "/")
+            .endsWith("/default")
+            ? "a.md:1: hello needle one"
+            : "o/r/default/a.md:1: hello needle one\no/other/default/b.md:1: needle two",
+        },
+      ],
+      details: {},
+    });
     const tools = createGitHubResearchTools(
       { scope: "token-accessible", token: "t" },
       undefined as never,
       {
         cacheDir: dir,
+        executeGrep,
       },
     );
     const scoped = (await tools[2]!.execute("id", {
@@ -967,11 +985,25 @@ describe("github file cache, ranges, and grep", () => {
       "scoped needle here\n",
     );
     await saveCachedFile(dir, { owner: "o", repo: "r", path: "docs/b.md" }, "default needle\n");
+    const executeGrep = async (_id: string, input: Record<string, unknown>) => ({
+      content: [
+        {
+          type: "text",
+          text: String(input.path ?? "")
+            .replace(/\\/gu, "/")
+            .endsWith("b.md")
+            ? "b.md:1: default needle"
+            : "a.md:1: scoped needle here",
+        },
+      ],
+      details: {},
+    });
     const tools = createGitHubResearchTools(
       { scope: "token-accessible", token: "t" },
       undefined as never,
       {
         cacheDir: dir,
+        executeGrep,
       },
     );
     const byFile = (await tools[2]!.execute("id", {

@@ -247,6 +247,10 @@ function safeFailure(error: unknown): string {
 // the download cache instead of the checkout, and results are reframed as
 // untrusted research data with logical repository keys instead of tmpdir
 // paths. Constructed once per factory so ripgrep resolution is shared.
+interface InnerGrepResult {
+  content: Array<{ type: string; text?: unknown }>;
+  details?: unknown;
+}
 interface CacheGrepInner {
   execute: (
     id: string,
@@ -254,7 +258,7 @@ interface CacheGrepInner {
     signal?: AbortSignal,
     onUpdate?: unknown,
     ctx?: unknown,
-  ) => Promise<{ content: Array<{ type: string; text?: unknown }>; details?: unknown }>;
+  ) => Promise<InnerGrepResult>;
 }
 
 function parseInnerGrepText(
@@ -307,7 +311,12 @@ export function createGitHubResearchTools(
   // Test-only override: production always uses defaultCacheDir() here and in
   // the client, so both sides coincide; pass cacheDir only with
   // PI_REVIEWER_GH_CACHE_DIR set to the same directory.
-  options: { cacheDir?: string } = {},
+  // executeGrep overrides the inner workspace-grep call so unit tests never
+  // resolve (or download) the ripgrep binary; production omits it.
+  options: {
+    cacheDir?: string;
+    executeGrep?: (id: string, input: Record<string, unknown>) => Promise<InnerGrepResult>;
+  } = {},
 ): AgentTool<any, any>[] {
   const cacheDir = options.cacheDir ?? defaultCacheDir();
   // Resolved on first grep so merely registering the research tools never
@@ -315,6 +324,7 @@ export function createGitHubResearchTools(
   let innerGrep: CacheGrepInner | undefined;
   const getInnerGrep = (): CacheGrepInner =>
     (innerGrep ??= createGrepToolDefinition(cacheDir) as unknown as CacheGrepInner);
+  const runInnerGrep = options.executeGrep ?? ((id, input) => getInnerGrep().execute(id, input));
   const search: AgentTool<typeof searchSchema, SearchParams> = {
     name: GITHUB_SEARCH_TOOL_NAME,
     label: GITHUB_SEARCH_TOOL_NAME,
@@ -491,7 +501,7 @@ export function createGitHubResearchTools(
           return { content: [{ type: "text" as const, text }], details: params };
         };
         try {
-          const inner = await getInnerGrep().execute(_id, {
+          const inner = await runInnerGrep(_id, {
             pattern,
             path: subpath,
             ignoreCase: params.ignoreCase,
