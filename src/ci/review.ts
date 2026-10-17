@@ -55,6 +55,29 @@ import { log } from "./log.js";
 import type { Logger } from "../logging/index.js";
 
 /**
+ * DeepWiki only indexes public repositories, so "repository not found" for
+ * a private repo is the normal case, not a failure worth vetoing: that
+ * source is simply unavailable and the agent already continued without it.
+ * Any other DeepWiki failure is abnormal and still vetoes the post, as does
+ * anything from any other server. The distinction reads the result text
+ * because the adapter reports every server-side rejection as bare
+ * tool_error; the excerpt is matched in memory and never logged, and
+ * unknown wording fails closed (vetoes). Observed across ask_wiki_question,
+ * read_wiki_contents, and read_wiki_structure, the unindexed case always
+ * contains "Repository not found".
+ */
+const DEEPWIKI_UNINDEXED_REPOSITORY_PATTERN = /repository not found/i;
+
+function isDeepWikiRejection(failure: McpFailureEntry): boolean {
+  return (
+    failure.signal.errorClass === "tool" &&
+    (failure.identity.server === "deepwiki" || failure.identity.tool.startsWith("deepwiki_")) &&
+    failure.contentExcerpt !== undefined &&
+    DEEPWIKI_UNINDEXED_REPOSITORY_PATTERN.test(failure.contentExcerpt)
+  );
+}
+
+/**
  * Maps the model's typed decision to the output call. The dispatch is
  * exhaustive: an action the harness does not understand is a bug, never a
  * silent fall-through.
@@ -207,6 +230,23 @@ export interface McpToolIdentity {
 export interface McpFailureEntry {
   identity: McpToolIdentity;
   signal: McpErrorSignal;
+  /** Bounded result-text excerpt, matched in memory only — never logged. */
+  contentExcerpt?: string;
+}
+
+const MAX_MCP_CONTENT_EXCERPT_LENGTH = 1000;
+
+/** Plain-text excerpt of a tool result's content blocks for matching, never logged. */
+function extractMcpContentExcerpt(result: unknown): string | undefined {
+  if (!isRecord(result) || !Array.isArray(result.content)) return undefined;
+  let excerpt = "";
+  for (const block of result.content) {
+    if (!isRecord(block) || block.type !== "text" || typeof block.text !== "string") continue;
+    excerpt += block.text;
+    if (excerpt.length >= MAX_MCP_CONTENT_EXCERPT_LENGTH) break;
+  }
+  const trimmed = excerpt.trim().slice(0, MAX_MCP_CONTENT_EXCERPT_LENGTH);
+  return trimmed ? trimmed : undefined;
 }
 
 // A failed MCP tool call is returned (not thrown) with a closed adapter code
@@ -991,7 +1031,11 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
             const signal = extractMcpErrorSignal(toolEvent.result) ?? {
               errorClass: "unknown" as const,
             };
-            failedMcpCalls.set(mcpKey, { identity: mcpIdentity, signal });
+            failedMcpCalls.set(mcpKey, {
+              identity: mcpIdentity,
+              signal,
+              contentExcerpt: extractMcpContentExcerpt(toolEvent.result),
+            });
           } else if (mcpIdentity && mcpKey) failedMcpCalls.delete(mcpKey);
           const outputArtifact = mcpIdentity
             ? mcpOutputArtifactDirectory(toolEvent.result)
@@ -1077,7 +1121,17 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
         settleRun = resolve;
         failRun = reject;
       });
-      await Promise.all([agent.prompt(message), ended]);
+      // The rejection may land while prompt() is still settling; mark it
+      // observed up front so the window before the await below never reads
+      // as an unhandled rejection. Awaiting ended afterwards still throws.
+      void ended.catch(() => {});
+      // Sequential on purpose: agent.prompt() settles only after agent_end
+      // listeners have run and the run is fully idle. Awaiting both
+      // concurrently lets ended reject first while prompt() still holds the
+      // run open, so the immediate bare-nudge retry collides with "Agent is
+      // already processing a prompt".
+      await agent.prompt(message);
+      await ended;
     };
 
     try {
@@ -1143,17 +1197,31 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
       // Classes cover only the capped entries so every class has a visible tool.
       const errorClasses = [...new Set(entries.map((entry) => entry.signal.errorClass))];
       const additional = failedMcpCalls.size > entries.length ? " and other MCP tools" : "";
-      logger.error(
-        "review.mcp.failed",
-        "MCP tool call failed; check server availability and auth. Review not posted.",
-        {
-          servers,
-          tools,
-          errorClasses,
-          additionalTools: additional,
-        },
-      );
-      throw new Error("A configured MCP tool call failed; refusing to post the review");
+      const onlyDeepWikiRejections = [...failedMcpCalls.values()].every(isDeepWikiRejection);
+      if (onlyDeepWikiRejections) {
+        logger.warn(
+          "review.mcp.failed",
+          "DeepWiki has no index for the repository; continuing without wiki answers",
+          {
+            servers,
+            tools,
+            errorClasses,
+            additionalTools: additional,
+          },
+        );
+      } else {
+        logger.error(
+          "review.mcp.failed",
+          "MCP tool call failed; check server availability and auth. Review not posted.",
+          {
+            servers,
+            tools,
+            errorClasses,
+            additionalTools: additional,
+          },
+        );
+        throw new Error("A configured MCP tool call failed; refusing to post the review");
+      }
     }
     if (searchClient?.hasRequiredFailure())
       throw new Error("Required web search failed; refusing to post the review");
