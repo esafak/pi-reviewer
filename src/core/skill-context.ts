@@ -1,6 +1,6 @@
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, sep } from "node:path";
+import { isAbsolute, join, sep } from "node:path";
 
 import {
   formatSkillsForPrompt,
@@ -40,6 +40,44 @@ export function resolveSkillDirs(explicit?: string[]): string[] {
   return parseSkillDirs(raw);
 }
 
+/**
+ * Union of skill-dir resolutions across the cwd and diff-root bases, cwd
+ * scope first. Dedupe keeps the first occurrence so coincident bases (CI,
+ * nested --dir repos) scan once without bogus already-defined warnings, and
+ * first-wins name matching prefers the nearer scope on genuine clashes.
+ * Absolute entries bypass both bases. `normalize` puts joined paths into the
+ * comparison namespace: pass canonicalize where paths may be symlinked
+ * (local disk); the remote loader's paths are already physical (pwd -P) so
+ * it passes the identity and absolute remote entries are used verbatim.
+ * One shared helper so local and remote discovery cannot diverge on which
+ * dirs get scanned.
+ */
+export function unionDirLists(
+  joinFn: (...parts: string[]) => string,
+  cwd: string,
+  diffRoot: string,
+  skillDirs: string[],
+  normalize: (p: string) => string = (p) => p,
+): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  const emit = (abs: string): void => {
+    const key = normalize(abs).replace(/\\/g, "/");
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(normalize(abs));
+  };
+  for (const d of skillDirs) {
+    if (isAbsolute(d)) {
+      emit(d);
+      continue;
+    }
+    emit(joinFn(cwd, d));
+    emit(joinFn(diffRoot, d));
+  }
+  return out;
+}
+
 export interface LoadSkillContextOptions {
   cwd: string;
   /**
@@ -49,7 +87,14 @@ export interface LoadSkillContextOptions {
    */
   trustFiles: string[];
   gitRoot?: string;
-  /** Dirs relative to cwd; defaults to DEFAULT_SKILL_DIRS. Empty disables. */
+  /**
+   * Dirs relative to cwd (absolute entries bypass the bases). Each dir is
+   * resolved against both cwd and the diff root with cwd scope first, so
+   * subdirectory sessions still see repo-root skills and vice versa; first
+   * definition wins name clashes. Sibling-package skills outside both
+   * subtrees are not discovered (known limitation). Defaults to
+   * DEFAULT_SKILL_DIRS; empty disables.
+   */
   skillDirs?: string[];
 }
 
@@ -216,7 +261,7 @@ export async function loadSkillContext(
   // inside the nested repo at cwd.
   const diffRoot = options.gitRoot ? cwd : gitRoot;
 
-  const skillDirAbsList = skillDirs.map((d) => join(cwd, d));
+  const skillDirAbsList = unionDirLists(join, cwd, diffRoot, skillDirs, canonicalize);
   const discovered: Skill[] = [];
   const warnings: string[] = [];
   for (const dir of skillDirAbsList) {
@@ -311,7 +356,7 @@ export async function loadSkillContextRemote(
   const tmpRoot = await mkdtemp(join(tmpdir(), "pi-reviewer-skills-"));
   try {
     const discovered: Skill[] = [];
-    const skillDirAbsList = skillDirs.map((d) => fs.join(remoteCwd, d));
+    const skillDirAbsList = unionDirLists(fs.join, remoteCwd, diffRoot, skillDirs);
     // One budget across all dirs: the listed set is small and curated.
     const budget: FetchBudget = { files: MAX_REMOTE_SKILL_FILES, bytes: MAX_REMOTE_SKILL_BYTES };
     let capped = false;

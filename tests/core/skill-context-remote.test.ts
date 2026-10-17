@@ -163,4 +163,47 @@ describe("loadSkillContextRemote", () => {
     expect(result.skills).toHaveLength(100);
     expect(result.warnings.some((w) => w.includes("capped"))).toBe(true);
   });
+
+  it("discovers root skills from a subdirectory remote cwd via the union", async () => {
+    vi.mocked(sshExec).mockImplementation(async (_remote: string, command: string) => {
+      if (command.includes("pwd -P")) return "/remote/root/packages/api\n";
+      return "/remote/root\n";
+    });
+    const fs = makeFakeSshFs({
+      "/remote/root/skills/web/SKILL.md": SKILL_BODY,
+    });
+
+    const result = await loadSkillContextRemote({
+      remote: "user@host",
+      fs,
+      remoteCwd: "/remote/root/packages/api",
+      trustFiles: ["skills/web/SKILL.md"],
+      skillDirs: ["skills"],
+    });
+
+    expect(result.skills).toEqual([]);
+    expect(result.untrusted).toHaveLength(1);
+  });
+
+  it("scans coincident remote bases once without warnings", async () => {
+    vi.mocked(sshExec).mockImplementation(async (_remote: string, command: string) => {
+      if (command.includes("pwd -P")) return "/remote/root/packages/api\n";
+      return "/remote/root\n";
+    });
+    const fs = makeFakeSshFs({
+      "/remote/root/packages/api/skills/a/SKILL.md": SKILL_BODY,
+    });
+
+    const result = await loadSkillContextRemote({
+      remote: "user@host",
+      fs,
+      remoteCwd: "/remote/root/packages/api",
+      trustFiles: [],
+      gitRoot: "/remote/root/packages/api",
+      skillDirs: ["skills"],
+    });
+
+    expect(result.skills.map((s) => s.name)).toEqual(["deploy"]);
+    expect(result.warnings).toEqual([]);
+  });
 });
