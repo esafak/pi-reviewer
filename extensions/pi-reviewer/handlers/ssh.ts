@@ -8,6 +8,11 @@ import {
 } from "../../../src/core/output.js";
 import { loadContextSSH } from "../../../src/core/context.js";
 import { extractDiffFiles } from "../../../src/core/diff-resolver.js";
+import {
+  loadSkillContext,
+  loadSkillContextRemote,
+  resolveSkillDirs,
+} from "../../../src/core/skill-context.js";
 import { filterDiff } from "../../../src/core/diff-filter.js";
 import {
   buildJSONSystemPrompt,
@@ -177,6 +182,27 @@ export async function handleSSHReview(opts: HandleSSHReviewOptions): Promise<voi
       ).catch(() => ({ conventions: [], reviewRules: [] }))
     : { conventions: [], reviewRules: [] };
 
+  const sshSkillDirs = resolveSkillDirs();
+  const sshSkillContext =
+    sshSkillDirs.length > 0
+      ? await (
+          sshState
+            ? loadSkillContextRemote({
+                remote: sshState.remote,
+                fs: providerFs,
+                remoteCwd: sshRemoteCwd,
+                gitRoot: parsed.dir ? sshState.remoteCwd : undefined,
+                diffFiles: sshDiffFiles,
+                skillDirs: sshSkillDirs,
+              })
+            : loadSkillContext({
+                cwd: ctx.cwd,
+                diffFiles: sshDiffFiles,
+                skillDirs: sshSkillDirs,
+              })
+        ).catch(() => null)
+      : null;
+
   const source = buildSSHSource(parsed, {
     branch: readDefaultBranch(),
     head: sshHeadBranch.trim() || "HEAD",
@@ -202,13 +228,27 @@ export async function handleSSHReview(opts: HandleSSHReviewOptions): Promise<voi
   const userPrompt = buildUserPrompt(sshDiff, sshSkippedFiles);
 
   if (!parsed.ui) {
-    const systemPrompt = buildMarkdownSystemPrompt(minSeverity, sshContext, sshContextFiles);
+    const systemPrompt = buildMarkdownSystemPrompt(
+      minSeverity,
+      sshContext,
+      sshContextFiles,
+      sshSkillContext ?? undefined,
+    );
     loaderState.stop = setReviewFooter(ctx, source, { model: currentModelId, thinking });
     runSSHReview({ systemPrompt, userPrompt, pi, stopLoader: loaderState.stop, notify });
     return;
   }
 
-  const systemPrompt = buildJSONSystemPrompt(sshContext, minSeverity, sshContextFiles);
+  const systemPrompt = buildJSONSystemPrompt(
+    sshContext,
+    minSeverity,
+    sshContextFiles,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    sshSkillContext ? { skills: sshSkillContext } : undefined,
+  );
   loaderState.stop = setReviewFooter(ctx, source, { model: currentModelId, thinking });
   const result = await runSSHReviewAndWait({
     systemPrompt,

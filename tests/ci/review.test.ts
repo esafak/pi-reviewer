@@ -23,6 +23,7 @@ vi.mock("../../src/core/skill-context.js", () => ({
     .fn()
     .mockResolvedValue({ formatted: "", untrusted: [], skills: [], warnings: [] }),
   parseSkillDirs: vi.fn(() => []),
+  resolveSkillDirs: vi.fn(() => []),
   DEFAULT_SKILL_DIRS: [],
 }));
 

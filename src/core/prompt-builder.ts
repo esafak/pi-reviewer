@@ -28,15 +28,17 @@ export interface PullRequestContext {
   title?: string;
   body?: string;
 }
-export interface ReviewPromptOptions {
-  /** Request the pr_summary/pr_diagram overview fields. Defaults to false. */
-  summaryEnabled?: boolean;
-}
-
 /** Progressive-disclosure skill guidance plus untrusted new-skill bodies. */
 export interface SkillPromptSection {
   formatted: string;
   untrusted: ContextFile[];
+}
+
+export interface ReviewPromptOptions {
+  /** Request the pr_summary/pr_diagram overview fields. Defaults to false. */
+  summaryEnabled?: boolean;
+  /** Progressive-disclosure skill guidance plus untrusted new-skill bodies. */
+  skills?: SkillPromptSection;
 }
 
 const SEVERITY_RULE: Record<MinSeverity, string | null> = {
@@ -130,7 +132,6 @@ export function buildJSONSystemPrompt(
   resolvedFindings: ResolvedFindingContext[] = [],
   prContext?: PullRequestContext,
   prSummary?: ReviewPromptOptions,
-  skills?: SkillPromptSection,
 ): string {
   const baseLines = [
     ...buildSharedBase(minSeverity),
@@ -153,6 +154,7 @@ export function buildJSONSystemPrompt(
   const sections: string[] = [base];
   if (conventionsStr.trim()) sections.push(`<conventions>\n${conventionsStr}\n</conventions>`);
   if (reviewRulesStr.trim()) sections.push(`<review_rules>\n${reviewRulesStr}\n</review_rules>`);
+  const skills = prSummary?.skills;
   if (skills?.formatted.trim())
     sections.push(`<skills>\n${skills.formatted}\n</skills>\n${PROMPTS.skills.trusted}`);
   if (skills && skills.untrusted.length > 0) {

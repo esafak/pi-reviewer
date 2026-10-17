@@ -2,6 +2,7 @@ import path from "node:path";
 
 import { collectProviderContext, loadContext } from "../../../src/core/context.js";
 import { resolveDiff, extractDiffFiles } from "../../../src/core/diff-resolver.js";
+import { loadSkillContext, resolveSkillDirs } from "../../../src/core/skill-context.js";
 import {
   buildJSONSystemPrompt,
   buildMarkdownSystemPrompt,
@@ -44,11 +45,30 @@ export async function handleDryRun(opts: HandleDryRunOptions): Promise<void> {
     gitRoot: parsed.dir ? cwd : undefined,
     diffFiles: dryDiffFiles,
   });
+  const drySkillDirs = resolveSkillDirs();
+  const drySkillContext =
+    drySkillDirs.length > 0
+      ? await loadSkillContext({
+          cwd: parsed.dir ? path.resolve(cwd, parsed.dir) : cwd,
+          diffFiles: dryDiffFiles,
+          gitRoot: parsed.dir ? cwd : undefined,
+          skillDirs: drySkillDirs,
+        })
+      : null;
   const dryContextFiles = (await collectProviderContext(pi.events, cwd, dryDiffFiles)).flatMap(
     (g) => g.files,
   );
   notify(`Diff source: ${source}`);
-  const systemPrompt = buildJSONSystemPrompt(context, minSeverity, dryContextFiles);
+  const systemPrompt = buildJSONSystemPrompt(
+    context,
+    minSeverity,
+    dryContextFiles,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    drySkillContext ? { skills: drySkillContext } : undefined,
+  );
   notify(`System prompt:\n\n${systemPrompt}`);
   notify(`User prompt:\n\n${buildUserPrompt(diff, skippedFiles)}`);
 }
