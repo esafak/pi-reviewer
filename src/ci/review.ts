@@ -55,6 +55,19 @@ import { log } from "./log.js";
 import type { Logger } from "../logging/index.js";
 
 /**
+ * DeepWiki answering for a repo it has not indexed rejects the call
+ * server-side; that source is simply unavailable and the agent already
+ * continued without it, so the review posts with a warning instead of
+ * failing the run.
+ */
+function isDeepWikiRejection(failure: McpFailureEntry): boolean {
+  return (
+    failure.signal.errorClass === "tool" &&
+    (failure.identity.server === "deepwiki" || failure.identity.tool.startsWith("deepwiki_"))
+  );
+}
+
+/**
  * Maps the model's typed decision to the output call. The dispatch is
  * exhaustive: an action the harness does not understand is a bug, never a
  * silent fall-through.
@@ -1153,15 +1166,7 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
       // Classes cover only the capped entries so every class has a visible tool.
       const errorClasses = [...new Set(entries.map((entry) => entry.signal.errorClass))];
       const additional = failedMcpCalls.size > entries.length ? " and other MCP tools" : "";
-      // DeepWiki answering for a repo it has not indexed rejects the call
-      // server-side; that source is simply unavailable and the agent already
-      // continued without it, so the review posts with a warning instead of
-      // failing the run. Anything else still vetoes the post.
-      const onlyDeepWikiRejections = [...failedMcpCalls.values()].every(
-        (failure) =>
-          failure.signal.errorClass === "tool" &&
-          (failure.identity.server === "deepwiki" || failure.identity.tool.startsWith("deepwiki_")),
-      );
+      const onlyDeepWikiRejections = [...failedMcpCalls.values()].every(isDeepWikiRejection);
       if (onlyDeepWikiRejections) {
         logger.warn(
           "review.mcp.failed",
