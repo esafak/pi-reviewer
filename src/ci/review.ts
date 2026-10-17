@@ -62,7 +62,9 @@ import type { Logger } from "../logging/index.js";
  * anything from any other server. The distinction reads the result text
  * because the adapter reports every server-side rejection as bare
  * tool_error; the excerpt is matched in memory and never logged, and
- * unknown wording fails closed (vetoes).
+ * unknown wording fails closed (vetoes). Observed across ask_wiki_question,
+ * read_wiki_contents, and read_wiki_structure, the unindexed case always
+ * contains "Repository not found".
  */
 const DEEPWIKI_UNINDEXED_REPOSITORY_PATTERN = /repository not found/i;
 

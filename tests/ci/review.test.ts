@@ -1123,6 +1123,39 @@ describe("review", () => {
     expect(JSON.stringify(records)).not.toContain("Repository not found");
   });
 
+  it("warns on the read tools' unindexed wording too", async () => {
+    fakeAgentEvents = [
+      {
+        type: "tool_execution_start",
+        toolName: "mcp",
+        toolCallId: "mcp-deepwiki-read-call",
+        args: { tool: "deepwiki_read_wiki_contents" },
+      },
+      {
+        type: "tool_execution_end",
+        toolName: "mcp",
+        toolCallId: "mcp-deepwiki-read-call",
+        isError: true,
+        result: {
+          details: { mode: "call", error: "tool_error", server: "deepwiki" },
+          content: [
+            {
+              type: "text",
+              text: "Error fetching wiki for owner/repo: Repository not found. Visit https://deepwiki.com/owner/repo to index it.",
+            },
+          ],
+        },
+      },
+    ];
+    const { sink, records } = createMemorySink();
+    const mcpConfig: CiMcpConfig = { mcpServers: { deepwiki: { url: "https://mcp.example/mcp" } } };
+
+    await review({ cwd: "/repo", output: "comment", mcpConfig, logger: createLogger({ sink }) });
+
+    expect(sendOutputMock).toHaveBeenCalled();
+    expect(records.find(({ event }) => event === "review.mcp.failed")?.level).toBe("warn");
+  });
+
   it("still refuses to post on other DeepWiki errors", async () => {
     fakeAgentEvents = [
       {
