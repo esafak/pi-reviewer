@@ -127,21 +127,21 @@ export function mergeContextFiles(result: ContextResult): ContextFile[] {
  * `resolveBase` is the root diff paths are relative to (the repo toplevel the
  * diff was taken from, not necessarily `cwd`); `cwd` stays the base for
  * returned relative paths. Each diff file contributes its directory chain up
- * to `gitRoot`. Files already in `visited` never shadow: once any file is
- * found for a directory the search ends there, preserving the
- * AGENTS.md-over-CLAUDE.md priority. Touched files append after the base
- * chain in alphabetical directory order. The dir cap bounds prompt growth and
- * per-directory file probes (one ssh round-trip per probe over sshFs).
+ * to `gitRoot`. Once any file is found for a directory the search ends there,
+ * preserving the AGENTS.md-over-CLAUDE.md priority. Touched files append
+ * after the base chain in alphabetical directory order. Dirs already covered
+ * by the base chain are skipped, and the per-kind dir cap bounds prompt
+ * growth and per-directory file probes (one ssh round-trip per probe over
+ * sshFs); conventions and rules each get their own cap deliberately.
  */
-export const MAX_TOUCHED_DIRS = 20;
+const MAX_TOUCHED_DIRS = 20;
 
-export async function collectTouchedContextFiles(
+async function collectTouchedContextFiles(
   fs: FsOps,
   cwd: string,
   diffFiles: string[],
   filenames: string[],
   gitRoot: string,
-  visited: Set<string>,
   resolveBase: string = cwd,
 ): Promise<ContextFile[]> {
   const baseChain = new Set<string>();
@@ -172,10 +172,7 @@ export async function collectTouchedContextFiles(
     for (const filename of filenames) {
       const found = await readContextFile(fs, dir, filename);
       if (found === null) continue;
-      if (!visited.has(found.path)) {
-        visited.add(found.path);
-        result.push({ path: fs.relative(cwd, found.path), content: found.content });
-      }
+      result.push({ path: fs.relative(cwd, found.path), content: found.content });
       break; // one file per directory level
     }
   }
@@ -192,10 +189,6 @@ async function appendTouchedFiles(
   diffFiles: string[],
   resolveBase: string,
 ): Promise<void> {
-  const visited = new Set<string>([
-    ...conventions.map((f) => fs.join(cwd, f.path)),
-    ...reviewRules.map((f) => fs.join(cwd, f.path)),
-  ]);
   const [touchedConventions, touchedRules] = await Promise.all([
     collectTouchedContextFiles(
       fs,
@@ -203,10 +196,9 @@ async function appendTouchedFiles(
       diffFiles,
       ["AGENTS.md", "CLAUDE.md"],
       gitRoot,
-      visited,
       resolveBase,
     ),
-    collectTouchedContextFiles(fs, cwd, diffFiles, ["REVIEW.md"], gitRoot, visited, resolveBase),
+    collectTouchedContextFiles(fs, cwd, diffFiles, ["REVIEW.md"], gitRoot, resolveBase),
   ]);
   conventions.push(...touchedConventions);
   reviewRules.push(...touchedRules);

@@ -1,5 +1,5 @@
 import { execSync } from "node:child_process";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
@@ -443,11 +443,13 @@ describe("loadContext — touched directories", () => {
     execSync("git init", { cwd: root, stdio: "ignore" });
 
     await writeFile(path.join(root, "AGENTS.md"), "root agents", "utf-8");
-    await writeFile(path.join(root, "CLAUDE.md"), "root claude", "utf-8");
+    await mkdir(path.join(root, "packages", "web"), { recursive: true });
+    await writeFile(path.join(root, "packages", "web", "AGENTS.md"), "web agents", "utf-8");
+    await writeFile(path.join(root, "packages", "web", "CLAUDE.md"), "web claude", "utf-8");
 
-    const result = await loadContext({ cwd: root, diffFiles: ["src/foo.ts"] });
+    const result = await loadContext({ cwd: root, diffFiles: ["packages/web/foo.ts"] });
 
-    expect(result.conventions.map((f) => f.content)).toEqual(["root agents"]);
+    expect(result.conventions.map((f) => f.content)).toEqual(["root agents", "web agents"]);
   });
 
   it("ignores root-level touched files beyond the base chain", async () => {
@@ -469,11 +471,30 @@ describe("loadContext — touched directories", () => {
 
     const sub = path.join(root, "packages", "api");
     await mkdir(sub, { recursive: true });
+    await writeFile(path.join(root, "AGENTS.md"), "root", "utf-8");
     await writeFile(path.join(sub, "AGENTS.md"), "api", "utf-8");
+    await mkdir(path.join(root, "packages", "web"), { recursive: true });
+    await writeFile(path.join(root, "packages", "web", "AGENTS.md"), "web", "utf-8");
 
-    // git prints repo-root-relative paths even when the diff runs in a subdir
-    const result = await loadContext({ cwd: sub, diffFiles: ["packages/api/foo.ts"] });
+    // git prints repo-root-relative paths even when the diff runs in a subdir,
+    // so a sibling subtree is reachable from a nested cwd
+    const result = await loadContext({ cwd: sub, diffFiles: ["packages/web/foo.ts"] });
 
-    expect(result.conventions.map((f) => f.content)).toContain("api");
+    expect(result.conventions.map((f) => f.content)).toEqual(["root", "api", "web"]);
+  });
+
+  it("dedupes when cwd reaches the repo through a symlink", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "pi-reviewer-touched-"));
+    createdDirs.push(root);
+    execSync("git init", { cwd: root, stdio: "ignore" });
+
+    await writeFile(path.join(root, "AGENTS.md"), "root", "utf-8");
+    const link = `${root}-link`;
+    createdDirs.push(link);
+    await symlink(root, link);
+
+    const result = await loadContext({ cwd: link, diffFiles: ["packages/api/foo.ts"] });
+
+    expect(result.conventions.map((f) => f.content)).toEqual(["root"]);
   });
 });

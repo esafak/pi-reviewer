@@ -121,14 +121,17 @@ describe("loadContextSSH — touched directories", () => {
     vi.mocked(sshFs).mockReturnValue(
       makeFakeSshFs({
         "/remote/root/AGENTS.md": "# Root Agents",
-        "/remote/root/CLAUDE.md": "# Root Claude",
+        "/remote/root/packages/web/AGENTS.md": "# Web Agents",
+        "/remote/root/packages/web/CLAUDE.md": "# Web Claude",
       }),
     );
     vi.mocked(sshExec).mockResolvedValue("/remote/root\n");
 
-    const result = await loadContextSSH("user@host", "/remote/root", undefined, ["src/foo.ts"]);
+    const result = await loadContextSSH("user@host", "/remote/root", undefined, [
+      "packages/web/foo.ts",
+    ]);
 
-    expect(result.conventions.map((f) => f.content)).toEqual(["# Root Agents"]);
+    expect(result.conventions.map((f) => f.content)).toEqual(["# Root Agents", "# Web Agents"]);
   });
 
   it("leaves empty diffFiles behavior unchanged", async () => {
@@ -145,14 +148,19 @@ describe("loadContextSSH — touched directories", () => {
       makeFakeSshFs({
         "/remote/root/AGENTS.md": "# Root Level",
         "/remote/root/packages/api/AGENTS.md": "# Api Level",
+        "/remote/root/packages/web/AGENTS.md": "# Web Level",
       }),
     );
     vi.mocked(sshExec).mockResolvedValue("/remote/root\n");
 
     const result = await loadContextSSH("user@host", "/remote/root/packages/api", undefined, [
-      "packages/api/foo.ts",
+      "packages/web/foo.ts",
     ]);
 
-    expect(result.conventions.map((f) => f.content)).toContain("# Api Level");
+    expect(result.conventions.map((f) => f.content)).toEqual([
+      "# Root Level",
+      "# Api Level",
+      "# Web Level",
+    ]);
   });
 });
