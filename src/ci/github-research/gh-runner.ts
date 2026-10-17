@@ -1,19 +1,32 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { log } from "../log.js";
 import { validateGhArgs } from "./gh-allowlist.js";
 import { truncateUtf8WithMarker } from "../registry/helpers.js";
 const exec = promisify(execFile);
 export async function probeGhCli(): Promise<boolean> {
-  try {
-    await exec("gh", ["--version"], {
-      env: { PATH: process.env.PATH },
-      timeout: 1_000,
-      maxBuffer: 1024,
-    });
-    return true;
-  } catch {
-    return false;
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      await exec("gh", ["--version"], {
+        env: { PATH: process.env.PATH },
+        timeout: 5_000,
+        maxBuffer: 1024,
+      });
+      return true;
+    } catch (error) {
+      lastError = error;
+    }
   }
+  // The warn path tells the operator to install gh, which is wrong advice
+  // when the binary exists but a cold runner stalls the spawn past the
+  // timeout (observed: setup step finds gh, probe does not). Keep the reason
+  // at debug so the next occurrence is diagnosable instead of a mystery.
+  const reason = lastError instanceof Error ? lastError.message.split("\n")[0] : String(lastError);
+  log.debug("review.github_research.probe_failed", "gh CLI probe failed", {
+    error: (reason ?? "unknown").slice(0, 160),
+  });
+  return false;
 }
 export const MAX_GH_RESULT_BYTES = 7 * 1024,
   MAX_GH_TOTAL_BYTES = 15 * 1024,
