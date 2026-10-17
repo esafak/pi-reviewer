@@ -143,14 +143,7 @@ export async function handleSSHReview(opts: HandleSSHReviewOptions): Promise<voi
   const providerFs = sshState ? makeSshFs(sshState.remote) : localFs();
 
   const gitCmd = `git -C ${JSON.stringify(sshRemoteCwd)}`;
-  const [sshContext, rawSshDiff, sshHeadBranch, sshOriginBase] = await Promise.all([
-    sshState
-      ? loadContextSSH(
-          sshState.remote,
-          sshRemoteCwd,
-          parsed.dir ? sshState.remoteCwd : undefined,
-        ).catch(() => ({ conventions: [], reviewRules: [] }))
-      : Promise.resolve({ conventions: [], reviewRules: [] }),
+  const [rawSshDiff, sshHeadBranch, sshOriginBase] = await Promise.all([
     sshState
       ? sshExec(
           sshState.remote,
@@ -165,12 +158,6 @@ export async function handleSSHReview(opts: HandleSSHReviewOptions): Promise<voi
       : Promise.resolve("origin/main"),
   ]);
 
-  const source = buildSSHSource(parsed, {
-    branch: readDefaultBranch(),
-    head: sshHeadBranch.trim() || "HEAD",
-    detectedBase: sshOriginBase.trim() || undefined,
-  });
-
   const {
     diff: sshDiff,
     warning: sshDiffWarning,
@@ -178,7 +165,24 @@ export async function handleSSHReview(opts: HandleSSHReviewOptions): Promise<voi
   } = filterDiff(rawSshDiff);
   if (sshDiffWarning) notify(sshDiffWarning, "warning");
 
-  const sshDiffFiles = extractDiffFiles(rawSshDiff);
+  // Context follows the filtered diff so providers and conventions describe
+  // the files actually under review, matching local mode and CI.
+  const sshDiffFiles = extractDiffFiles(sshDiff);
+  const sshContext = sshState
+    ? await loadContextSSH(
+        sshState.remote,
+        sshRemoteCwd,
+        parsed.dir ? sshState.remoteCwd : undefined,
+        sshDiffFiles,
+      ).catch(() => ({ conventions: [], reviewRules: [] }))
+    : { conventions: [], reviewRules: [] };
+
+  const source = buildSSHSource(parsed, {
+    branch: readDefaultBranch(),
+    head: sshHeadBranch.trim() || "HEAD",
+    detectedBase: sshOriginBase.trim() || undefined,
+  });
+
   const sshGitRoot = parsed.dir ? (sshState ? sshState.remoteCwd : ctx.cwd) : undefined;
   const {
     groups: sshAllContextGroups,

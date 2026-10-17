@@ -35,7 +35,7 @@ For reviewing code on a remote machine. Instead of spawning a subprocess, SSH mo
 /review --ssh --branch dev
 ```
 
-Before starting the agent, pi-reviewer fetches everything over SSH in parallel: the diff, `AGENTS.md` / `CLAUDE.md`, `REVIEW.md`, and any context provider files. The diff is passed directly to the agent — no extra round-trip needed. The agent saves `pi-review.md` directly on the remote.
+Before starting the agent, pi-reviewer fetches the diff over SSH, then `AGENTS.md` / `CLAUDE.md`, `REVIEW.md`, and any context provider files for the touched directories. The diff is passed directly to the agent — no extra round-trip needed. The agent saves `pi-review.md` directly on the remote.
 
 > **Note:** `--model` and `--thinking` have no effect in SSH mode — the model is fixed to whatever the parent session is using.
 
@@ -161,6 +161,7 @@ Create `AGENTS.md` or `CLAUDE.md` at your project root to give the reviewer cont
 - `AGENTS.md` is checked first; `CLAUDE.md` is the fallback. Matched case-insensitively.
 - Files can also live in `.pi/`, `.claude/`, or `.agents/` subdirectories.
 - **Monorepo support:** pi-reviewer walks up from the working directory to the git root and collects `AGENTS.md`/`REVIEW.md` at every level, root first. `--dir` extends the walk-up to the outer project root.
+- **Touched directories:** files under review also contribute their parent chains up to the git root, deduped against the base chain, so nested conventions travel with the diff.
 
 ### Context providers
 

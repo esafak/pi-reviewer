@@ -201,11 +201,12 @@ export async function handleLocalReview(opts: HandleLocalReviewOptions): Promise
   if (warning) notify(warning, "warning");
 
   notify("Loading context…");
+  const diffFiles = extractDiffFiles(diff);
   const context = await loadContext({
     cwd: parsed.dir ? path.resolve(ctx.cwd, parsed.dir) : ctx.cwd,
     gitRoot: parsed.dir ? ctx.cwd : undefined,
+    diffFiles,
   });
-  const diffFiles = extractDiffFiles(diff);
   const providerCwd = parsed.dir ? path.resolve(ctx.cwd, parsed.dir) : ctx.cwd;
   const {
     groups: allContextGroups,

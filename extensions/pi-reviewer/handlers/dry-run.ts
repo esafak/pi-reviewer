@@ -38,11 +38,12 @@ export async function handleDryRun(opts: HandleDryRunOptions): Promise<void> {
     pr: parsed.pr,
     dir: parsed.dir,
   });
+  const dryDiffFiles = extractDiffFiles(diff);
   const context = await loadContext({
     cwd: parsed.dir ? path.resolve(cwd, parsed.dir) : cwd,
     gitRoot: parsed.dir ? cwd : undefined,
+    diffFiles: dryDiffFiles,
   });
-  const dryDiffFiles = extractDiffFiles(diff);
   const dryContextFiles = (await collectProviderContext(pi.events, cwd, dryDiffFiles)).flatMap(
     (g) => g.files,
   );

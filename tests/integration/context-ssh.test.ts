@@ -99,3 +99,68 @@ describe("loadContextSSH — monorepo walk-up", () => {
     expect(result.conventions[1]?.content).toBe("# Package Level");
   });
 });
+
+describe("loadContextSSH — touched directories", () => {
+  it("ingests AGENTS.md from a touched sibling dir", async () => {
+    vi.mocked(sshFs).mockReturnValue(
+      makeFakeSshFs({
+        "/remote/root/AGENTS.md": "# Root Level",
+        "/remote/root/packages/web/AGENTS.md": "# Web Level",
+      }),
+    );
+    vi.mocked(sshExec).mockResolvedValue("/remote/root\n");
+
+    const result = await loadContextSSH("user@host", "/remote/root", undefined, [
+      "packages/web/foo.ts",
+    ]);
+
+    expect(result.conventions.map((f) => f.content)).toEqual(["# Root Level", "# Web Level"]);
+  });
+
+  it("does not add CLAUDE.md where AGENTS.md is already covered", async () => {
+    vi.mocked(sshFs).mockReturnValue(
+      makeFakeSshFs({
+        "/remote/root/AGENTS.md": "# Root Agents",
+        "/remote/root/packages/web/AGENTS.md": "# Web Agents",
+        "/remote/root/packages/web/CLAUDE.md": "# Web Claude",
+      }),
+    );
+    vi.mocked(sshExec).mockResolvedValue("/remote/root\n");
+
+    const result = await loadContextSSH("user@host", "/remote/root", undefined, [
+      "packages/web/foo.ts",
+    ]);
+
+    expect(result.conventions.map((f) => f.content)).toEqual(["# Root Agents", "# Web Agents"]);
+  });
+
+  it("leaves empty diffFiles behavior unchanged", async () => {
+    vi.mocked(sshFs).mockReturnValue(makeFakeSshFs({ "/remote/root/AGENTS.md": "# Root Level" }));
+    vi.mocked(sshExec).mockResolvedValue("/remote/root\n");
+
+    const result = await loadContextSSH("user@host", "/remote/root", undefined, []);
+
+    expect(result.conventions).toHaveLength(1);
+  });
+
+  it("resolves touched paths against the repo root when cwd is a subdirectory", async () => {
+    vi.mocked(sshFs).mockReturnValue(
+      makeFakeSshFs({
+        "/remote/root/AGENTS.md": "# Root Level",
+        "/remote/root/packages/api/AGENTS.md": "# Api Level",
+        "/remote/root/packages/web/AGENTS.md": "# Web Level",
+      }),
+    );
+    vi.mocked(sshExec).mockResolvedValue("/remote/root\n");
+
+    const result = await loadContextSSH("user@host", "/remote/root/packages/api", undefined, [
+      "packages/web/foo.ts",
+    ]);
+
+    expect(result.conventions.map((f) => f.content)).toEqual([
+      "# Root Level",
+      "# Api Level",
+      "# Web Level",
+    ]);
+  });
+});
