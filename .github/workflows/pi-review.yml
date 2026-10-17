@@ -101,6 +101,16 @@ jobs:
           fi
           printf 'PI_API_KEY=%s\n' "$key" >> "$GITHUB_ENV"
 
+      - name: Ensure gh CLI
+        shell: bash
+        run: |
+          # The reviewer shells out to gh for read-only research; guarantee
+          # the binary independent of the action's warn-only installer.
+          if ! command -v gh >/dev/null 2>&1; then
+            sudo apt-get update && sudo apt-get install -y gh
+          fi
+          gh --version
+
       - name: Review
         uses: ./
         env:
