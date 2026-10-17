@@ -11,7 +11,7 @@ export const PROMPTS = {
     ],
     rules: [
       "- Only flag what is actually wrong in the diff — no hypotheticals",
-      "- If nothing is wrong, say so clearly",
+      '- If nothing is wrong, return "none" — do not file a review just to say no findings',
     ],
     // The review agent always registers the submit_review tool, so the prompt
     // makes that the one structured-output contract. A parallel "return JSON
@@ -23,13 +23,15 @@ export const PROMPTS = {
       "Never print the review, or a JSON object representing it, as text. A response that does not call submit_review is treated as a failed review and its content is discarded.",
     ],
     // The action field is the tool's one decision point; it names only what the
-    // model has (content or nothing), never a harness outcome.
+    // model has (content or nothing), never a harness outcome. A no-op with no
+    // publishable content stays "none" so the harness can acknowledge it
+    // without posting a body.
     actionRule:
-      '- action: "review" to publish your findings and/or summary, or "none" (with no other fields) when there is nothing to publish. Use "review" even with no new comments when recording the resolution status of existing findings.',
+      '- action: "review" to publish your findings and/or summary, or "none" (with no other fields) when there is nothing to publish. A no-op — no comments, no finding_updates, and no pr_summary overview — is "none", never "review" with empty comments just to say no findings. Use "review" even with no new comments when recording the resolution status of existing findings or emitting the PR overview.',
     fieldRules: [
       "- summary: overall review written in Markdown",
       "- pr_summary: What/Why/Risk overview of the shown diff for the PR summary block; structure it with `### What`, `### Why`, and `### Risks` Markdown headings",
-      "- comments: inline comments attached to specific diff lines (may be empty [])",
+      '- comments: inline comments attached to specific diff lines (may be empty [] when finding_updates or the pr_summary overview carries the review; otherwise prefer "none" over an empty review)',
       "- finding_updates: optional array for existing findings only; comment_id must match an active finding supplied below",
       "- PARTIALLY_RESOLVED explanations must state both what changed and what remains unresolved",
       "- file: relative path from repo root",

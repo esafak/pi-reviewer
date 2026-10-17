@@ -105,7 +105,7 @@ function decisionToOutput(
  * always applies.
  */
 const SUBMIT_NUDGE =
-  'Submit your decision now by calling submit_review: action "review" with your findings, or "none" when there is nothing to publish.';
+  'Submit your decision now by calling submit_review: action "review" with your findings, or "none" when there is nothing that needs changing.';
 
 /**
  * Pinned tool choice for the retry — best-effort enrichment on top of the

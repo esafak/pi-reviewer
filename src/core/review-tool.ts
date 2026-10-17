@@ -80,7 +80,7 @@ const commentsField = Type.Optional(
     ),
     {
       description:
-        'Inline comments attached to specific diff lines. Required for action "review" (may be an empty array); omit for "none".',
+        'Inline comments attached to specific diff lines. May be an empty array when finding_updates or the PR overview carries the review; otherwise prefer "none" over an empty review. Omit for "none".',
     },
   ),
 );
@@ -105,7 +105,7 @@ const findingUpdatesField = Type.Optional(
 );
 
 const ACTION_DESCRIPTION =
-  '"review" to publish your review (summary, findings, and/or the PR overview); "none" when there is nothing to publish.';
+  '"review" to publish comments, finding_updates, and/or the PR overview; "none" when there is nothing to publish (no comments, no updates, no overview — never file a no-findings review).';
 
 /**
  * TypeBox schema for the `submit_review` tool parameters.
@@ -204,7 +204,7 @@ export function createReviewTool(): ReviewTool {
     name: "submit_review",
     label: "submit_review",
     description:
-      'Submit the final code review. Call this as your final action after reviewing the diff: declare "review" with your findings and/or summary, or "none" when there is nothing to publish. Pass the complete result as structured data — do not also emit it as text.',
+      'Submit the final code review. Call this as your final action after reviewing the diff: declare "review" with comments, finding_updates, and/or the PR overview, or "none" when there is nothing to publish. A clean diff with nothing to report is "none" rather than a "review" with empty comments. Pass the complete result as structured data — do not also emit it as text.',
     parameters: reviewSchema,
     async execute(_toolCallId: string, params: ReviewParams) {
       captured = normalizeDecision(params);
