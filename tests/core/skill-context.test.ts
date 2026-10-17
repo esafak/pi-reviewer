@@ -317,7 +317,56 @@ describe("loadSkillContext", () => {
     expect(result.warnings.some((w) => w.includes("absent or unreadable at head"))).toBe(true);
   });
 
-  it("partitions through a symlinked cwd with fully automatic roots", async () => {
+  it("scans coincident bases once without already-defined warnings", async () => {
+    const root = await createTempDir();
+    execSync("git init", { cwd: root, stdio: "ignore" });
+    await writeSkill(path.join(root, "skills"), "deploy", "Deploys things");
+
+    const result = await loadSkillContext({
+      cwd: root,
+      trustFiles: [],
+      skillDirs: ["skills"],
+    });
+
+    expect(result.skills.map((s) => s.name)).toEqual(["deploy"]);
+    expect(result.warnings).toEqual([]);
+  });
+
+  it("prefers the cwd scope on name clashes across bases", async () => {
+    const root = await createTempDir();
+    execSync("git init", { cwd: root, stdio: "ignore" });
+    await writeSkill(path.join(root, ".pi", "skills"), "deploy", "Root deploy");
+    const sub = path.join(root, "packages", "api");
+    await mkdir(sub, { recursive: true });
+    await writeSkill(path.join(sub, ".pi", "skills"), "deploy", "Local deploy");
+
+    const result = await loadSkillContext({
+      cwd: sub,
+      trustFiles: [],
+      skillDirs: [".pi/skills"],
+    });
+
+    expect(result.skills.map((s) => s.name)).toEqual(["deploy"]);
+    expect(result.formatted).toContain("Local deploy");
+    expect(result.formatted).not.toContain("Root deploy");
+  });
+
+  it("uses absolute skill dirs as-is", async () => {
+    const root = await createTempDir();
+    const abs = path.join(root, "custom-skills");
+    await writeSkill(abs, "deploy", "Deploys things");
+
+    const result = await loadSkillContext({
+      cwd: root,
+      trustFiles: [],
+      skillDirs: [abs],
+    });
+
+    expect(result.skills.map((s) => s.name)).toEqual(["deploy"]);
+    expect(result.warnings).toEqual([]);
+  });
+
+  it("canonicalizes absolute skill dirs through symlinks", async () => {
     const root = await createTempDir();
     execSync("git init", { cwd: root, stdio: "ignore" });
     await writeSkill(path.join(root, "skills"), "deploy", "Deploys things");
@@ -325,15 +374,34 @@ describe("loadSkillContext", () => {
     createdDirs.push(link);
     await symlink(root, link);
 
-    // No explicit roots: exercises findGitRoot plus canonicalization end to end.
     const result = await loadSkillContext({
-      cwd: link,
+      cwd: root,
+      trustFiles: ["skills/deploy/SKILL.md"],
+      skillDirs: [path.join(link, "skills")],
+    });
+
+    expect(result.skills).toEqual([]);
+    expect(result.untrusted).toHaveLength(1);
+    expect(result.warnings.some((w) => w.includes("already defined"))).toBe(false);
+  });
+
+  it("reaches root skills from a subdirectory cwd via the union", async () => {
+    const root = await createTempDir();
+    execSync("git init", { cwd: root, stdio: "ignore" });
+    const sub = path.join(root, "packages", "api");
+    await mkdir(sub, { recursive: true });
+    await writeSkill(path.join(root, "skills"), "deploy", "Deploys things");
+
+    // No explicit roots: diffRoot resolves to the git toplevel while cwd is
+    // the subdir, so only the union of both bases finds the skill.
+    const result = await loadSkillContext({
+      cwd: sub,
       trustFiles: ["skills/deploy/SKILL.md"],
       skillDirs: ["skills"],
     });
 
     expect(result.skills).toEqual([]);
-    expect(result.untrusted).toHaveLength(1);
+    expect(result.untrusted.map((f) => f.path)).toEqual(["skills/deploy/SKILL.md"]);
   });
 });
 

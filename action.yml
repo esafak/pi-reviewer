@@ -47,7 +47,7 @@ inputs:
     default: ""
 
   skills-dirs:
-    description: "Comma-separated skill dirs to load as review guidance (default: .pi/skills,.claude/skills,.agents/skills,skills; 'none' disables). New/modified skills are reviewed as untrusted changes instead."
+    description: "Comma-separated skill dirs to load as review guidance (default: .pi/skills,.claude/skills,.agents/skills,skills; 'none' disables). Resolved against the session cwd and the repo root. New/modified skills are reviewed as untrusted changes instead."
     required: false
     default: ""
 
