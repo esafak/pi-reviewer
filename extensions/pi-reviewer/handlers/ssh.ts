@@ -158,7 +158,16 @@ export async function handleSSHReview(opts: HandleSSHReviewOptions): Promise<voi
       : Promise.resolve("origin/main"),
   ]);
 
-  const sshDiffFiles = extractDiffFiles(rawSshDiff);
+  const {
+    diff: sshDiff,
+    warning: sshDiffWarning,
+    skippedFiles: sshSkippedFiles,
+  } = filterDiff(rawSshDiff);
+  if (sshDiffWarning) notify(sshDiffWarning, "warning");
+
+  // Context follows the filtered diff so providers and conventions describe
+  // the files actually under review, matching local mode and CI.
+  const sshDiffFiles = extractDiffFiles(sshDiff);
   const sshContext = sshState
     ? await loadContextSSH(
         sshState.remote,
@@ -173,13 +182,6 @@ export async function handleSSHReview(opts: HandleSSHReviewOptions): Promise<voi
     head: sshHeadBranch.trim() || "HEAD",
     detectedBase: sshOriginBase.trim() || undefined,
   });
-
-  const {
-    diff: sshDiff,
-    warning: sshDiffWarning,
-    skippedFiles: sshSkippedFiles,
-  } = filterDiff(rawSshDiff);
-  if (sshDiffWarning) notify(sshDiffWarning, "warning");
 
   const sshGitRoot = parsed.dir ? (sshState ? sshState.remoteCwd : ctx.cwd) : undefined;
   const {

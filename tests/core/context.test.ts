@@ -409,3 +409,71 @@ describe("collectProviderContext", () => {
     expect(withoutMatch).toHaveLength(0); // filtered out (empty files)
   });
 });
+
+describe("loadContext — touched directories", () => {
+  it("ingests AGENTS.md from a touched nested dir after the base chain", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "pi-reviewer-touched-"));
+    createdDirs.push(root);
+    execSync("git init", { cwd: root, stdio: "ignore" });
+
+    await writeFile(path.join(root, "AGENTS.md"), "root", "utf-8");
+    await mkdir(path.join(root, "packages", "api"), { recursive: true });
+    await writeFile(path.join(root, "packages", "api", "AGENTS.md"), "api", "utf-8");
+
+    const result = await loadContext({ cwd: root, diffFiles: ["packages/api/foo.ts"] });
+
+    expect(result.conventions.map((f) => f.content)).toEqual(["root", "api"]);
+  });
+
+  it("does not duplicate base-chain files for touched dirs", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "pi-reviewer-touched-"));
+    createdDirs.push(root);
+    execSync("git init", { cwd: root, stdio: "ignore" });
+
+    await writeFile(path.join(root, "AGENTS.md"), "root", "utf-8");
+
+    const result = await loadContext({ cwd: root, diffFiles: ["src/foo.ts"] });
+
+    expect(result.conventions).toHaveLength(1);
+  });
+
+  it("keeps AGENTS.md priority over CLAUDE.md in touched dirs", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "pi-reviewer-touched-"));
+    createdDirs.push(root);
+    execSync("git init", { cwd: root, stdio: "ignore" });
+
+    await writeFile(path.join(root, "AGENTS.md"), "root agents", "utf-8");
+    await writeFile(path.join(root, "CLAUDE.md"), "root claude", "utf-8");
+
+    const result = await loadContext({ cwd: root, diffFiles: ["src/foo.ts"] });
+
+    expect(result.conventions.map((f) => f.content)).toEqual(["root agents"]);
+  });
+
+  it("ignores root-level touched files beyond the base chain", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "pi-reviewer-touched-"));
+    createdDirs.push(root);
+    execSync("git init", { cwd: root, stdio: "ignore" });
+
+    await writeFile(path.join(root, "AGENTS.md"), "root", "utf-8");
+
+    const result = await loadContext({ cwd: root, diffFiles: ["foo.ts"] });
+
+    expect(result.conventions).toHaveLength(1);
+  });
+
+  it("resolves touched paths against the repo root when cwd is a subdirectory", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "pi-reviewer-touched-"));
+    createdDirs.push(root);
+    execSync("git init", { cwd: root, stdio: "ignore" });
+
+    const sub = path.join(root, "packages", "api");
+    await mkdir(sub, { recursive: true });
+    await writeFile(path.join(sub, "AGENTS.md"), "api", "utf-8");
+
+    // git prints repo-root-relative paths even when the diff runs in a subdir
+    const result = await loadContext({ cwd: sub, diffFiles: ["packages/api/foo.ts"] });
+
+    expect(result.conventions.map((f) => f.content)).toContain("api");
+  });
+});

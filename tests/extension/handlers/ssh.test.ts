@@ -2,12 +2,22 @@ import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 vi.mock("../../../src/core/ssh.js", async (importActual) => {
   const actual = await importActual<typeof import("../../../src/core/ssh.js")>();
-  return { ...actual, readSshFlag: vi.fn().mockReturnValue(undefined) };
+  return {
+    ...actual,
+    readSshFlag: vi.fn().mockReturnValue(undefined),
+    resolveSshState: vi.fn(),
+    sshExec: vi.fn(),
+    sshFs: vi.fn(),
+  };
 });
 
 vi.mock("../../../src/core/context.js", async (importActual) => {
   const actual = await importActual<typeof import("../../../src/core/context.js")>();
-  return { ...actual, collectProviderContext: vi.fn().mockResolvedValue([]) };
+  return {
+    ...actual,
+    collectProviderContext: vi.fn().mockResolvedValue([]),
+    loadContextSSH: vi.fn(async () => ({ conventions: [], reviewRules: [] })),
+  };
 });
 
 vi.mock("../../../src/core/ui/server/index.js", () => ({
@@ -22,7 +32,8 @@ vi.mock("../../../extensions/pi-reviewer/handlers/ui.js", () => ({
   handleUIReview: vi.fn().mockResolvedValue(undefined),
 }));
 
-import { collectProviderContext } from "../../../src/core/context.js";
+import { collectProviderContext, loadContextSSH } from "../../../src/core/context.js";
+import { readSshFlag, resolveSshState, sshExec, sshFs } from "../../../src/core/ssh.js";
 import { setReviewFooter } from "../../../extensions/pi-reviewer/footer.js";
 import { handleUIReview } from "../../../extensions/pi-reviewer/handlers/ui.js";
 import { handleSSHReview } from "../../../extensions/pi-reviewer/handlers/ssh.js";
@@ -173,5 +184,38 @@ describe("handleSSHReview — UI path (sshState = null)", () => {
     opts.pi = makeSyncAgentEndPi();
     await handleSSHReview(opts);
     expect(opts.pi.sendUserMessage).toHaveBeenCalledWith("address all comments");
+  });
+});
+
+describe("handleSSHReview — touched context (sshState set)", () => {
+  const rawDiff =
+    "diff --git a/packages/api/foo.ts b/packages/api/foo.ts\n--- a/packages/api/foo.ts\n+++ b/packages/api/foo.ts\n@@ -1 +1 @@\n-old\n+new\n";
+
+  beforeEach(() => {
+    vi.mocked(readSshFlag).mockReturnValue("user@host");
+    vi.mocked(resolveSshState).mockResolvedValue({
+      remote: "user@host",
+      remoteCwd: "/remote/root",
+    });
+    vi.mocked(sshExec).mockImplementation(async (_remote: string, command: string) => {
+      if (command.includes("rev-parse")) return "HEAD\n";
+      if (command.includes("diff")) return rawDiff;
+      return "origin/main\n";
+    });
+    vi.mocked(sshFs).mockReturnValue({
+      read: async () => null,
+      list: async () => [],
+      join: (...parts: string[]) => parts.join("/"),
+      dirname: (p: string) => p.split("/").slice(0, -1).join("/") || "/",
+      relative: (_from: string, to: string) => to,
+    } as any);
+  });
+
+  it("forwards filtered diff files to loadContextSSH", async () => {
+    const opts = makeOpts();
+    await handleSSHReview(opts);
+    expect(loadContextSSH).toHaveBeenCalledWith("user@host", "/remote/root", undefined, [
+      "packages/api/foo.ts",
+    ]);
   });
 });

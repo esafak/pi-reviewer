@@ -512,7 +512,8 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
   logger.info("review.diff.resolved", "Diff resolved", { source, size: diff.length });
   if (warning) logger.warn("review.diff.warning", warning);
 
-  const context = await loadContext({ cwd, diffFiles: extractDiffFiles(diff) });
+  const diffFiles = extractDiffFiles(diff);
+  const context = await loadContext({ cwd, diffFiles });
   const loadedPaths = mergeContextFiles(context).map((f) => f.path);
   if (loadedPaths.length > 0) {
     logger.info("review.context.loaded", "Context loaded", { paths: loadedPaths });
@@ -522,9 +523,7 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
 
   const docDirs = options.docDirs ?? parseDocDirs(process.env.PI_REVIEWER_DOC_DIRS);
   const docContextFiles =
-    docDirs.length > 0
-      ? await loadDocContext({ cwd, diffFiles: extractDiffFiles(diff), docDirs })
-      : [];
+    docDirs.length > 0 ? await loadDocContext({ cwd, diffFiles, docDirs }) : [];
   if (docContextFiles.length > 0) {
     logger.info("review.doc_context.loaded", "Documentation context loaded", {
       paths: docContextFiles.map((f) => f.path),
