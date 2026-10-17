@@ -1,5 +1,6 @@
 import { execSync } from "node:child_process";
 import { realpathSync } from "node:fs";
+import { gitEnv } from "./git-env.js";
 import { localFs, sshExec, sshFs, type FsOps } from "./ssh.js";
 
 const CONFIG_DIRS = [".pi", ".claude", ".agents"];
@@ -46,6 +47,7 @@ export function findGitRoot(cwd: string): string | null {
     return execSync("git rev-parse --show-toplevel", {
       cwd,
       encoding: "utf8",
+      env: gitEnv(),
       stdio: ["ignore", "pipe", "ignore"],
     }).trim();
   } catch {

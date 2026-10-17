@@ -1,4 +1,6 @@
 import { execFileSync, execSync } from "node:child_process";
+
+import { gitEnv } from "./git-env.js";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -42,7 +44,7 @@ function run(command: string, cwd: string): string {
   return execSync(command, {
     cwd,
     encoding: "utf-8",
-    env: { ...process.env, PATH: augmentedPath },
+    env: { ...gitEnv(), PATH: augmentedPath },
     maxBuffer: GIT_OUTPUT_MAX_BUFFER,
   });
 }
@@ -58,6 +60,7 @@ export function detectCurrentBranch(cwd: string): string {
     return execSync("git rev-parse --abbrev-ref HEAD", {
       cwd,
       encoding: "utf-8",
+      env: gitEnv(),
       stdio: ["pipe", "pipe", "pipe"],
     }).trim();
   } catch {
@@ -102,6 +105,7 @@ export function detectOriginBase(cwd: string): string {
     return execSync("git symbolic-ref refs/remotes/origin/HEAD --short", {
       cwd,
       encoding: "utf-8",
+      env: gitEnv(),
       stdio: ["pipe", "pipe", "pipe"],
     }).trim();
   } catch {
@@ -130,7 +134,7 @@ export async function resolveDiff(options: DiffOptions): Promise<DiffResult> {
     raw = execFileSync("git", ["diff", `${options.fromSha}..${options.toSha}`], {
       cwd,
       encoding: "utf-8",
-      env: { ...process.env, PATH: augmentedPath },
+      env: { ...gitEnv(), PATH: augmentedPath },
       maxBuffer: GIT_OUTPUT_MAX_BUFFER,
     });
     source = `git diff ${options.fromSha}..${options.toSha}`;

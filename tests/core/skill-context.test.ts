@@ -10,6 +10,7 @@ import {
   parseSkillDirs,
   resolveSkillDirs,
 } from "../../src/core/skill-context.js";
+import { gitEnv } from "../../src/core/git-env.js";
 
 const createdDirs: string[] = [];
 
@@ -140,7 +141,7 @@ describe("loadSkillContext", () => {
     const outer = await createTempDir();
     const sub = path.join(outer, "pkg");
     await mkdir(sub, { recursive: true });
-    execSync("git init", { cwd: sub, stdio: "ignore" });
+    execSync("git init", { cwd: sub, stdio: "ignore", env: gitEnv() });
     await writeSkill(path.join(sub, "skills"), "deploy", "Deploys things");
 
     // --dir shape: the diff runs inside the nested repo, so its paths are
@@ -176,7 +177,7 @@ describe("loadSkillContext", () => {
 
   it("partitions correctly through a symlinked cwd with fully automatic roots", async () => {
     const root = await createTempDir();
-    execSync("git init", { cwd: root, stdio: "ignore" });
+    execSync("git init", { cwd: root, stdio: "ignore", env: gitEnv() });
     await writeSkill(path.join(root, "skills"), "deploy", "Deploys things");
     const link = `${root}-link`;
     createdDirs.push(link);
@@ -319,7 +320,7 @@ describe("loadSkillContext", () => {
 
   it("scans coincident bases once without already-defined warnings", async () => {
     const root = await createTempDir();
-    execSync("git init", { cwd: root, stdio: "ignore" });
+    execSync("git init", { cwd: root, stdio: "ignore", env: gitEnv() });
     await writeSkill(path.join(root, "skills"), "deploy", "Deploys things");
 
     const result = await loadSkillContext({
@@ -334,7 +335,7 @@ describe("loadSkillContext", () => {
 
   it("prefers the cwd scope on name clashes across bases", async () => {
     const root = await createTempDir();
-    execSync("git init", { cwd: root, stdio: "ignore" });
+    execSync("git init", { cwd: root, stdio: "ignore", env: gitEnv() });
     await writeSkill(path.join(root, ".pi", "skills"), "deploy", "Root deploy");
     const sub = path.join(root, "packages", "api");
     await mkdir(sub, { recursive: true });
@@ -368,7 +369,7 @@ describe("loadSkillContext", () => {
 
   it("canonicalizes absolute skill dirs through symlinks", async () => {
     const root = await createTempDir();
-    execSync("git init", { cwd: root, stdio: "ignore" });
+    execSync("git init", { cwd: root, stdio: "ignore", env: gitEnv() });
     await writeSkill(path.join(root, "skills"), "deploy", "Deploys things");
     const link = `${root}-link`;
     createdDirs.push(link);
@@ -387,7 +388,7 @@ describe("loadSkillContext", () => {
 
   it("reaches root skills from a subdirectory cwd via the union", async () => {
     const root = await createTempDir();
-    execSync("git init", { cwd: root, stdio: "ignore" });
+    execSync("git init", { cwd: root, stdio: "ignore", env: gitEnv() });
     const sub = path.join(root, "packages", "api");
     await mkdir(sub, { recursive: true });
     await writeSkill(path.join(root, "skills"), "deploy", "Deploys things");
