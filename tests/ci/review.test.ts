@@ -249,7 +249,10 @@ function makeFakeMcpSession() {
       emit: vi.fn().mockResolvedValue(undefined),
     },
     setActiveToolsByName: vi.fn((names: string[]) => {
-      agent.state.tools = names.includes("mcp") ? [mcpTool] : [];
+      // Fake registry: every activated name resolves to a tool definition.
+      agent.state.tools = names.map((name) =>
+        name === "mcp" ? mcpTool : { name, label: name, execute: vi.fn() },
+      );
     }),
     dispose: vi.fn(),
   };
@@ -464,7 +467,8 @@ describe("review", () => {
     expect(createAgentSessionMock).toHaveBeenCalledWith(
       expect.objectContaining({
         cwd: "/repo",
-        tools: ["read", "grep", "find", "mcp"],
+        tools: expect.arrayContaining(["read", "grep", "find", "mcp", "submit_review"]),
+        customTools: expect.arrayContaining([expect.objectContaining({ name: "submit_review" })]),
         sessionManager: expect.anything(),
         resourceLoader: expect.anything(),
       }),
@@ -504,8 +508,12 @@ describe("review", () => {
       mcpServers: { docs: { url: "https://mcp.example/mcp" } },
     };
     await review({ cwd: "/repo", repo: "owner/repo", mcpConfig, output: "comment" });
-    // Assert on the post-reassignment array: presence in the active-names
-    // list alone would pass even while the tool definition is dropped.
+    // Assert the definition reaches the registry, not just the active-names list.
+    expect(createAgentSessionMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        customTools: expect.arrayContaining([expect.objectContaining({ name: "code_exec" })]),
+      }),
+    );
     expect(fakeMcpSession.agent.state.tools).toEqual(
       expect.arrayContaining([expect.objectContaining({ name: "code_exec" })]),
     );
@@ -2241,8 +2249,7 @@ describe("review", () => {
 
     await review({ cwd: "/repo" });
 
-    // Guard for the wrapper itself: deleting the toolChoice spread would leave
-    // every other test green while silently reducing the retry to nudge-only.
+    // Guard the retry wrapper itself: the second run must pin toolChoice.
     expect(base).toHaveBeenCalledTimes(2);
     expect((base.mock.calls[0][2] as { toolChoice?: unknown }).toolChoice).toBeUndefined();
     expect((base.mock.calls[1][2] as { toolChoice?: unknown }).toolChoice).toEqual(

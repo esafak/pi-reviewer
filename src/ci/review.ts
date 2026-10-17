@@ -780,12 +780,18 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
         ],
       });
       await resourceLoader.reload();
+      // Reviewer tools must be registered as session custom tools: the session
+      // rebuilds state.tools from registry names on every turn, and
+      // setActiveToolsByName only activates registered tools.
       const created = await createAgentSession({
         cwd,
         agentDir,
         sessionManager: SessionManager.inMemory(),
         resourceLoader,
-        tools: ["read", "grep", "find", "mcp"],
+        tools: [
+          ...new Set(["read", "grep", "find", "ls", "mcp", ...baseTools.map((tool) => tool.name)]),
+        ],
+        customTools: baseTools,
       });
       session = created.session;
       const mcpToolNames = new Set(
@@ -810,19 +816,9 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
       agent = session.agent;
       // The system prompt is seeded via the resource loader's leading system
       // message; state.systemPrompt replays the transcript and is read-only.
+      // Tools are already active from the registry, so leave state.tools alone.
       agent.state.model = resolvedModel;
       agent.state.thinkingLevel = options.thinking ?? "off";
-      agent.state.tools = [
-        ...readOnlyTools,
-        ...mcpTools,
-        ...searchTools,
-        ...registryTools,
-        ...githubResearchTools,
-        // Same comment-only exec gate as baseTools: without this the agent
-        // receives the code_exec policy but cannot call the tool.
-        ...codeExecTools,
-        reviewTool,
-      ];
       agent.streamFunction = models.streamSimple.bind(models);
       agent.getApiKey = apiKey;
       closeMcpSession = async () => {
