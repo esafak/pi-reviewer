@@ -23,6 +23,17 @@ on:
         description: Optional ancestor commit to review
         required: false
         type: string
+      thinking:
+        description: Thinking budget for this manual run only
+        required: false
+        default: off
+        type: choice
+        options: [off, minimal, low, medium, high, xhigh]
+      debug:
+        description: Upload thinking/action trace artifact for this manual run only
+        required: false
+        default: false
+        type: boolean
 
 jobs:
   review:
@@ -109,7 +120,11 @@ jobs:
           github-token: ${{ steps.bot-token.outputs.token }}
           pi-api-key: ${{ env.PI_API_KEY }}
           model: ${{ vars.MODEL_NAME }}
-          thinking: off
+          # Manual runs may raise the thinking budget or enable the trace;
+          # scheduled PR runs stay at off/false. The `||` fallback covers
+          # non-dispatch events where inputs are unset.
+          thinking: ${{ inputs.thinking || 'off' }}
+          debug: ${{ inputs.debug == true && 'true' || 'false' }}
           review-drafts: false
           min-severity: ${{ inputs.min-severity || 'warn' }}
           github-scope: ${{ vars.PI_REVIEWER_GITHUB_SCOPE }}
