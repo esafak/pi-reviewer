@@ -138,15 +138,37 @@ const readSchema = Type.Object(
     kind: Type.String({ enum: [...readKinds] }),
     owner: Type.String({ minLength: 1, maxLength: 39 }),
     repo: Type.String({ minLength: 1, maxLength: 100 }),
-    path: Type.Optional(Type.String({ minLength: 1, maxLength: 1024 })),
-    ref: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
-    number: Type.Optional(Type.Integer({ minimum: 1, maximum: 2_147_483_647 })),
-    comments: Type.Optional(Type.Boolean()),
-    name_only: Type.Optional(Type.Boolean()),
-    branch: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
-    log: Type.Optional(Type.Boolean()),
-    exit_status: Type.Optional(Type.Boolean()),
-    attempt: Type.Optional(Type.Integer({ minimum: 1, maximum: 1000 })),
+    path: Type.Optional(
+      Type.String({
+        minLength: 1,
+        maxLength: 1024,
+        description: "file only: repo-relative path, no leading slash",
+      }),
+    ),
+    ref: Type.Optional(
+      Type.String({
+        minLength: 1,
+        maxLength: 256,
+        description: "file only: branch, tag, or SHA",
+      }),
+    ),
+    number: Type.Optional(
+      Type.Integer({
+        minimum: 1,
+        maximum: 2_147_483_647,
+        description: "Required for every kind except file, repository, and status",
+      }),
+    ),
+    comments: Type.Optional(Type.Boolean({ description: "pull_request and issue only" })),
+    name_only: Type.Optional(Type.Boolean({ description: "diff only" })),
+    branch: Type.Optional(
+      Type.String({ minLength: 1, maxLength: 256, description: "repository only" }),
+    ),
+    log: Type.Optional(Type.Boolean({ description: "run only" })),
+    exit_status: Type.Optional(Type.Boolean({ description: "run only" })),
+    attempt: Type.Optional(
+      Type.Integer({ minimum: 1, maximum: 1000, description: "run only" }),
+    ),
   },
   { additionalProperties: false },
 );
@@ -198,7 +220,7 @@ export function createGitHubResearchTools(
     name: GITHUB_READ_TOOL_NAME,
     label: GITHUB_READ_TOOL_NAME,
     description:
-      "Read files, pull requests, issues, runs, workflows, releases, repositories, and PR checks/status/diffs. Optional enrichments: PR/issue comments, name-only diffs, repository branch, and run logs/exit status/attempt. Results over 7 KiB fail with an advisory unavailable message; [truncated] marks comments/logs only in the 4–7 KiB capture window.",
+      "Read a GitHub resource by kind. file requires path (repo-relative, no leading slash) with optional ref (branch, tag, or SHA); repository takes optional branch and neither number nor path/ref; status takes neither number nor path/ref; every other kind requires number. Enrichments by kind: pull_request/issue accept comments, diff accepts name_only, run accepts log/exit_status/attempt. Results over 7 KiB fail with an advisory unavailable message; [truncated] marks comments/logs only in the 4–7 KiB capture window.",
     parameters: readSchema,
     async execute(_id, args) {
       try {
