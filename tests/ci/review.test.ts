@@ -1082,6 +1082,38 @@ describe("review", () => {
     });
   });
 
+  it("posts the review with a warning when DeepWiki rejects an unindexed repo", async () => {
+    fakeAgentEvents = [
+      {
+        type: "tool_execution_start",
+        toolName: "mcp",
+        toolCallId: "mcp-deepwiki-call",
+        args: { tool: "deepwiki_ask_wiki_question" },
+      },
+      {
+        type: "tool_execution_end",
+        toolName: "mcp",
+        toolCallId: "mcp-deepwiki-call",
+        isError: true,
+        result: { details: { mode: "call", error: "tool_error", server: "deepwiki" } },
+      },
+    ];
+    const { sink, records } = createMemorySink();
+    const mcpConfig: CiMcpConfig = { mcpServers: { deepwiki: { url: "https://mcp.example/mcp" } } };
+
+    await review({ cwd: "/repo", output: "comment", mcpConfig, logger: createLogger({ sink }) });
+
+    expect(sendOutputMock).toHaveBeenCalled();
+    const failed = records.find(({ event }) => event === "review.mcp.failed");
+    expect(failed?.level).toBe("warn");
+    expect(failed?.fields).toEqual({
+      servers: ["unknown"],
+      tools: ["deepwiki_ask_wiki_question"],
+      errorClasses: ["tool"],
+      additionalTools: "",
+    });
+  });
+
   it("allows a failed MCP call when a retry of that tool succeeds", async () => {
     fakeAgentEvents = [
       {
@@ -2033,6 +2065,74 @@ describe("review", () => {
     expect(records.find(({ event }) => event === "review.agent.forced_call_failed")).toEqual(
       expect.objectContaining({
         fields: expect.objectContaining({ error: "400 Invalid API parameter" }),
+      }),
+    );
+  });
+
+  it("waits for the pinned attempt to settle before the bare retry", async () => {
+    const { sink, records } = createMemorySink();
+    let promptCalls = 0;
+    let activeRun = false;
+    let listener: ((event: unknown) => void) | undefined;
+    const agent = {
+      subscribe: vi.fn((callback: (event: unknown) => void) => {
+        listener = callback;
+        return vi.fn();
+      }),
+      prompt: vi.fn(async () => {
+        promptCalls += 1;
+        if (activeRun)
+          throw new Error(
+            "Agent is already processing a prompt. Use steer() or followUp() to queue messages, or wait for completion.",
+          );
+        activeRun = true;
+        try {
+          agent.streamFunction({} as never, {} as never, {} as never);
+          if (promptCalls === 2) {
+            // The pinned toolChoice is rejected at the transport: the run
+            // ends in error, and the agent only goes idle after its end
+            // listeners settle — later than the failure notification.
+            listener?.({
+              type: "agent_end",
+              stopReason: "error",
+              errorMessage: "400 Invalid API parameter",
+              messages: [{ role: "assistant", content: [{ type: "text", text: "" }] }],
+            });
+            await new Promise((resolve) => setTimeout(resolve, 10));
+          } else {
+            listener?.({
+              type: "agent_end",
+              messages: [{ role: "assistant", content: [{ type: "text", text: "prose only" }] }],
+            });
+          }
+        } finally {
+          activeRun = false;
+        }
+      }),
+      state: { tools: [] as unknown[] },
+      streamFunction: vi.fn(),
+    };
+    AgentMock.mockImplementation(function () {
+      return agent as never;
+    });
+    let decisionReads = 0;
+    createReviewToolMock.mockReturnValue({
+      tool: {
+        name: "submit_review",
+        label: "submit_review",
+        description: "test",
+        parameters: {},
+        execute: vi.fn(),
+      },
+      getResult: () => (decisionReads++ === 0 ? undefined : { action: "none" }),
+    });
+
+    await review({ cwd: "/repo", logger: createLogger({ sink }) });
+
+    expect(agent.prompt).toHaveBeenCalledTimes(3);
+    expect(records.find(({ event }) => event === "review.agent.forced_call_failed")).toEqual(
+      expect.objectContaining({
+        fields: expect.objectContaining({ error: expect.stringContaining("400") }),
       }),
     );
   });

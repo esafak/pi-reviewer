@@ -1077,7 +1077,17 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
         settleRun = resolve;
         failRun = reject;
       });
-      await Promise.all([agent.prompt(message), ended]);
+      // The rejection may land while prompt() is still settling; mark it
+      // observed up front so the window before the await below never reads
+      // as an unhandled rejection. Awaiting ended afterwards still throws.
+      void ended.catch(() => {});
+      // Sequential on purpose: agent.prompt() settles only after agent_end
+      // listeners have run and the run is fully idle. Awaiting both
+      // concurrently lets ended reject first while prompt() still holds the
+      // run open, so the immediate bare-nudge retry collides with "Agent is
+      // already processing a prompt".
+      await agent.prompt(message);
+      await ended;
     };
 
     try {
@@ -1143,17 +1153,39 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
       // Classes cover only the capped entries so every class has a visible tool.
       const errorClasses = [...new Set(entries.map((entry) => entry.signal.errorClass))];
       const additional = failedMcpCalls.size > entries.length ? " and other MCP tools" : "";
-      logger.error(
-        "review.mcp.failed",
-        "MCP tool call failed; check server availability and auth. Review not posted.",
-        {
-          servers,
-          tools,
-          errorClasses,
-          additionalTools: additional,
-        },
+      // DeepWiki answering for a repo it has not indexed rejects the call
+      // server-side; that source is simply unavailable and the agent already
+      // continued without it, so the review posts with a warning instead of
+      // failing the run. Anything else still vetoes the post.
+      const onlyDeepWikiRejections = [...failedMcpCalls.values()].every(
+        (failure) =>
+          failure.signal.errorClass === "tool" &&
+          (failure.identity.server === "deepwiki" || failure.identity.tool.startsWith("deepwiki_")),
       );
-      throw new Error("A configured MCP tool call failed; refusing to post the review");
+      if (onlyDeepWikiRejections) {
+        logger.warn(
+          "review.mcp.failed",
+          "DeepWiki has no index for the repository; continuing without wiki answers",
+          {
+            servers,
+            tools,
+            errorClasses,
+            additionalTools: additional,
+          },
+        );
+      } else {
+        logger.error(
+          "review.mcp.failed",
+          "MCP tool call failed; check server availability and auth. Review not posted.",
+          {
+            servers,
+            tools,
+            errorClasses,
+            additionalTools: additional,
+          },
+        );
+        throw new Error("A configured MCP tool call failed; refusing to post the review");
+      }
     }
     if (searchClient?.hasRequiredFailure())
       throw new Error("Required web search failed; refusing to post the review");

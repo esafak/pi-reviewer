@@ -190,7 +190,9 @@ means the server rejected the call (check the server tool contract),
 `call_failed` means the call threw (check server health and config),
 `input_required` means a UI-gated tool cannot run headless. If the
 reviewer actually calls a configured MCP tool and that call
-fails, pi-reviewer does not post a potentially incomplete review. Servers the
+fails, pi-reviewer does not post a potentially incomplete review — unless
+every failure is DeepWiki rejecting an unindexed repository, which posts
+with a warning instead. Servers the
 reviewer never calls are not connected.
 
 DeepWiki's public MCP server is supported as an ordinary entry in this file and
