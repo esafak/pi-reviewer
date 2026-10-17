@@ -298,6 +298,39 @@ describe("buildJSONSystemPrompt — PR summary policy", () => {
   });
 });
 
+describe("buildJSONSystemPrompt — skills sections", () => {
+  it("omits skills sections when no skills are given", () => {
+    const prompt = buildJSONSystemPrompt({ conventions: [], reviewRules: [] });
+
+    expect(prompt).not.toContain("<skills>");
+    expect(prompt).not.toContain("<new_skills_under_review>");
+  });
+
+  it("injects trusted skills and untrusted new skills", () => {
+    const prompt = buildJSONSystemPrompt(
+      { conventions: [], reviewRules: [] },
+      "INFO",
+      [],
+      [],
+      "",
+      [],
+      undefined,
+      {
+        skills: {
+          formatted: "<available_skills>deploy</available_skills>",
+          untrusted: [{ path: "skills/new/SKILL.md", content: "# New" }],
+        },
+      },
+    );
+
+    expect(prompt).toContain("<skills>");
+    expect(prompt).toContain("deploy");
+    expect(prompt).toContain("<new_skills_under_review>");
+    expect(prompt).toContain("skills/new/SKILL.md");
+    expect(prompt).toContain("# New");
+  });
+});
+
 describe("buildMarkdownSystemPrompt", () => {
   it("returns markdown format, not JSON schema", () => {
     const prompt = buildMarkdownSystemPrompt();
