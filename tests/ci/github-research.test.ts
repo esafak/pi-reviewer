@@ -1,4 +1,7 @@
 import { describe, expect, it, vi } from "vite-plus/test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import {
   resolveGitHubResearchConfig,
   unavailableGitHubResearchWarnings,
@@ -7,7 +10,7 @@ import { createGitHubResearchClient } from "../../src/ci/github-research/client.
 import { createGitHubResearchTools } from "../../src/ci/github-research/tool.js";
 import { validateGhArgs } from "../../src/ci/github-research/gh-allowlist.js";
 import { createGhRunner } from "../../src/ci/github-research/gh-runner.js";
-
+import { readCachedRange, saveCachedFile } from "../../src/ci/github-research/cache.js";
 describe("gh-backed GitHub research", () => {
   it("enables with a token by default and supports opt-out", () => {
     expect(resolveGitHubResearchConfig({}, "t")).toEqual({ scope: "public", token: "t" });
@@ -616,7 +619,7 @@ describe("gh-backed GitHub research", () => {
     );
     const response = await tools[0]!.execute("id", { kind: "issues", query: "q" } as never);
     expect(JSON.stringify(response)).toContain("Continue without it");
-    expect(tools.map((t) => t.name)).toEqual(["github_search", "github_read"]);
+    expect(tools.map((t) => t.name)).toEqual(["github_search", "github_read", "github_grep"]);
   });
   it("rejects unsupported API mutations", () => {
     expect(validateGhArgs(["api", "repos/o/r", "--method", "DELETE"])).toContain("GET");
@@ -767,5 +770,231 @@ describe("gh-backed GitHub research", () => {
       "{tagName:.tag_name,name,isDraft:.draft,url:.html_url,publishedAt:.published_at}",
     ]);
     expect(result.result).toMatchObject({ isDraft: true, publishedAt: null });
+  });
+});
+
+describe("github file cache, ranges, and grep", () => {
+  const filePayload = (text: string) =>
+    JSON.stringify({
+      path: "docs/notes.md",
+      url: "https://github.com/o/r/blob/main/docs/notes.md",
+      content: Buffer.from(text).toString("base64"),
+    });
+
+  it("caches the full download while returning a preview with size", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "pi-reviewer-cache-test-"));
+    const previous = process.env.PI_REVIEWER_GH_CACHE_DIR;
+    process.env.PI_REVIEWER_GH_CACHE_DIR = dir;
+    try {
+      const text = `${"alpha\n".repeat(100)}needle here\n${"beta\n".repeat(1000)}`;
+      const run = vi.fn().mockResolvedValue({ stdout: filePayload(text) });
+      const result = await createGitHubResearchClient(
+        "t",
+        "token-accessible",
+        Date.now,
+        run as never,
+      ).read({ kind: "file", owner: "o", repo: "r", path: "docs/notes.md" });
+      expect(result).toMatchObject({ size: Buffer.byteLength(text), truncated: true });
+      expect(result.content as string).toContain("[truncated]");
+      // Full text is recoverable from the cache without another gh call.
+      const range = await readCachedRange(
+        dir,
+        { owner: "o", repo: "r", path: "docs/notes.md" },
+        101,
+        1,
+      );
+      expect(range?.content).toBe("needle here");
+      expect(run).toHaveBeenCalledTimes(1);
+    } finally {
+      if (previous === undefined) delete process.env.PI_REVIEWER_GH_CACHE_DIR;
+      else process.env.PI_REVIEWER_GH_CACHE_DIR = previous;
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("serves ranged re-reads from the cache with no gh call", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "pi-reviewer-range-test-"));
+    await saveCachedFile(
+      dir,
+      { owner: "o", repo: "r", ref: "main", path: "docs/notes.md" },
+      "one\ntwo\nthree\nfour\n",
+    );
+    const run = vi.fn().mockRejectedValue(new Error("must not fetch"));
+    const client = createGitHubResearchClient("t", "token-accessible", Date.now, run as never);
+    const tools = createGitHubResearchTools({ scope: "token-accessible", token: "t" }, client, {
+      cacheDir: dir,
+    });
+    const response = (await tools[1]!.execute("id", {
+      kind: "file",
+      owner: "o",
+      repo: "r",
+      path: "docs/notes.md",
+      ref: "main",
+      offset: 2,
+      limit: 2,
+    } as never)) as { content: Array<{ text: string }> };
+    const body = JSON.parse(response.content[0]!.text.split("\n").slice(1).join("\n")) as Record<
+      string,
+      unknown
+    >;
+    expect(body).toMatchObject({ content: "two\nthree", offset: 2, limit: 2, totalLines: 5 });
+    expect(run).not.toHaveBeenCalled();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("rejects ranges for non-file kinds and out-of-range limits", async () => {
+    const client = createGitHubResearchClient("t", "token-accessible");
+    await expect(
+      client.read({ kind: "repository", owner: "o", repo: "r", offset: 1 } as never),
+    ).rejects.toThrow("only valid for file reads");
+    await expect(
+      client.read({ kind: "file", owner: "o", repo: "r", path: "a.md", limit: 201 } as never),
+    ).rejects.toThrow("range is invalid");
+  });
+
+  it("greps cached downloads with logical keys and scope filters", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "pi-reviewer-grep-test-"));
+    await saveCachedFile(dir, { owner: "o", repo: "r", path: "a.md" }, "hello needle one\nplain\n");
+    await saveCachedFile(dir, { owner: "o", repo: "other", path: "b.md" }, "needle two\n");
+    const tools = createGitHubResearchTools(
+      { scope: "token-accessible", token: "t" },
+      undefined as never,
+      {
+        cacheDir: dir,
+      },
+    );
+    const scoped = (await tools[2]!.execute("id", {
+      pattern: "needle",
+      owner: "o",
+      repo: "r",
+    } as never)) as { content: Array<{ text: string }> };
+    const scopedBody = JSON.parse(scoped.content[0]!.text.split("\n").slice(1).join("\n")) as {
+      matches: Array<{ repository: string; path: string; line: number }>;
+    };
+    expect(scopedBody.matches).toEqual([
+      expect.objectContaining({ repository: "o/r", path: "a.md", line: 1 }),
+    ]);
+    const response = (await tools[2]!.execute("id", { pattern: "needle" } as never)) as {
+      content: Array<{ text: string }>;
+    };
+    const body = JSON.parse(response.content[0]!.text.split("\n").slice(1).join("\n")) as {
+      matches: Array<{ repository: string; path: string }>;
+    };
+    expect(body.matches.map((m) => `${m.repository}/${m.path}`).sort()).toEqual([
+      "o/other/b.md",
+      "o/r/a.md",
+    ]);
+    const empty = (await tools[2]!.execute("id", {
+      pattern: "needle",
+      owner: "o",
+      repo: "missing",
+    } as never)) as { content: Array<{ text: string }> };
+    expect(empty.content[0]!.text).toContain("No cached downloads match this scope");
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("rejects grep patterns with control characters", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "pi-reviewer-grep-invalid-test-"));
+    const tools = createGitHubResearchTools(
+      { scope: "token-accessible", token: "t" },
+      undefined as never,
+      {
+        cacheDir: dir,
+      },
+    );
+    const response = (await tools[2]!.execute("id", { pattern: "a\x00b" } as never)) as {
+      content: Array<{ text: string }>;
+    };
+    expect(response.content[0]!.text).toContain("GitHub grep unavailable");
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("keeps cache-hit ranged reads within the per-result budget", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "pi-reviewer-range-budget-test-"));
+    // Minified single-line shape: 200 lines still exceed 7 KiB without a cap.
+    await saveCachedFile(
+      dir,
+      { owner: "o", repo: "r", path: "bundle.min.js" },
+      `x${"y".repeat(900 * 1024)}`,
+    );
+    const run = vi.fn().mockRejectedValue(new Error("must not fetch"));
+    const client = createGitHubResearchClient("t", "token-accessible", Date.now, run as never);
+    const tools = createGitHubResearchTools({ scope: "token-accessible", token: "t" }, client, {
+      cacheDir: dir,
+    });
+    const response = (await tools[1]!.execute("id", {
+      kind: "file",
+      owner: "o",
+      repo: "r",
+      path: "bundle.min.js",
+      offset: 1,
+      limit: 200,
+    } as never)) as { content: Array<{ text: string }> };
+    expect(Buffer.byteLength(response.content[0]!.text)).toBeLessThanOrEqual(7 * 1024);
+    expect(response.content[0]!.text).toContain("[truncated]");
+    expect(run).not.toHaveBeenCalled();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("fails closed when JSON escaping inflates a cache hit past the budget", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "pi-reviewer-range-escape-test-"));
+    // 4 KiB of quotes fits the content cap but escapes past the 7 KiB result
+    // budget; the fetch path rejects the same file, so the re-read must too.
+    await saveCachedFile(dir, { owner: "o", repo: "r", path: "quotes.md" }, `"`.repeat(4096));
+    const run = vi.fn().mockRejectedValue(new Error("must not fetch"));
+    const client = createGitHubResearchClient("t", "token-accessible", Date.now, run as never);
+    const tools = createGitHubResearchTools({ scope: "token-accessible", token: "t" }, client, {
+      cacheDir: dir,
+    });
+    const response = (await tools[1]!.execute("id", {
+      kind: "file",
+      owner: "o",
+      repo: "r",
+      path: "quotes.md",
+      offset: 1,
+      limit: 200,
+    } as never)) as { content: Array<{ text: string }> };
+    expect(response.content[0]!.text).toContain("GitHub read unavailable");
+    expect(response.content[0]!.text).toContain("byte limit");
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("scopes grep to ref-less paths and directories", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "pi-reviewer-grep-scope-test-"));
+    await saveCachedFile(
+      dir,
+      { owner: "o", repo: "r", ref: "main", path: "docs/a.md" },
+      "scoped needle here\n",
+    );
+    await saveCachedFile(dir, { owner: "o", repo: "r", path: "docs/b.md" }, "default needle\n");
+    const tools = createGitHubResearchTools(
+      { scope: "token-accessible", token: "t" },
+      undefined as never,
+      {
+        cacheDir: dir,
+      },
+    );
+    const byFile = (await tools[2]!.execute("id", {
+      pattern: "needle",
+      owner: "o",
+      repo: "r",
+      path: "docs/b.md",
+    } as never)) as { content: Array<{ text: string }> };
+    const byFileBody = JSON.parse(byFile.content[0]!.text.split("\n").slice(1).join("\n")) as {
+      matches: Array<{ path: string }>;
+    };
+    expect(byFileBody.matches.map((m) => m.path)).toEqual(["docs/b.md"]);
+    const byDir = (await tools[2]!.execute("id", {
+      pattern: "needle",
+      owner: "o",
+      repo: "r",
+      ref: "main",
+      path: "docs",
+    } as never)) as { content: Array<{ text: string }> };
+    const byDirBody = JSON.parse(byDir.content[0]!.text.split("\n").slice(1).join("\n")) as {
+      matches: Array<{ path: string }>;
+    };
+    expect(byDirBody.matches.map((m) => m.path)).toEqual(["docs/a.md"]);
+    await rm(dir, { recursive: true, force: true });
   });
 });

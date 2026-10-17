@@ -6,6 +6,7 @@ export const WEB_AI_SEARCH_TOOL_NAME = "web_ai_search";
 export const PACKAGE_LOOKUP_TOOL_NAME = "package_lookup";
 export const GITHUB_SEARCH_TOOL_NAME = "github_search";
 export const GITHUB_READ_TOOL_NAME = "github_read";
+export const GITHUB_GREP_TOOL_NAME = "github_grep";
 export const CODE_EXEC_TOOL_NAME = "code_exec";
 export const MCP_TOOL_NAME = "mcp";
 
@@ -15,6 +16,7 @@ export const KNOWN_CI_TOOL_NAMES = [
   PACKAGE_LOOKUP_TOOL_NAME,
   GITHUB_SEARCH_TOOL_NAME,
   GITHUB_READ_TOOL_NAME,
+  GITHUB_GREP_TOOL_NAME,
   CODE_EXEC_TOOL_NAME,
   MCP_TOOL_NAME,
 ] as const;
