@@ -71,6 +71,7 @@ beforeEach(() => {
   vi.mocked(resolveDiff).mockResolvedValue({
     diff: "diff --git a/foo.ts\n",
     source: "feature vs main",
+    changedFiles: ["foo.ts"],
   });
   vi.mocked(loadContext).mockResolvedValue({ conventions: [], reviewRules: [] });
   vi.mocked(collectProviderContext).mockResolvedValue([]);

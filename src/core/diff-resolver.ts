@@ -20,6 +20,12 @@ export interface DiffResult {
   source: string;
   warning?: string;
   skippedFiles?: string[];
+  /**
+   * Every path in the raw diff before filterDiff caps or noise patterns.
+   * Trust decisions (e.g. skill redefinition) must use this, never the
+   * filtered file list: dropped files stay attacker-controlled.
+   */
+  changedFiles: string[];
 }
 
 const EMPTY_DIFF_ERROR =
@@ -167,6 +173,7 @@ export async function resolveDiff(options: DiffOptions): Promise<DiffResult> {
   }
 
   if (!options.allowEmpty) ensureNonEmptyDiff(raw);
+  const changedFiles = extractDiffFiles(raw);
   const { diff, warning, skippedFiles } = filterDiff(raw);
-  return { diff, source, warning, skippedFiles };
+  return { diff, source, warning, skippedFiles, changedFiles };
 }

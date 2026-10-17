@@ -14,6 +14,7 @@ import path from "node:path";
 import { loadContext, mergeContextFiles } from "../core/context.js";
 import { resolveDiff, extractDiffFiles } from "../core/diff-resolver.js";
 import { loadDocContext } from "../core/doc-context.js";
+import { loadSkillContext, resolveSkillDirs } from "../core/skill-context.js";
 import {
   sendOutput,
   extractLastAssistantText,
@@ -138,6 +139,7 @@ export interface ReviewOptions {
   debug?: boolean;
   minSeverity?: MinSeverity;
   docDirs?: string[]; // dirs to scan for doc-context; empty = inject nothing (opt-in)
+  skillDirs?: string[]; // dirs to scan for skills; defaults to pi-style set, empty = disable
   mcpConfig?: CiMcpConfig;
   mcpServerCwd?: string;
   fromSha?: string;
@@ -500,7 +502,7 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
       "MCP disabled; only available for CI comment-output reviews",
     );
 
-  const { diff, source, warning, skippedFiles } = await resolveDiff({
+  const { diff, source, warning, skippedFiles, changedFiles } = await resolveDiff({
     pr: options.pr,
     diff: options.diff,
     branch: options.branch,
@@ -530,6 +532,21 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
     });
   }
 
+  const skillDirs = resolveSkillDirs(options.skillDirs);
+  const skillContext =
+    skillDirs.length > 0
+      ? await loadSkillContext({ cwd, trustFiles: changedFiles, skillDirs })
+      : null;
+  if (skillContext && (skillContext.skills.length > 0 || skillContext.untrusted.length > 0)) {
+    logger.info("review.skills.loaded", "Skills loaded", {
+      skills: skillContext.skills.map((s) => s.name),
+      untrusted: skillContext.untrusted.map((f) => f.path),
+    });
+  }
+  for (const warning of skillContext?.warnings ?? []) {
+    logger.warn("review.skills.warning", warning);
+  }
+
   const resolvedFindings = selectResolvedFindings(options.resolvedFindings ?? []);
   // PR summaries are CI-comment-only like search/registry: local terminal/file
   // runs must not grow the prompt merely because CI configuration leaked into
@@ -552,7 +569,7 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
     options.priorSummary,
     resolvedFindings,
     prTitle || prBody ? { title: prTitle, body: prBody } : undefined,
-    { summaryEnabled },
+    { summaryEnabled, skills: skillContext ?? undefined },
   );
   // Search is deliberately CI-comment-only. Local terminal/file runs must not
   // receive network tools merely because CI configuration leaked into env.

@@ -18,6 +18,15 @@ vi.mock("../../src/core/doc-context.js", () => ({
   loadDocContext: vi.fn().mockResolvedValue([]),
 }));
 
+vi.mock("../../src/core/skill-context.js", () => ({
+  loadSkillContext: vi
+    .fn()
+    .mockResolvedValue({ formatted: "", untrusted: [], skills: [], warnings: [] }),
+  parseSkillDirs: vi.fn(() => []),
+  resolveSkillDirs: vi.fn(() => []),
+  DEFAULT_SKILL_DIRS: [],
+}));
+
 vi.mock("../../src/core/context.js", () => ({
   loadContext: vi.fn(),
   mergeContextFiles: vi.fn((ctx) => [...(ctx.conventions ?? []), ...(ctx.reviewRules ?? [])]),
@@ -82,6 +91,7 @@ import { createMcpAdapter } from "pi-mcp-adapter";
 import { loadContext } from "../../src/core/context.js";
 import { resolveDiff } from "../../src/core/diff-resolver.js";
 import { loadDocContext } from "../../src/core/doc-context.js";
+import { loadSkillContext, resolveSkillDirs } from "../../src/core/skill-context.js";
 import { sendOutput } from "../../src/core/output.js";
 import { createReviewTool } from "../../src/core/review-tool.js";
 import { createReplyTool } from "../../src/core/reply-tool.js";
@@ -354,6 +364,36 @@ describe("review", () => {
     );
     expect(AgentMock).not.toHaveBeenCalled();
     expect(sendOutputMock).not.toHaveBeenCalled();
+  });
+
+  it("loads default skills into the dry-run system prompt", async () => {
+    const { sink, records } = createMemorySink();
+    resolveDiffMock.mockResolvedValue({
+      diff: "diff --git a/a.ts b/a.ts",
+      source: "git diff origin/main...HEAD",
+      changedFiles: ["a.ts", "skills/deploy/SKILL.md"],
+    });
+    vi.mocked(resolveSkillDirs).mockReturnValueOnce(["skills"]);
+    vi.mocked(loadSkillContext).mockResolvedValueOnce({
+      formatted: "SKILL-MARKER",
+      untrusted: [],
+      skills: [{ name: "deploy" } as never],
+      warnings: [],
+    });
+
+    await review({ cwd: "/repo", dryRun: true, logger: createLogger({ sink }) });
+
+    expect(loadSkillContext).toHaveBeenCalledWith(
+      expect.objectContaining({ trustFiles: ["a.ts", "skills/deploy/SKILL.md"] }),
+    );
+    expect(records).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          event: "review.dry_run.system_prompt",
+          fields: expect.objectContaining({ prompt: expect.stringContaining("SKILL-MARKER") }),
+        }),
+      ]),
+    );
   });
 
   it("does not create an MCP session by default", async () => {

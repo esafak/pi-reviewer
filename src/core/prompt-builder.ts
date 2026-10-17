@@ -28,9 +28,17 @@ export interface PullRequestContext {
   title?: string;
   body?: string;
 }
+/** Progressive-disclosure skill guidance plus untrusted new-skill bodies. */
+export interface SkillPromptSection {
+  formatted: string;
+  untrusted: ContextFile[];
+}
+
 export interface ReviewPromptOptions {
   /** Request the pr_summary/pr_diagram overview fields. Defaults to false. */
   summaryEnabled?: boolean;
+  /** Progressive-disclosure skill guidance plus untrusted new-skill bodies. */
+  skills?: SkillPromptSection;
 }
 
 const SEVERITY_RULE: Record<MinSeverity, string | null> = {
@@ -43,7 +51,7 @@ export const RESOLVED_HISTORY_COUNT_LIMIT = 50;
 export const PR_TITLE_LIMIT = 500;
 export const PR_BODY_LIMIT = 8000;
 
-function escapePromptMarkup(value: string): string {
+export function escapePromptMarkup(value: string): string {
   return value.replaceAll("<", "\\u003c").replaceAll(">", "\\u003e");
 }
 
@@ -146,6 +154,19 @@ export function buildJSONSystemPrompt(
   const sections: string[] = [base];
   if (conventionsStr.trim()) sections.push(`<conventions>\n${conventionsStr}\n</conventions>`);
   if (reviewRulesStr.trim()) sections.push(`<review_rules>\n${reviewRulesStr}\n</review_rules>`);
+  const skills = prSummary?.skills;
+  if (skills?.formatted.trim())
+    sections.push(`<skills>\n${skills.formatted}\n</skills>\n${PROMPTS.skills.trusted}`);
+  if (skills && skills.untrusted.length > 0) {
+    // Untrusted bodies are PR-authored: escape markup so a fenced section or
+    // a spoofed file boundary cannot break out of the container.
+    const bodies = skills.untrusted
+      .map((f) => `--- ${escapePromptMarkup(f.path)} ---\n${escapePromptMarkup(f.content)}`)
+      .join("\n\n");
+    sections.push(
+      `<new_skills_under_review>\n${bodies}\n</new_skills_under_review>\n${PROMPTS.skills.untrusted}`,
+    );
+  }
   if (contextFiles && contextFiles.length > 0)
     sections.push(contextFiles.map((f) => f.content).join("\n\n"));
   // Author-stated intent precedes history so findings are read in context.
@@ -208,6 +229,7 @@ export function buildMarkdownSystemPrompt(
   minSeverity: MinSeverity = "INFO",
   context?: ContextResult | string,
   contextFiles?: ContextFile[],
+  skills?: SkillPromptSection,
 ): string {
   const base = [...buildSharedBase(minSeverity), "", ...PROMPTS.markdownReview].join("\n");
 
@@ -224,6 +246,18 @@ export function buildMarkdownSystemPrompt(
   const sections: string[] = [base];
   if (conventionsStr.trim()) sections.push(`<conventions>\n${conventionsStr}\n</conventions>`);
   if (reviewRulesStr.trim()) sections.push(`<review_rules>\n${reviewRulesStr}\n</review_rules>`);
+  if (skills?.formatted.trim())
+    sections.push(`<skills>\n${skills.formatted}\n</skills>\n${PROMPTS.skills.trusted}`);
+  if (skills && skills.untrusted.length > 0) {
+    // Untrusted bodies are PR-authored: escape markup so a fenced section or
+    // a spoofed file boundary cannot break out of the container.
+    const bodies = skills.untrusted
+      .map((f) => `--- ${escapePromptMarkup(f.path)} ---\n${escapePromptMarkup(f.content)}`)
+      .join("\n\n");
+    sections.push(
+      `<new_skills_under_review>\n${bodies}\n</new_skills_under_review>\n${PROMPTS.skills.untrusted}`,
+    );
+  }
   if (contextFiles && contextFiles.length > 0)
     sections.push(contextFiles.map((f) => f.content).join("\n\n"));
   return sections.join("\n\n");

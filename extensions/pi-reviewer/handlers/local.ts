@@ -12,6 +12,7 @@ import {
 } from "../../../src/core/output.js";
 import { loadContext } from "../../../src/core/context.js";
 import { resolveDiff, extractDiffFiles } from "../../../src/core/diff-resolver.js";
+import { loadSkillContext, resolveSkillDirs } from "../../../src/core/skill-context.js";
 import {
   buildJSONSystemPrompt,
   buildUserPrompt,
@@ -191,7 +192,7 @@ export async function handleLocalReview(opts: HandleLocalReviewOptions): Promise
   } = opts;
 
   notify("Fetching diff…");
-  const { diff, source, warning, skippedFiles } = await resolveDiff({
+  const { diff, source, warning, skippedFiles, changedFiles } = await resolveDiff({
     cwd: ctx.cwd,
     diff: parsed.diff,
     branch: parsed.branch ?? readDefaultBranch(),
@@ -222,7 +223,34 @@ export async function handleLocalReview(opts: HandleLocalReviewOptions): Promise
   );
   if (contextPaths.length > 0) notify(`Context:\n${contextPaths.map((p) => `  ${p}`).join("\n")}`);
 
-  const systemPrompt = buildJSONSystemPrompt(context, minSeverity, contextFiles);
+  const skillDirs = resolveSkillDirs();
+  const skillContext =
+    skillDirs.length > 0
+      ? await loadSkillContext({
+          cwd: providerCwd,
+          trustFiles: changedFiles,
+          gitRoot: parsed.dir ? ctx.cwd : undefined,
+          skillDirs,
+        })
+      : null;
+  if (skillContext && skillContext.skills.length > 0) {
+    notify(`Skills:\n${skillContext.skills.map((s) => `  ${s.name}`).join("\n")}`);
+  }
+  for (const warning of skillContext?.warnings ?? []) notify(warning, "warning");
+  if (skillContext && skillContext.untrusted.length > 0) {
+    notify(`Skills under review:\n${skillContext.untrusted.map((f) => `  ${f.path}`).join("\n")}`);
+  }
+
+  const systemPrompt = buildJSONSystemPrompt(
+    context,
+    minSeverity,
+    contextFiles,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    skillContext ? { skills: skillContext } : undefined,
+  );
   const userPrompt = buildUserPrompt(diff, skippedFiles);
 
   loaderState.stop = setReviewFooter(ctx, source, { model: currentModelId, thinking });

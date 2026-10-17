@@ -88,6 +88,7 @@ sequenceDiagram
     ext->>src: resolveDiff() → git diff
     src->>src: filterDiff() — noise + cap
     ext->>src: loadContext() → AGENTS.md / CLAUDE.md (+ touched-dir parents)
+    ext->>src: loadSkillContext() → trusted skills + untrusted new skills
     ext->>src: buildJSONSystemPrompt(context)
     ext->>src: buildUserPrompt(diff)
     ext->>sub: spawn pi --mode json --append-system-prompt

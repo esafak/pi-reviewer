@@ -41,7 +41,7 @@ export interface ContextProviderEvent {
   register: (name: string, provider: ContextProvider) => void;
 }
 
-function findGitRoot(cwd: string): string | null {
+export function findGitRoot(cwd: string): string | null {
   try {
     return execSync("git rev-parse --show-toplevel", {
       cwd,
@@ -56,7 +56,7 @@ function findGitRoot(cwd: string): string | null {
 // git resolves symlinks (e.g. /var → /private/var on macOS) while the caller
 // may pass an unresolved cwd, so string equality on paths fails. Canonicalize
 // once so chain termination and visited dedupe compare the same namespace.
-function canonicalize(dir: string): string {
+export function canonicalize(dir: string): string {
   try {
     return realpathSync(dir);
   } catch {

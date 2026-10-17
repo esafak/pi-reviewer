@@ -92,15 +92,17 @@ export function readSshFlag(): string | undefined {
 /**
  * Resolves SSH state from the --ssh flag value.
  * Supports user@host:/path and user@host (cwd resolved via pwd).
+ * Physical paths (pwd -P): git reports physical paths while plain pwd prints
+ * the logical one, and every loader compares the two namespaces.
  */
 export async function resolveSshState(flag: string): Promise<SshState> {
   const colonIdx = flag.indexOf(":");
   if (colonIdx !== -1) {
     const remote = flag.slice(0, colonIdx);
     const rawCwd = flag.slice(colonIdx + 1);
-    const remoteCwd = (await sshExec(remote, `cd ${rawCwd} && pwd`)).trim();
+    const remoteCwd = (await sshExec(remote, `cd ${rawCwd} && pwd -P`)).trim();
     return { remote, remoteCwd };
   }
-  const remoteCwd = (await sshExec(flag, "pwd")).trim();
+  const remoteCwd = (await sshExec(flag, "pwd -P")).trim();
   return { remote: flag, remoteCwd };
 }

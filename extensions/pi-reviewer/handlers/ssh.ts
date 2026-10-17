@@ -8,6 +8,11 @@ import {
 } from "../../../src/core/output.js";
 import { loadContextSSH } from "../../../src/core/context.js";
 import { extractDiffFiles } from "../../../src/core/diff-resolver.js";
+import {
+  loadSkillContext,
+  loadSkillContextRemote,
+  resolveSkillDirs,
+} from "../../../src/core/skill-context.js";
 import { filterDiff } from "../../../src/core/diff-filter.js";
 import {
   buildJSONSystemPrompt,
@@ -166,8 +171,10 @@ export async function handleSSHReview(opts: HandleSSHReviewOptions): Promise<voi
   if (sshDiffWarning) notify(sshDiffWarning, "warning");
 
   // Context follows the filtered diff so providers and conventions describe
-  // the files actually under review, matching local mode and CI.
+  // the files actually under review, matching local mode and CI. Trust uses
+  // the raw list: files dropped by filterDiff stay attacker-controlled.
   const sshDiffFiles = extractDiffFiles(sshDiff);
+  const sshTrustFiles = extractDiffFiles(rawSshDiff);
   const sshContext = sshState
     ? await loadContextSSH(
         sshState.remote,
@@ -176,6 +183,37 @@ export async function handleSSHReview(opts: HandleSSHReviewOptions): Promise<voi
         sshDiffFiles,
       ).catch(() => ({ conventions: [], reviewRules: [] }))
     : { conventions: [], reviewRules: [] };
+
+  const sshSkillDirs = resolveSkillDirs();
+  const sshSkillContext =
+    sshSkillDirs.length > 0
+      ? await (
+          sshState
+            ? loadSkillContextRemote({
+                remote: sshState.remote,
+                fs: providerFs,
+                remoteCwd: sshRemoteCwd,
+                gitRoot: parsed.dir ? sshState.remoteCwd : undefined,
+                trustFiles: sshTrustFiles,
+                skillDirs: sshSkillDirs,
+              })
+            : loadSkillContext({
+                cwd: ctx.cwd,
+                trustFiles: sshTrustFiles,
+                skillDirs: sshSkillDirs,
+              })
+        ).catch((error) => {
+          notify(
+            `Skills skipped: ${error instanceof Error ? error.message : String(error)}`,
+            "warning",
+          );
+          return null;
+        })
+      : null;
+  if (sshSkillContext && sshSkillContext.skills.length > 0) {
+    notify(`Skills:\n${sshSkillContext.skills.map((s) => `  ${s.name}`).join("\n")}`);
+  }
+  for (const warning of sshSkillContext?.warnings ?? []) notify(warning, "warning");
 
   const source = buildSSHSource(parsed, {
     branch: readDefaultBranch(),
@@ -202,13 +240,27 @@ export async function handleSSHReview(opts: HandleSSHReviewOptions): Promise<voi
   const userPrompt = buildUserPrompt(sshDiff, sshSkippedFiles);
 
   if (!parsed.ui) {
-    const systemPrompt = buildMarkdownSystemPrompt(minSeverity, sshContext, sshContextFiles);
+    const systemPrompt = buildMarkdownSystemPrompt(
+      minSeverity,
+      sshContext,
+      sshContextFiles,
+      sshSkillContext ?? undefined,
+    );
     loaderState.stop = setReviewFooter(ctx, source, { model: currentModelId, thinking });
     runSSHReview({ systemPrompt, userPrompt, pi, stopLoader: loaderState.stop, notify });
     return;
   }
 
-  const systemPrompt = buildJSONSystemPrompt(sshContext, minSeverity, sshContextFiles);
+  const systemPrompt = buildJSONSystemPrompt(
+    sshContext,
+    minSeverity,
+    sshContextFiles,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    sshSkillContext ? { skills: sshSkillContext } : undefined,
+  );
   loaderState.stop = setReviewFooter(ctx, source, { model: currentModelId, thinking });
   const result = await runSSHReviewAndWait({
     systemPrompt,

@@ -126,6 +126,7 @@ beforeEach(() => {
   vi.mocked(resolveDiff).mockResolvedValue({
     diff: "diff --git a/foo.ts\n",
     source: "feature vs main",
+    changedFiles: ["foo.ts"],
   });
   vi.mocked(loadContext).mockResolvedValue({ conventions: [], reviewRules: [] });
   vi.mocked(spawn).mockReturnValue(makeFakeProcess() as any);
@@ -236,6 +237,7 @@ describe("handleLocalReview — diff warning", () => {
       diff: "diff --git a/foo.ts\n",
       source: "feature vs main",
       warning: "Diff truncated to 100k chars",
+      changedFiles: ["foo.ts"],
     });
     const opts = makeOpts();
     await handleLocalReview(opts);
