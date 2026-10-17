@@ -55,15 +55,23 @@ import { log } from "./log.js";
 import type { Logger } from "../logging/index.js";
 
 /**
- * DeepWiki answering for a repo it has not indexed rejects the call
- * server-side; that source is simply unavailable and the agent already
- * continued without it, so the review posts with a warning instead of
- * failing the run.
+ * DeepWiki only indexes public repositories, so "repository not found" for
+ * a private repo is the normal case, not a failure worth vetoing: that
+ * source is simply unavailable and the agent already continued without it.
+ * Any other DeepWiki failure is abnormal and still vetoes the post, as does
+ * anything from any other server. The distinction reads the result text
+ * because the adapter reports every server-side rejection as bare
+ * tool_error; the excerpt is matched in memory and never logged, and
+ * unknown wording fails closed (vetoes).
  */
+const DEEPWIKI_UNINDEXED_REPOSITORY_PATTERN = /repository not found/i;
+
 function isDeepWikiRejection(failure: McpFailureEntry): boolean {
   return (
     failure.signal.errorClass === "tool" &&
-    (failure.identity.server === "deepwiki" || failure.identity.tool.startsWith("deepwiki_"))
+    (failure.identity.server === "deepwiki" || failure.identity.tool.startsWith("deepwiki_")) &&
+    failure.contentExcerpt !== undefined &&
+    DEEPWIKI_UNINDEXED_REPOSITORY_PATTERN.test(failure.contentExcerpt)
   );
 }
 
@@ -220,6 +228,23 @@ export interface McpToolIdentity {
 export interface McpFailureEntry {
   identity: McpToolIdentity;
   signal: McpErrorSignal;
+  /** Bounded result-text excerpt, matched in memory only — never logged. */
+  contentExcerpt?: string;
+}
+
+const MAX_MCP_CONTENT_EXCERPT_LENGTH = 1000;
+
+/** Plain-text excerpt of a tool result's content blocks for matching, never logged. */
+function extractMcpContentExcerpt(result: unknown): string | undefined {
+  if (!isRecord(result) || !Array.isArray(result.content)) return undefined;
+  let excerpt = "";
+  for (const block of result.content) {
+    if (!isRecord(block) || block.type !== "text" || typeof block.text !== "string") continue;
+    excerpt += block.text;
+    if (excerpt.length >= MAX_MCP_CONTENT_EXCERPT_LENGTH) break;
+  }
+  const trimmed = excerpt.trim().slice(0, MAX_MCP_CONTENT_EXCERPT_LENGTH);
+  return trimmed ? trimmed : undefined;
 }
 
 // A failed MCP tool call is returned (not thrown) with a closed adapter code
@@ -1004,7 +1029,11 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
             const signal = extractMcpErrorSignal(toolEvent.result) ?? {
               errorClass: "unknown" as const,
             };
-            failedMcpCalls.set(mcpKey, { identity: mcpIdentity, signal });
+            failedMcpCalls.set(mcpKey, {
+              identity: mcpIdentity,
+              signal,
+              contentExcerpt: extractMcpContentExcerpt(toolEvent.result),
+            });
           } else if (mcpIdentity && mcpKey) failedMcpCalls.delete(mcpKey);
           const outputArtifact = mcpIdentity
             ? mcpOutputArtifactDirectory(toolEvent.result)

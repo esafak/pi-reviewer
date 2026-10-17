@@ -191,8 +191,9 @@ means the server rejected the call (check the server tool contract),
 `input_required` means a UI-gated tool cannot run headless. If the
 reviewer actually calls a configured MCP tool and that call
 fails, pi-reviewer does not post a potentially incomplete review — unless
-every failure is DeepWiki rejecting an unindexed repository, which posts
-with a warning instead. Servers the
+every failure is DeepWiki reporting the repository is not indexed, the
+normal case for private repositories, which posts with a warning instead.
+Any other DeepWiki failure still vetoes. Servers the
 reviewer never calls are not connected.
 
 DeepWiki's public MCP server is supported as an ordinary entry in this file and

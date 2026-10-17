@@ -1095,7 +1095,15 @@ describe("review", () => {
         toolName: "mcp",
         toolCallId: "mcp-deepwiki-call",
         isError: true,
-        result: { details: { mode: "call", error: "tool_error", server: "deepwiki" } },
+        result: {
+          details: { mode: "call", error: "tool_error", server: "deepwiki" },
+          content: [
+            {
+              type: "text",
+              text: "Error processing question: Repository not found. Visit https://deepwiki.com to index it.",
+            },
+          ],
+        },
       },
     ];
     const { sink, records } = createMemorySink();
@@ -1112,6 +1120,36 @@ describe("review", () => {
       errorClasses: ["tool"],
       additionalTools: "",
     });
+    expect(JSON.stringify(records)).not.toContain("Repository not found");
+  });
+
+  it("still refuses to post on other DeepWiki errors", async () => {
+    fakeAgentEvents = [
+      {
+        type: "tool_execution_start",
+        toolName: "mcp",
+        toolCallId: "mcp-deepwiki-call",
+        args: { server: "deepwiki", tool: "ask_wiki_question", args: {} },
+      },
+      {
+        type: "tool_execution_end",
+        toolName: "mcp",
+        toolCallId: "mcp-deepwiki-call",
+        isError: true,
+        result: {
+          details: { mode: "call", error: "tool_error", server: "deepwiki" },
+          content: [{ type: "text", text: "Error processing question: upstream unavailable." }],
+        },
+      },
+    ];
+    const { sink, records } = createMemorySink();
+    const mcpConfig: CiMcpConfig = { mcpServers: { deepwiki: { url: "https://mcp.example/mcp" } } };
+
+    await expect(
+      review({ cwd: "/repo", output: "comment", mcpConfig, logger: createLogger({ sink }) }),
+    ).rejects.toThrow("A configured MCP tool call failed; refusing to post the review");
+    expect(sendOutputMock).not.toHaveBeenCalled();
+    expect(records.find(({ event }) => event === "review.mcp.failed")?.level).toBe("error");
   });
 
   it("allows a failed MCP call when a retry of that tool succeeds", async () => {
