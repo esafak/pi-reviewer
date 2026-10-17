@@ -50,7 +50,7 @@
       "onFail": "warn"
     }
   },
-  "packageManager": "pnpm@12.8.2",
+  "packageManager": "pnpm@12.9.0",
   "pi": {
     "extensions": [
       "./extensions"
