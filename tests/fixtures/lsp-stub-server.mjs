@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 // Test-only stub LSP server: answers definition with a fixed location and
-// publishes one fake diagnostic (naming the file) on didOpen. Honors the
-// `exit` notification (the path stock pi-lsp shutdown relies on) but ignores
-// SIGTERM on purpose and keeps the event loop alive past stdio teardown
-// (ref'd interval), so the test proves teardown through the protocol path
-// rather than the signal path. Speaks LSP over stdio with Content-Length framing.
+// publishes one fake diagnostic (naming the file) on didOpen. Exits on the
+// shutdown request, the `exit` notification, or stdio close — whichever
+// comes first — but ignores SIGTERM on purpose and keeps the event loop
+// alive past stdio teardown (ref'd interval), so the test proves teardown
+// through the protocol path rather than the signal path. Speaks LSP over stdio with Content-Length framing.
 // Usage: node lsp-stub-server.mjs [--hang]
 // --hang consumes input without ever responding (startup-timeout testing).
 import { writeFileSync } from "node:fs";
@@ -79,15 +79,14 @@ function handle(message) {
       },
     });
   }
-  // NOTE: a cooperative `exit` is the teardown path stock pi-lsp relies on
-  // (shutdown request + exit notification, then a SIGTERM fallback). The
-  // stub honors it; SIGTERM stays ignored above so the protocol path, not
-  // the signal path, is what the lifecycle test exercises.
-  if (message.method === "exit") {
-    // Flush the diagnostic push first so tests observing shutdown ordering
-    // see a complete stream.
-    setImmediate(() => process.exit(0));
-    return;
+  // Cooperative shutdown: receipt of the shutdown request or the exit
+  // notification ends the process synchronously — no further scheduling,
+  // so no post-receipt race with stdio teardown or signals can strand it.
+  // (The stock client sends shutdown, then exit, then SIGTERM; the stub
+  // ignores SIGTERM, so the protocol path is what the lifecycle test
+  // exercises.) Responding is pointless: stock never reads the reply.
+  if (message.method === "shutdown" || message.method === "exit") {
+    process.exit(0);
   }
 }
 
@@ -96,3 +95,8 @@ process.stdin.on("data", (chunk) => {
   pump();
 });
 process.stdin.resume();
+// Belt and braces: if the client tears down stdio without the protocol
+// goodbye (best-effort writes), the closed pipe ends the stub instead of
+// stranding it on its keep-alive interval.
+process.stdin.on("end", () => process.exit(0));
+process.stdin.on("close", () => process.exit(0));
