@@ -74,6 +74,7 @@ describe("resolveDiff", () => {
     expect(execSyncMock).toHaveBeenNthCalledWith(1, "git rev-parse --abbrev-ref HEAD", {
       cwd: "/repo",
       encoding: "utf-8",
+      env: expect.any(Object),
       stdio: ["pipe", "pipe", "pipe"],
     });
     expect(execSyncMock).toHaveBeenNthCalledWith(
@@ -107,6 +108,7 @@ describe("resolveDiff", () => {
     expect(execSyncMock).toHaveBeenNthCalledWith(1, "git rev-parse --abbrev-ref HEAD", {
       cwd: "/repo",
       encoding: "utf-8",
+      env: expect.any(Object),
       stdio: ["pipe", "pipe", "pipe"],
     });
     expect(execSyncMock).toHaveBeenNthCalledWith(
@@ -133,6 +135,7 @@ describe("resolveDiff", () => {
     expect(execSyncMock).toHaveBeenNthCalledWith(1, "git rev-parse --abbrev-ref HEAD", {
       cwd: "/repo",
       encoding: "utf-8",
+      env: expect.any(Object),
       stdio: ["pipe", "pipe", "pipe"],
     });
     expect(execSyncMock).toHaveBeenNthCalledWith(
@@ -141,6 +144,7 @@ describe("resolveDiff", () => {
       {
         cwd: "/repo",
         encoding: "utf-8",
+        env: expect.any(Object),
         stdio: ["pipe", "pipe", "pipe"],
       },
     );

@@ -220,6 +220,57 @@ function sanitizeMcpDebugName(value: string): string {
   return sanitizeMcpDebugText(value, 160);
 }
 
+// The trace records sizes, never payloads: an empty success and a useful
+// success share status but demand different triage, so tool_end carries a
+// fingerprint that distinguishes them without persisting tool output.
+interface ToolResultFingerprint {
+  resultBytes: number;
+  resultEmpty: boolean;
+}
+
+function utf8Bytes(value: string): number {
+  return Buffer.byteLength(value, "utf8");
+}
+
+// The trace records sizes, never payloads: an empty success and a useful
+// success share status but demand different triage, so tool_end carries a
+// fingerprint that distinguishes them without persisting tool output.
+// Measurement is consistent: strings count their own UTF-8 bytes, objects
+// (including content envelopes) count their serialized JSON UTF-8 bytes.
+// resultEmpty means absence of supported content, not a usefulness judgment.
+function describeToolResult(result: unknown): ToolResultFingerprint {
+  if (result === undefined || result === null) return { resultBytes: 0, resultEmpty: true };
+  if (typeof result === "string")
+    return { resultBytes: utf8Bytes(result), resultEmpty: result.trim() === "" };
+  let serialized = "";
+  try {
+    serialized = JSON.stringify(result) ?? "";
+  } catch {
+    return { resultBytes: 0, resultEmpty: true };
+  }
+  if (isRecord(result) && Array.isArray(result.content)) {
+    let hasText = false;
+    let hasNonText = false;
+    for (const block of result.content) {
+      if (!isRecord(block) || typeof block.type !== "string") continue;
+      if (block.type === "text") {
+        if (typeof block.text !== "string") continue;
+        if (block.text.trim() !== "") hasText = true;
+      } else {
+        // Non-text payloads (images, blobs, resources) are content even
+        // with no text, so they mark the result non-empty.
+        hasNonText = true;
+      }
+    }
+    return { resultBytes: utf8Bytes(serialized), resultEmpty: !(hasText || hasNonText) };
+  }
+  const trimmed = serialized.trim();
+  return {
+    resultBytes: utf8Bytes(serialized),
+    resultEmpty: trimmed === "" || trimmed === "{}" || trimmed === "[]" || trimmed === '""',
+  };
+}
+
 export type McpErrorClass = "tool" | "call_failed" | "input_required" | "unknown";
 export interface McpErrorSignal {
   errorClass: McpErrorClass;
@@ -912,6 +963,11 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
     const thinkingTrace: Array<Record<string, unknown>> = [];
     let pendingThinking: { timestamp: string; text: string } | undefined;
     let thinkingDeltaCount = 0;
+    let thinkingChars = 0;
+    // Per-run baselines: run_end reports only the current prompt's thinking,
+    // so a retry does not inherit the previous run's totals.
+    let runStartDeltas = 0;
+    let runStartChars = 0;
     let finalMessageThinkingCaptured = false;
     const traceEnabled = options.debug && Boolean(process.env.PI_REVIEWER_THINKING_ARTIFACT);
     const addTraceEvent = (type: string, fields: Record<string, unknown> = {}) => {
@@ -959,6 +1015,7 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
         const thinkingEvent = update.assistantMessageEvent;
         if (thinkingEvent?.type === "thinking_delta" && typeof thinkingEvent.delta === "string") {
           thinkingDeltaCount++;
+          thinkingChars += thinkingEvent.delta.length;
           if (pendingThinking) pendingThinking.text += thinkingEvent.delta;
           else pendingThinking = { timestamp: new Date().toISOString(), text: thinkingEvent.delta };
         } else {
@@ -1002,6 +1059,10 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
             eventType === "tool_execution_end" && mcpIdentity && toolEvent.isError === true
               ? extractMcpErrorSignal(toolEvent.result)
               : undefined;
+          // Fingerprint only: sizes decide empty-vs-useful triage, the trace
+          // never persists tool output.
+          const fingerprint =
+            eventType === "tool_execution_end" ? describeToolResult(toolEvent.result) : undefined;
           addTraceEvent(eventType === "tool_execution_start" ? "tool_start" : "tool_end", {
             ...(mcpIdentity
               ? {
@@ -1011,7 +1072,15 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
               : { tool: sanitizeMcpDebugName(rawToolName).slice(0, 200) }),
             callId: rawCallId ? sanitizeMcpDebugName(rawCallId).slice(0, 128) : undefined,
             ...(eventType === "tool_execution_end"
-              ? { status: toolEvent.isError === true ? "error" : "success" }
+              ? {
+                  status: toolEvent.isError === true ? "error" : "success",
+                  ...(fingerprint
+                    ? {
+                        resultBytes: fingerprint.resultBytes,
+                        resultEmpty: fingerprint.resultEmpty,
+                      }
+                    : {}),
+                }
               : {}),
             ...(endSignal
               ? {
@@ -1105,9 +1174,29 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
               endTimestamp: timestamp,
               text: part.thinking,
             });
+            thinkingChars += part.thinking.length;
             finalMessageThinkingCaptured = true;
           }
         }
+      }
+
+      if (traceEnabled) {
+        // Terminal marker: without it a trace that ends in thinking is
+        // ambiguous between a quiet stop and a stop that starved the tool
+        // call of output budget. Raw stopReason plus the thinking text lets
+        // the reader infer budget starvation without a heuristic bit.
+        const stopReason =
+          typeof ev.stopReason === "string"
+            ? ev.stopReason
+            : typeof lastAssistant?.stopReason === "string"
+              ? lastAssistant.stopReason
+              : undefined;
+        addTraceEvent("run_end", {
+          ...(stopReason !== undefined ? { stopReason } : {}),
+          hasDecision: getResult() !== undefined,
+          thinkingDeltas: thinkingDeltaCount - runStartDeltas,
+          thinkingChars: thinkingChars - runStartChars,
+        });
       }
 
       // The error may surface on the agent_end event OR on the last assistant
@@ -1137,6 +1226,9 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
       // observed up front so the window before the await below never reads
       // as an unhandled rejection. Awaiting ended afterwards still throws.
       void ended.catch(() => {});
+      // Baseline per-run thinking: run_end reports this prompt's deltas only.
+      runStartDeltas = thinkingDeltaCount;
+      runStartChars = thinkingChars;
       // Sequential on purpose: agent.prompt() settles only after agent_end
       // listeners have run and the run is fully idle. Awaiting both
       // concurrently lets ended reject first while prompt() still holds the

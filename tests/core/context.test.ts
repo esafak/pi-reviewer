@@ -10,6 +10,7 @@ import {
   collectProviderContext,
   CONTEXT_PROVIDER_EVENT,
 } from "../../src/core/context.js";
+import { gitEnv } from "../../src/core/git-env.js";
 import type {
   ContextProviderEvent,
   MinimalEventBus,
@@ -152,7 +153,7 @@ describe("loadContext — monorepo (git root walk-up)", () => {
   it("collects AGENTS.md from both root and package dir", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "pi-reviewer-mono-"));
     createdDirs.push(root);
-    execSync("git init", { cwd: root, stdio: "ignore" });
+    execSync("git init", { cwd: root, stdio: "ignore", env: gitEnv() });
 
     const pkgDir = path.join(root, "packages", "api");
     await mkdir(pkgDir, { recursive: true });
@@ -172,7 +173,7 @@ describe("loadContext — monorepo (git root walk-up)", () => {
   it("collects REVIEW.md from both root and package dir", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "pi-reviewer-mono-"));
     createdDirs.push(root);
-    execSync("git init", { cwd: root, stdio: "ignore" });
+    execSync("git init", { cwd: root, stdio: "ignore", env: gitEnv() });
 
     const pkgDir = path.join(root, "packages", "api");
     await mkdir(pkgDir, { recursive: true });
@@ -189,7 +190,7 @@ describe("loadContext — monorepo (git root walk-up)", () => {
   it("works with only root AGENTS.md when running from a package dir", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "pi-reviewer-mono-"));
     createdDirs.push(root);
-    execSync("git init", { cwd: root, stdio: "ignore" });
+    execSync("git init", { cwd: root, stdio: "ignore", env: gitEnv() });
 
     const pkgDir = path.join(root, "packages", "api");
     await mkdir(pkgDir, { recursive: true });
@@ -204,7 +205,7 @@ describe("loadContext — monorepo (git root walk-up)", () => {
   it("finds root AGENTS.md and package REVIEW.md when cwd is the package dir (--dir equivalent)", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "pi-reviewer-mono-"));
     createdDirs.push(root);
-    execSync("git init", { cwd: root, stdio: "ignore" });
+    execSync("git init", { cwd: root, stdio: "ignore", env: gitEnv() });
 
     const pkgDir = path.join(root, "project-x");
     await mkdir(pkgDir, { recursive: true });
@@ -270,7 +271,7 @@ describe("walkUpContextFiles", () => {
   it("collects one file per directory level, root → cwd", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "pi-reviewer-walk-"));
     createdDirs.push(root);
-    execSync("git init", { cwd: root, stdio: "ignore" });
+    execSync("git init", { cwd: root, stdio: "ignore", env: gitEnv() });
 
     const pkgDir = path.join(root, "packages", "api");
     await mkdir(pkgDir, { recursive: true });
@@ -287,7 +288,7 @@ describe("walkUpContextFiles", () => {
   it("stops at gitRoot — does not collect files above it", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "pi-reviewer-walk-"));
     createdDirs.push(root);
-    execSync("git init", { cwd: root, stdio: "ignore" });
+    execSync("git init", { cwd: root, stdio: "ignore", env: gitEnv() });
 
     const pkgDir = path.join(root, "packages", "api");
     await mkdir(pkgDir, { recursive: true });
@@ -414,7 +415,7 @@ describe("loadContext — touched directories", () => {
   it("ingests AGENTS.md from a touched nested dir after the base chain", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "pi-reviewer-touched-"));
     createdDirs.push(root);
-    execSync("git init", { cwd: root, stdio: "ignore" });
+    execSync("git init", { cwd: root, stdio: "ignore", env: gitEnv() });
 
     await writeFile(path.join(root, "AGENTS.md"), "root", "utf-8");
     await mkdir(path.join(root, "packages", "api"), { recursive: true });
@@ -428,7 +429,7 @@ describe("loadContext — touched directories", () => {
   it("does not duplicate base-chain files for touched dirs", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "pi-reviewer-touched-"));
     createdDirs.push(root);
-    execSync("git init", { cwd: root, stdio: "ignore" });
+    execSync("git init", { cwd: root, stdio: "ignore", env: gitEnv() });
 
     await writeFile(path.join(root, "AGENTS.md"), "root", "utf-8");
 
@@ -440,7 +441,7 @@ describe("loadContext — touched directories", () => {
   it("keeps AGENTS.md priority over CLAUDE.md in touched dirs", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "pi-reviewer-touched-"));
     createdDirs.push(root);
-    execSync("git init", { cwd: root, stdio: "ignore" });
+    execSync("git init", { cwd: root, stdio: "ignore", env: gitEnv() });
 
     await writeFile(path.join(root, "AGENTS.md"), "root agents", "utf-8");
     await mkdir(path.join(root, "packages", "web"), { recursive: true });
@@ -455,7 +456,7 @@ describe("loadContext — touched directories", () => {
   it("ignores root-level touched files beyond the base chain", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "pi-reviewer-touched-"));
     createdDirs.push(root);
-    execSync("git init", { cwd: root, stdio: "ignore" });
+    execSync("git init", { cwd: root, stdio: "ignore", env: gitEnv() });
 
     await writeFile(path.join(root, "AGENTS.md"), "root", "utf-8");
 
@@ -467,7 +468,7 @@ describe("loadContext — touched directories", () => {
   it("resolves touched paths against the repo root when cwd is a subdirectory", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "pi-reviewer-touched-"));
     createdDirs.push(root);
-    execSync("git init", { cwd: root, stdio: "ignore" });
+    execSync("git init", { cwd: root, stdio: "ignore", env: gitEnv() });
 
     const sub = path.join(root, "packages", "api");
     await mkdir(sub, { recursive: true });
@@ -486,7 +487,7 @@ describe("loadContext — touched directories", () => {
   it("dedupes when cwd reaches the repo through a symlink", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "pi-reviewer-touched-"));
     createdDirs.push(root);
-    execSync("git init", { cwd: root, stdio: "ignore" });
+    execSync("git init", { cwd: root, stdio: "ignore", env: gitEnv() });
 
     await writeFile(path.join(root, "AGENTS.md"), "root", "utf-8");
     const link = `${root}-link`;
@@ -496,5 +497,32 @@ describe("loadContext — touched directories", () => {
     const result = await loadContext({ cwd: link, diffFiles: ["packages/api/foo.ts"] });
 
     expect(result.conventions.map((f) => f.content)).toEqual(["root"]);
+  });
+
+  it("ignores a leaked GIT_DIR from the parent environment", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "pi-reviewer-touched-"));
+    createdDirs.push(root);
+    execSync("git init", { cwd: root, stdio: "ignore", env: gitEnv() });
+
+    await writeFile(path.join(root, "AGENTS.md"), "root", "utf-8");
+    await mkdir(path.join(root, "packages", "api"), { recursive: true });
+    await writeFile(path.join(root, "packages", "api", "AGENTS.md"), "api", "utf-8");
+
+    // Hooks and tooling export repository redirection that would otherwise
+    // retarget the fixture at the outer repo and ingest its AGENTS.md.
+    const previousGitDir = process.env.GIT_DIR;
+    const previousWorkTree = process.env.GIT_WORK_TREE;
+    process.env.GIT_DIR = "/nonexistent/pushed-repo/.git";
+    process.env.GIT_WORK_TREE = "/nonexistent/pushed-repo";
+    try {
+      const result = await loadContext({ cwd: root, diffFiles: ["packages/api/foo.ts"] });
+
+      expect(result.conventions.map((f) => f.content)).toEqual(["root", "api"]);
+    } finally {
+      if (previousGitDir === undefined) delete process.env.GIT_DIR;
+      else process.env.GIT_DIR = previousGitDir;
+      if (previousWorkTree === undefined) delete process.env.GIT_WORK_TREE;
+      else process.env.GIT_WORK_TREE = previousWorkTree;
+    }
   });
 });

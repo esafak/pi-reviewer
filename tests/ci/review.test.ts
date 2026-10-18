@@ -692,7 +692,9 @@ describe("review", () => {
         "thinking",
         "tool_start",
         "tool_end",
+        "run_end",
         "thinking",
+        "run_end",
       ]);
       expect(trace[0]).toMatchObject({ type: "thinking", text: "Before tool." });
       expect(trace[1]).toMatchObject({ type: "tool_start", tool: "read_file", callId: "call-1" });
@@ -701,8 +703,15 @@ describe("review", () => {
         tool: "read_file",
         callId: "call-1",
         status: "success",
+        resultBytes: Buffer.byteLength("private file contents", "utf8"),
+        resultEmpty: false,
       });
-      expect(trace[3]).toMatchObject({ type: "thinking", text: "After tool." });
+      expect(trace[3]).toMatchObject({
+        type: "run_end",
+        hasDecision: true,
+      });
+      expect(trace[4]).toMatchObject({ type: "thinking", text: "After tool." });
+      expect(trace[5]).toMatchObject({ type: "run_end", hasDecision: true });
       for (const entry of trace) {
         expect(entry.timestamp).toEqual(expect.stringMatching(/^\d{4}-\d\d-\d\dT/));
       }
@@ -756,7 +765,129 @@ describe("review", () => {
           timestamp: expect.stringMatching(/^\d{4}-\d\d-\d\dT/),
           endTimestamp: expect.stringMatching(/^\d{4}-\d\d-\d\dT/),
         }),
+        expect.objectContaining({ type: "run_end", hasDecision: true }),
+        expect.objectContaining({ type: "run_end", hasDecision: true }),
       ]);
+    } finally {
+      if (previousArtifactPath === undefined) delete process.env.PI_REVIEWER_THINKING_ARTIFACT;
+      else process.env.PI_REVIEWER_THINKING_ARTIFACT = previousArtifactPath;
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("fingerprints tool results by size without persisting payloads", async () => {
+    const unicodeText = "héllo 🌍";
+    fakeAgentEvents = [
+      { type: "tool_execution_start", toolName: "read_file", toolCallId: "empty" },
+      {
+        type: "tool_execution_end",
+        toolName: "read_file",
+        toolCallId: "empty",
+        result: "",
+        isError: false,
+      },
+      { type: "tool_execution_start", toolName: "read_file", toolCallId: "blank" },
+      {
+        type: "tool_execution_end",
+        toolName: "read_file",
+        toolCallId: "blank",
+        result: "   ",
+        isError: false,
+      },
+      { type: "tool_execution_start", toolName: "read_file", toolCallId: "unicode" },
+      {
+        type: "tool_execution_end",
+        toolName: "read_file",
+        toolCallId: "unicode",
+        result: unicodeText,
+        isError: false,
+      },
+      { type: "tool_execution_start", toolName: "read_file", toolCallId: "image" },
+      {
+        type: "tool_execution_end",
+        toolName: "read_file",
+        toolCallId: "image",
+        result: { content: [{ type: "image", source: "private-bytes" }] },
+        isError: false,
+      },
+    ];
+    const directory = await mkdtemp(path.join(tmpdir(), "pi-reviewer-fingerprint-test-"));
+    const artifactPath = path.join(directory, "thinking.jsonl");
+    const previousArtifactPath = process.env.PI_REVIEWER_THINKING_ARTIFACT;
+    process.env.PI_REVIEWER_THINKING_ARTIFACT = artifactPath;
+    try {
+      await review({ cwd: "/repo", debug: true });
+      const trace = (await readFile(artifactPath, "utf8"))
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as Record<string, unknown>);
+      const ends = trace.filter((entry) => entry.type === "tool_end") as Array<
+        Record<string, unknown>
+      >;
+      expect(ends.map((entry) => entry.callId)).toEqual(["empty", "blank", "unicode", "image"]);
+      expect(ends[0]).toMatchObject({ status: "success", resultBytes: 0, resultEmpty: true });
+      expect(ends[1]).toMatchObject({
+        status: "success",
+        resultBytes: Buffer.byteLength("   ", "utf8"),
+        resultEmpty: true,
+      });
+      expect(ends[2]).toMatchObject({
+        status: "success",
+        resultBytes: Buffer.byteLength(unicodeText, "utf8"),
+        resultEmpty: false,
+      });
+      // Non-text payloads are content even with no text. Objects measure
+      // serialized JSON bytes consistently with empty envelopes.
+      const imageResult = { content: [{ type: "image", source: "private-bytes" }] };
+      expect(ends[3]).toMatchObject({
+        status: "success",
+        resultBytes: Buffer.byteLength(JSON.stringify(imageResult), "utf8"),
+        resultEmpty: false,
+      });
+      expect(JSON.stringify(trace)).not.toContain("private-bytes");
+      expect(JSON.stringify(trace)).not.toContain(unicodeText);
+    } finally {
+      if (previousArtifactPath === undefined) delete process.env.PI_REVIEWER_THINKING_ARTIFACT;
+      else process.env.PI_REVIEWER_THINKING_ARTIFACT = previousArtifactPath;
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("reports per-run thinking counters across the retry", async () => {
+    createReviewToolMock.mockReturnValue({
+      tool: {
+        name: "submit_review",
+        label: "submit_review",
+        description: "test",
+        parameters: {},
+        execute: vi.fn(),
+      },
+      getResult: () => undefined,
+    });
+    fakeAgentEvents = [
+      {
+        type: "message_update",
+        assistantMessageEvent: { type: "thinking_delta", contentIndex: 0, delta: "abc" },
+      },
+    ];
+    const directory = await mkdtemp(path.join(tmpdir(), "pi-reviewer-per-run-test-"));
+    const artifactPath = path.join(directory, "thinking.jsonl");
+    const previousArtifactPath = process.env.PI_REVIEWER_THINKING_ARTIFACT;
+    process.env.PI_REVIEWER_THINKING_ARTIFACT = artifactPath;
+    try {
+      await expect(review({ cwd: "/repo", debug: true })).rejects.toThrow(
+        "Agent finished without calling submit_review",
+      );
+      const trace = (await readFile(artifactPath, "utf8"))
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as Record<string, unknown>);
+      const ends = trace.filter((entry) => entry.type === "run_end");
+      // Initial run plus the nudge retry: each reports only its own prompt.
+      expect(ends.length).toBeGreaterThanOrEqual(2);
+      for (const entry of ends) {
+        expect(entry).toMatchObject({ hasDecision: false, thinkingDeltas: 1, thinkingChars: 3 });
+      }
     } finally {
       if (previousArtifactPath === undefined) delete process.env.PI_REVIEWER_THINKING_ARTIFACT;
       else process.env.PI_REVIEWER_THINKING_ARTIFACT = previousArtifactPath;
