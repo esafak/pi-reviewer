@@ -55,6 +55,15 @@ inputs:
     description: "Optional repository-relative MCP JSON config path, read from the repository default branch."
     required: false
 
+  lsp-servers:
+    description: "Comma-separated LSP server preset ids for semantic review context (default: ty, markdown-oxide, rust-analyzer, taplo, gopls, tsc-rs). Set to 'none' to disable LSP."
+    required: false
+    default: ""
+
+  lsp-config-file:
+    description: "Optional repository-relative LSP JSON config path, read from the repository default branch. Merges over presets per server id."
+    required: false
+
   web-search:
     description: "Enable optional regular CI web search (default: false)."
     required: false
@@ -472,6 +481,8 @@ runs:
         PI_REVIEWER_DOC_DIRS: ${{ inputs.doc-dirs }}
         PI_REVIEWER_SKILLS_DIRS: ${{ inputs.skills-dirs }}
         PI_REVIEWER_MCP_CONFIG_FILE: ${{ inputs.mcp-config-file }}
+        PI_REVIEWER_LSP_SERVERS: ${{ inputs.lsp-servers }}
+        PI_REVIEWER_LSP_CONFIG_FILE: ${{ inputs.lsp-config-file }}
         PI_REVIEWER_WEB_SEARCH: ${{ inputs.web-search }}
         PI_REVIEWER_SEARCH_PROVIDER: ${{ inputs.search-provider || env.PI_REVIEWER_SEARCH_PROVIDER }}
         PI_REVIEWER_AI_SEARCH: ${{ inputs.ai-search }}

@@ -78,6 +78,10 @@ jobs:
           # doc-dirs: '.pi/notes,docs/review'
           # Optional user-configured MCP servers (config is read from the default branch).
           # mcp-config-file: '.github/mcp.json'
+          # Optional semantic review context via LSP (best-effort, CI comment reviews only).
+          # Binaries must be preinstalled on the runner; missing ones warn and skip.
+          # lsp-servers: 'ty,markdown-oxide,rust-analyzer,taplo,gopls,tsc-rs' # default; 'none' disables
+          # lsp-config-file: '.github/lsp.json' # trusted override, read from the default branch
           # Optional web search configuration.
           # Exa/Brave use EXA_API_KEY/BRAVE_SEARCH_API_KEY; DuckDuckGo regular
           # search uses a fixed unauthenticated endpoint and has no AI mode.
@@ -204,6 +208,69 @@ those read config from the target branch, where the example may not exist until
 the PR is merged. Workflows that previously used a DeepWiki-specific action
 input or `/review --deepwiki` flag should configure the server through their
 MCP config instead.
+
+### Semantic review context (LSP)
+
+CI comment reviews get language-aware context on top of the diff: the agent
+can ask for hover, definition, and references instead of guessing. The
+preset selection is correctness-oriented (type errors, broken references,
+syntax errors) — the defaults exclude lint/format servers, and review
+guidance tells the agent to use diagnostics as breakage signal, not style
+findings. (No output filtering is applied: stock `lsp_diagnostics` returns
+whatever the server pushed.)
+
+Six preset servers cover the common languages, all Rust-based where mature:
+`ty` (Python), `markdown-oxide` (Markdown), `rust-analyzer` (Rust), `taplo`
+(TOML — requires a `--features lsp` build), `gopls` (Go), `tsc-rs`
+(TypeScript). Unset `lsp-servers` means all six, best-effort: each language is
+skipped with a warning when its binary is absent, so reviews work with zero
+config on preinstalled runners. Set `lsp-servers: 'none'` to disable LSP
+entirely. A comma-separated subset selects specific servers; an unknown id
+with no config entry fails fast.
+
+Binaries must be preinstalled by the workflow — the action never installs,
+fetches, or auto-downloads servers. This repository's own review workflow
+pins `tsc-rs` in `.github/lsp-tools/package.json` (Renovate-tracked) and runs
+`npm ci --prefix .github/lsp-tools` before the Review step.
+
+```yaml
+      - uses: esafak/pi-reviewer@main
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          model: openrouter/openai/gpt-5.4-mini
+          lsp-servers: 'tsc-rs'
+```
+
+There is deliberately no pre-prompt diagnostics sweep: stock `pi-lsp`
+collects diagnostics on `write`/`edit`, which the read-only CI agent never
+calls, so a sweep would always come back empty. Diagnostics still reach the
+review through the agent: `lsp_hover` and `lsp_definition` open the document
+on the server, and a follow-up `lsp_diagnostics` call then reads the pushed
+results (verified with the stub server in `lsp-lifecycle.test.ts`). Pull-only
+servers such as `tsc-rs` 0.7.0 never push, so their diagnostics stay
+unavailable while navigation works.
+
+Custom servers or preset overrides go in a JSON file with the pi-lsp
+`{ version: 1, servers: [...] }` shape, set via `lsp-config-file` to its
+repository-relative path. Like `mcp-config-file`, it is read from the
+repository's default branch — never from the PR head — so a pull request
+cannot change which commands run. Entries merge over presets per server id
+(`enabled: false` disables one preset; unknown ids are allowed with full
+`bin`/`args`/`include`/`rootMarkers` and become selectable via
+`lsp-servers`).
+
+```json
+{
+  "version": 1,
+  "servers": [
+    { "id": "ty", "args": ["server", "--extra-flag"] }
+  ]
+}
+```
+
+LSP applies to CI comment reviews only (not local runs, replies, dry-runs,
+or non-comment output). The agent tools are read-only; their output is
+treated as untrusted data.
 
 The `init` command is the generic, non-App setup. It runs only when invoked
 explicitly, creates the workflow only when `.github/workflows/pi-review.yml`

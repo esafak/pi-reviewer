@@ -89,7 +89,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { createMcpAdapter } from "pi-mcp-adapter";
 import { loadContext } from "../../src/core/context.js";
-import { resolveDiff } from "../../src/core/diff-resolver.js";
+import { extractDiffFiles, resolveDiff } from "../../src/core/diff-resolver.js";
 import { loadDocContext } from "../../src/core/doc-context.js";
 import { loadSkillContext, resolveSkillDirs } from "../../src/core/skill-context.js";
 import { sendOutput } from "../../src/core/output.js";
@@ -192,6 +192,7 @@ describe("reply prompt limits", () => {
 });
 
 const resolveDiffMock = vi.mocked(resolveDiff);
+const extractDiffFilesMock = vi.mocked(extractDiffFiles);
 const loadContextMock = vi.mocked(loadContext);
 const loadDocContextMock = vi.mocked(loadDocContext);
 const sendOutputMock = vi.mocked(sendOutput);
@@ -251,7 +252,14 @@ function makeFakeMcpSession() {
     streamFunction: vi.fn(),
     getApiKey: vi.fn(),
   });
-  const registered = [{ definition: { name: "mcp" } }];
+  const registered = [
+    { definition: { name: "mcp" } },
+    { definition: { name: "lsp_diagnostics" } },
+    { definition: { name: "lsp_hover" } },
+    { definition: { name: "lsp_definition" } },
+    { definition: { name: "lsp_references" } },
+    { definition: { name: "lsp_symbols" } },
+  ];
   return {
     agent,
     extensionRunner: {
@@ -319,6 +327,9 @@ describe("review", () => {
     delete process.env.ZAI_API_KEY;
     delete process.env.PI_REVIEWER_DOC_DIRS;
     delete process.env.PI_REVIEWER_MCP_CONFIG_FILE;
+    delete process.env.PI_REVIEWER_LSP_SERVERS;
+    delete process.env.PI_REVIEWER_LSP_CONFIG_FILE;
+    delete process.env.PI_AGENT_DIR;
     delete process.env.PI_REVIEWER_WEB_SEARCH;
     delete process.env.PI_REVIEWER_SEARCH_PROVIDER;
     delete process.env.PI_REVIEWER_SEARCH_REQUIRED;
@@ -430,7 +441,7 @@ describe("review", () => {
 
   it("registers code_exec only for enabled CI comment reviews", async () => {
     process.env.PI_REVIEWER_CODE_EXEC = "true";
-    await review({ cwd: "/repo", output: "comment" });
+    await review({ cwd: "/repo", output: "comment", lspServers: "none" });
     expect(AgentMock.mock.calls[0][0].initialState.tools).toEqual(
       expect.arrayContaining([expect.objectContaining({ name: "code_exec" })]),
     );
@@ -445,7 +456,7 @@ describe("review", () => {
   });
 
   it("withholds code_exec for comment output when not enabled", async () => {
-    await review({ cwd: "/repo", output: "comment" });
+    await review({ cwd: "/repo", output: "comment", lspServers: "none" });
     expect(AgentMock.mock.calls[0][0].initialState.tools).not.toEqual(
       expect.arrayContaining([expect.objectContaining({ name: "code_exec" })]),
     );
@@ -557,6 +568,94 @@ describe("review", () => {
     expect(fakeMcpSession.agent.state.tools).toEqual(
       expect.arrayContaining([expect.objectContaining({ name: "code_exec" })]),
     );
+  });
+
+  it("creates an extension session with LSP tools for comment reviews by default", async () => {
+    const { sink, records } = createMemorySink();
+    await review({
+      cwd: "/repo",
+      repo: "owner/repo",
+      output: "comment",
+      logger: createLogger({ sink }),
+    });
+
+    expect(createAgentSessionMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cwd: "/repo",
+        tools: expect.arrayContaining(["read", "grep", "find", "submit_review"]),
+        customTools: expect.arrayContaining([expect.objectContaining({ name: "submit_review" })]),
+      }),
+    );
+    expect(fakeMcpSession.setActiveToolsByName).toHaveBeenCalledWith(
+      expect.arrayContaining(["lsp_diagnostics", "lsp_hover", "lsp_definition"]),
+    );
+    expect(AgentMock).not.toHaveBeenCalled();
+    expect(records).toEqual(
+      expect.arrayContaining([expect.objectContaining({ event: "review.lsp.enabled" })]),
+    );
+    const status = records.find(({ event }) => event === "review.tools.status");
+    expect(status?.fields.available).toEqual(
+      expect.arrayContaining(["lsp_diagnostics", "lsp_hover"]),
+    );
+  });
+
+  it("restores the plain agent path when lsp-servers is none", async () => {
+    await review({ cwd: "/repo", repo: "owner/repo", output: "comment", lspServers: "none" });
+
+    expect(createAgentSessionMock).not.toHaveBeenCalled();
+    expect(AgentMock).toHaveBeenCalled();
+  });
+
+  it("fails fast on unknown lsp-servers ids", async () => {
+    await expect(
+      review({ cwd: "/repo", repo: "owner/repo", output: "comment", lspServers: "pyright" }),
+    ).rejects.toThrow('Unknown LSP server "pyright"');
+    expect(createAgentSessionMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps MCP and LSP tools namespaced in a combined session", async () => {
+    const mcpConfig: CiMcpConfig = { mcpServers: { docs: { url: "https://mcp.example/mcp" } } };
+    await review({
+      cwd: "/repo",
+      repo: "owner/repo",
+      mcpConfig,
+      output: "comment",
+      lspServers: "ty",
+    });
+
+    expect(fakeMcpSession.setActiveToolsByName).toHaveBeenCalledWith(
+      expect.arrayContaining(["mcp", "lsp_diagnostics"]),
+    );
+  });
+
+  it("withholds LSP tools from MCP-only sessions", async () => {
+    const mcpConfig: CiMcpConfig = { mcpServers: { docs: { url: "https://mcp.example/mcp" } } };
+    await review({
+      cwd: "/repo",
+      repo: "owner/repo",
+      mcpConfig,
+      output: "comment",
+      lspServers: "none",
+    });
+
+    const names = fakeMcpSession.setActiveToolsByName.mock.calls[0][0] as string[];
+    expect(names).toEqual(expect.arrayContaining(["mcp"]));
+    expect(names).not.toEqual(expect.arrayContaining(["lsp_diagnostics"]));
+  });
+
+  it("cleans up the extension session and restores env when the run fails", async () => {
+    process.env.PI_AGENT_DIR = "sentinel-before";
+    // The session path uses the session's agent, not the Agent constructor.
+    fakeMcpSession.agent.prompt = vi.fn().mockRejectedValue(new Error("boom"));
+    await expect(
+      review({ cwd: "/repo", repo: "owner/repo", output: "comment", lspServers: "ty" }),
+    ).rejects.toThrow("boom");
+    expect(fakeMcpSession.extensionRunner.emit).toHaveBeenCalledWith({
+      type: "session_shutdown",
+      reason: "quit",
+    });
+    expect(fakeMcpSession.dispose).toHaveBeenCalled();
+    expect(process.env.PI_AGENT_DIR).toBe("sentinel-before");
   });
 
   it("passes the configured thinking level to the agent", async () => {
@@ -1465,7 +1564,13 @@ describe("review", () => {
   it("uses comment output target in CI mode", async () => {
     process.env.GITHUB_ACTIONS = "true";
 
-    await review({ cwd: "/repo", pr: 42, githubToken: "token", repo: "owner/repo" });
+    await review({
+      cwd: "/repo",
+      pr: 42,
+      githubToken: "token",
+      repo: "owner/repo",
+      lspServers: "none",
+    });
 
     const state = AgentMock.mock.calls[0][0].initialState;
     expect(state.tools).toEqual(
@@ -1562,7 +1667,13 @@ describe("review", () => {
     process.env.PI_REVIEWER_GH = "true";
     process.env.PI_REVIEWER_GITHUB_SCOPE = "public";
 
-    await review({ cwd: "/repo", pr: 42, githubToken: "token", repo: "owner/repo" });
+    await review({
+      cwd: "/repo",
+      pr: 42,
+      githubToken: "token",
+      repo: "owner/repo",
+      lspServers: "none",
+    });
 
     const state = AgentMock.mock.calls[0][0].initialState;
     expect(state.tools).toEqual(
@@ -1626,7 +1737,13 @@ describe("review", () => {
     });
 
     await expect(
-      review({ cwd: "/repo", pr: 42, githubToken: "token", repo: "owner/repo" }),
+      review({
+        cwd: "/repo",
+        pr: 42,
+        githubToken: "token",
+        repo: "owner/repo",
+        lspServers: "none",
+      }),
     ).rejects.toThrow("Required web search failed");
     expect(sendOutputMock).not.toHaveBeenCalled();
   });
@@ -2232,6 +2349,7 @@ describe("review", () => {
       githubToken: "token",
       repo: "owner/repo",
       output: "comment",
+      lspServers: "none",
     });
 
     expect(agent.prompt).toHaveBeenCalledTimes(2);

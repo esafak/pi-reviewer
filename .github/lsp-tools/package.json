@@ -1,0 +1,9 @@
+{
+  "name": "pi-reviewer-lsp-tools",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Pinned language-server binaries for pi-reviewer's own review workflow. Renovate updates these; the Review step requires them preinstalled (require-preinstalled policy).",
+  "dependencies": {
+    "tsc-rs": "0.7.0"
+  }
+}

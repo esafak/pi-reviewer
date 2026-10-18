@@ -49,7 +49,17 @@ import {
 } from "./github-research/config.js";
 import { createGitHubResearchTools } from "./github-research/tool.js";
 import { probeGhCli } from "./github-research/gh-runner.js";
-import { KNOWN_CI_TOOL_NAMES, MCP_TOOL_NAME } from "./tool-names.js";
+import { KNOWN_CI_TOOL_NAMES, LSP_TOOL_NAMES, MCP_TOOL_NAME } from "./tool-names.js";
+import {
+  restoreAgentDir,
+  resolveLspEntries,
+  setAgentDir,
+  writeTrustedLspConfig,
+  type LspServerOverrides,
+} from "../core/lsp/config.js";
+import { loadPiLspExtension, partitionExtensionTools } from "../core/lsp/extension.js";
+import { probeServerBinaries } from "../core/lsp/probe.js";
+import { resolveLspRoots } from "../core/lsp/roots.js";
 import type { CiMcpConfig } from "./mcp-config.js";
 import { formatServerNamespace, getServerPrefix } from "pi-mcp-adapter/types";
 import { log } from "./log.js";
@@ -142,6 +152,10 @@ export interface ReviewOptions {
   skillDirs?: string[]; // dirs to scan for skills; defaults to pi-style set, empty = disable
   mcpConfig?: CiMcpConfig;
   mcpServerCwd?: string;
+  /** Raw `lsp-servers` value (comma-separated preset ids, or "none"). CI-comment only. */
+  lspServers?: string;
+  /** Trusted per-id LSP overrides, loaded from the default branch. CI-comment only. */
+  lspOverrides?: LspServerOverrides;
   fromSha?: string;
   batchMarker?: string;
   activeFindings?: ActiveFindingContext[];
@@ -552,6 +566,15 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
       "review.mcp.disabled",
       "MCP disabled; only available for CI comment-output reviews",
     );
+  // LSP is CI-comment-only like MCP: local terminal/file runs never spawn
+  // servers. Unknown ids without a trusted definition fail fast here so a
+  // typo can never silently narrow coverage for one language only.
+  const lspEntries = resolveLspEntries(target, options.lspServers, options.lspOverrides ?? {});
+  if (options.lspServers !== undefined && target !== "comment")
+    logger.warn(
+      "review.lsp.disabled",
+      "LSP disabled; only available for CI comment-output reviews",
+    );
 
   const { diff, source, warning, skippedFiles, changedFiles } = await resolveDiff({
     pr: options.pr,
@@ -566,6 +589,52 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
   if (warning) logger.warn("review.diff.warning", warning);
 
   const diffFiles = extractDiffFiles(diff);
+  // Root diagnostic: which workspace root each changed file resolves to per
+  // server, using pi-lsp's own matching. A file that matches no server is
+  // reviewed from text alone; a file whose markers are missing skips that
+  // server with a warning naming the expected markers.
+  if (lspEntries.length > 0) {
+    const roots = await resolveLspRoots(cwd, diffFiles, lspEntries);
+    for (const match of roots.matches) {
+      logger.info("review.lsp.root", "LSP workspace root", {
+        server: match.id,
+        root: match.root,
+        files: match.files.length,
+      });
+    }
+    for (const skipped of roots.skipped) {
+      logger.warn(
+        "review.lsp.root.missing",
+        "LSP root markers not found; language skipped for file",
+        {
+          server: skipped.server,
+          file: skipped.file,
+          reason: skipped.reason,
+        },
+      );
+    }
+    for (const rootWarning of roots.warnings) {
+      logger.warn("review.lsp.root.warning", rootWarning);
+    }
+    // Startup availability per server: operators see what will run and what
+    // was skipped before the agent starts. Binaries resolve per matched
+    // workspace root, exactly as pi-lsp will spawn them; missing ones
+    // warn-and-skip per the require-preinstalled policy.
+    for (const probe of await probeServerBinaries(lspEntries, { cwd, roots: roots.matches })) {
+      if (probe.found) {
+        logger.info("review.lsp.server.available", "LSP server available", {
+          server: probe.id,
+          bin: probe.bin,
+        });
+      } else {
+        logger.warn("review.lsp.server.missing", "LSP server missing; language skipped", {
+          server: probe.id,
+          bin: probe.bin,
+          hint: probe.installHint,
+        });
+      }
+    }
+  }
   const context = await loadContext({ cwd, diffFiles });
   const loadedPaths = mergeContextFiles(context).map((f) => f.path);
   if (loadedPaths.length > 0) {
@@ -678,6 +747,7 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
       ...codeExecTools,
     ].map((tool) => tool.name);
     if (mcpConfig) available.push(MCP_TOOL_NAME);
+    if (lspEntries.length > 0) available.push(...LSP_TOOL_NAMES);
     logger.info("review.tools.status", "Tool availability", {
       available,
       unavailable: KNOWN_CI_TOOL_NAMES.filter((name) => !available.includes(name)),
@@ -771,43 +841,50 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
   };
 
   let agent: Agent;
-  let closeMcpSession: (() => Promise<void>) | undefined;
+  let closeExtensionSession: (() => Promise<void>) | undefined;
   const registeredMcpTools = new Set<string>();
+  const registeredLspTools = new Set<string>();
   const mcpToolCalls = new Map<string, McpToolIdentity>();
   const mcpOutputArtifacts = new Set<string>();
-  let restoreMcpEnvironment = () => {};
+  let restoreExtensionEnvironment = () => {};
   const failedMcpCalls = new Map<string, McpFailureEntry>();
   const knownMcpServers = new Set<string>(mcpConfig ? Object.keys(mcpConfig.mcpServers) : []);
-  if (mcpConfig) {
+  // The extension session path serves both MCP and LSP. It exists whenever
+  // either is configured; otherwise the agent runs without extensions.
+  const needsExtensionSession = Boolean(mcpConfig) || lspEntries.length > 0;
+  if (needsExtensionSession) {
     const agentDir = await mkdtemp(path.join(tmpdir(), "pi-reviewer-agent-"));
     let session: Awaited<ReturnType<typeof createAgentSession>>["session"] | undefined;
     try {
       const previousMcpOutputGuard = process.env.MCP_OUTPUT_GUARD;
       const previousMcpUiDebug = process.env.MCP_UI_DEBUG;
-      process.env.MCP_OUTPUT_GUARD = "1";
-      process.env.MCP_UI_DEBUG = "0";
-      restoreMcpEnvironment = () => {
+      if (mcpConfig) {
+        process.env.MCP_OUTPUT_GUARD = "1";
+        process.env.MCP_UI_DEBUG = "0";
+      }
+      // pi-lsp reads its trusted global config from PI_AGENT_DIR. Point it at
+      // the per-run agent dir so config, trust store, and runtime state are
+      // isolated and cleaned up with the session.
+      const previousPiAgentDir = setAgentDir(agentDir);
+      restoreExtensionEnvironment = () => {
         if (previousMcpOutputGuard === undefined) delete process.env.MCP_OUTPUT_GUARD;
         else process.env.MCP_OUTPUT_GUARD = previousMcpOutputGuard;
         if (previousMcpUiDebug === undefined) delete process.env.MCP_UI_DEBUG;
         else process.env.MCP_UI_DEBUG = previousMcpUiDebug;
+        restoreAgentDir(previousPiAgentDir);
       };
-      // The adapter ships Pi-extension TypeScript sources, so keep the import
-      // dynamic and untyped: it is loaded only for opted-in CI reviews.
-      const adapterPackage = "pi-mcp-adapter";
-      const { createMcpAdapter } = (await import(adapterPackage)) as {
-        createMcpAdapter(options: { config: CiMcpConfig }): unknown;
-      };
-      const resourceLoader = new DefaultResourceLoader({
-        cwd,
-        agentDir,
-        noExtensions: true,
-        noSkills: true,
-        noPromptTemplates: true,
-        noThemes: true,
-        noContextFiles: true,
-        systemPrompt: effectiveSystemPrompt,
-        extensionFactories: [
+      if (lspEntries.length > 0) {
+        await writeTrustedLspConfig(agentDir, lspEntries);
+      }
+      const extensionFactories: never[] = [];
+      if (mcpConfig) {
+        // The adapter ships Pi-extension TypeScript sources, so keep the import
+        // dynamic and untyped: it is loaded only for opted-in CI reviews.
+        const adapterPackage = "pi-mcp-adapter";
+        const { createMcpAdapter } = (await import(adapterPackage)) as {
+          createMcpAdapter(options: { config: CiMcpConfig }): unknown;
+        };
+        extensionFactories.push(
           createMcpAdapter({
             config: {
               ...mcpConfig,
@@ -844,7 +921,23 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
               ),
             },
           }) as never,
-        ],
+        );
+      }
+      // pi-lsp ships untyped TypeScript sources (see loadPiLspExtension), so
+      // it is loaded only when LSP is enabled for CI comment reviews.
+      if (lspEntries.length > 0) {
+        extensionFactories.push((await loadPiLspExtension()) as never);
+      }
+      const resourceLoader = new DefaultResourceLoader({
+        cwd,
+        agentDir,
+        noExtensions: true,
+        noSkills: true,
+        noPromptTemplates: true,
+        noThemes: true,
+        noContextFiles: true,
+        systemPrompt: effectiveSystemPrompt,
+        extensionFactories,
       });
       await resourceLoader.reload();
       // Reviewer tools must be registered as session custom tools: the session
@@ -856,29 +949,49 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
         sessionManager: SessionManager.inMemory(),
         resourceLoader,
         tools: [
-          ...new Set(["read", "grep", "find", "ls", "mcp", ...baseTools.map((tool) => tool.name)]),
+          ...new Set([
+            "read",
+            "grep",
+            "find",
+            "ls",
+            ...(mcpConfig ? ["mcp"] : []),
+            ...baseTools.map((tool) => tool.name),
+          ]),
         ],
         customTools: baseTools,
       });
       session = created.session;
-      const mcpToolNames = new Set(
+      // Extension tools are namespaced by origin: pi-lsp names every tool
+      // `lsp_*`; everything else registered belongs to MCP. The partition
+      // keeps LSP failures out of the MCP failure accounting below
+      // (failedMcpCalls, DeepWiki veto).
+      const { lsp: lspToolNames, mcp: mcpToolNames } = partitionExtensionTools(
         session.extensionRunner.getAllRegisteredTools().map(({ definition }) => definition.name),
       );
       for (const name of mcpToolNames) registeredMcpTools.add(name);
-      if (mcpToolNames.size === 0)
+      for (const name of lspToolNames) registeredLspTools.add(name);
+      if (mcpConfig && mcpToolNames.length === 0)
         throw new Error("MCP adapter did not register any tools for the configured servers");
+      if (lspEntries.length > 0 && lspToolNames.length === 0)
+        throw new Error("pi-lsp did not register any tools");
       session.setActiveToolsByName([
         ...new Set([
           "read",
           "grep",
           "find",
-          ...mcpToolNames,
+          // Each family is gated on its own config: an unrelated extension's
+          // `lsp_*` tool must not leak into an MCP-only review or vice versa.
+          ...(mcpConfig ? mcpToolNames : []),
+          ...(lspEntries.length > 0 ? lspToolNames : []),
           ...baseTools.map((tool) => tool.name),
         ]),
       ]);
-      const mcpTools = session.agent.state.tools.filter((tool) => mcpToolNames.has(tool.name));
-      if (mcpTools.length === 0)
+      const mcpTools = session.agent.state.tools.filter((tool) => mcpToolNames.includes(tool.name));
+      if (mcpConfig && mcpTools.length === 0)
         throw new Error("MCP adapter tools were not enabled in the review agent");
+      const lspTools = session.agent.state.tools.filter((tool) => lspToolNames.includes(tool.name));
+      if (lspEntries.length > 0 && lspTools.length === 0)
+        throw new Error("LSP tools were not enabled in the review agent");
 
       agent = session.agent;
       // The system prompt is seeded via the resource loader's leading system
@@ -888,7 +1001,7 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
       agent.state.thinkingLevel = options.thinking ?? "off";
       agent.streamFunction = models.streamSimple.bind(models);
       agent.getApiKey = apiKey;
-      closeMcpSession = async () => {
+      closeExtensionSession = async () => {
         try {
           await session?.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
         } finally {
@@ -905,13 +1018,19 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
               try {
                 await rm(agentDir, { recursive: true, force: true });
               } finally {
-                restoreMcpEnvironment();
+                restoreExtensionEnvironment();
               }
             }
           }
         }
       };
-      logger.info("review.mcp.enabled", "MCP enabled", { toolCount: mcpToolNames.size });
+      if (mcpConfig)
+        logger.info("review.mcp.enabled", "MCP enabled", { toolCount: registeredMcpTools.size });
+      if (lspEntries.length > 0)
+        logger.info("review.lsp.enabled", "LSP enabled", {
+          servers: lspEntries.map((entry) => entry.id),
+          toolCount: registeredLspTools.size,
+        });
     } catch (error) {
       try {
         if (session) {
@@ -924,7 +1043,7 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
         try {
           await rm(agentDir, { recursive: true, force: true });
         } finally {
-          restoreMcpEnvironment();
+          restoreExtensionEnvironment();
         }
       }
       throw error;
@@ -1390,7 +1509,7 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
     });
   } finally {
     unsubscribe?.();
-    await closeMcpSession?.();
+    await closeExtensionSession?.();
   }
 }
 

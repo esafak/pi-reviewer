@@ -71,7 +71,7 @@ Theme, view mode, default model, and thinking level are remembered across review
 
 ## CI Agent
 
-Runs on PR lifecycle events via GitHub Actions. Reviews are grouped by event batch, with authenticated GitHub review markers and durable inline-thread reconciliation; no LLM session replay is required. CI can opt into user-configured MCP servers with the `mcp-config-file` action input; the file is loaded from the repository's default branch and credentials are passed through environment variables. CI comment reviews post a collapsed What/Why/Risk PR summary (with an opt-in Mermaid diagram) on the PR's first review; set `summary: 'false'` to opt out. See [CI.md](./CI.md) for setup and policy.
+Runs on PR lifecycle events via GitHub Actions. Reviews are grouped by event batch, with authenticated GitHub review markers and durable inline-thread reconciliation; no LLM session replay is required. CI can opt into user-configured MCP servers with the `mcp-config-file` action input; the file is loaded from the repository's default branch and credentials are passed through environment variables. CI comment reviews also get best-effort semantic context from preinstalled LSP servers (six presets; `lsp-servers: 'none'` disables); see [CI.md](./CI.md) for setup and policy. CI comment reviews post a collapsed What/Why/Risk PR summary (with an opt-in Mermaid diagram) on the PR's first review; set `summary: 'false'` to opt out. See [CI.md](./CI.md) for setup and policy.
 
 ---
 

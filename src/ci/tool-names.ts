@@ -9,6 +9,20 @@ export const GITHUB_READ_TOOL_NAME = "github_read";
 export const GITHUB_GREP_TOOL_NAME = "github_grep";
 export const CODE_EXEC_TOOL_NAME = "code_exec";
 export const MCP_TOOL_NAME = "mcp";
+export const LSP_DIAGNOSTICS_TOOL_NAME = "lsp_diagnostics";
+export const LSP_HOVER_TOOL_NAME = "lsp_hover";
+export const LSP_DEFINITION_TOOL_NAME = "lsp_definition";
+export const LSP_REFERENCES_TOOL_NAME = "lsp_references";
+export const LSP_SYMBOLS_TOOL_NAME = "lsp_symbols";
+
+/** pi-lsp registers exactly these tools; the startup diagnostic lists the active subset. */
+export const LSP_TOOL_NAMES = [
+  LSP_DIAGNOSTICS_TOOL_NAME,
+  LSP_HOVER_TOOL_NAME,
+  LSP_DEFINITION_TOOL_NAME,
+  LSP_REFERENCES_TOOL_NAME,
+  LSP_SYMBOLS_TOOL_NAME,
+] as const;
 
 export const KNOWN_CI_TOOL_NAMES = [
   WEB_SEARCH_TOOL_NAME,
@@ -19,6 +33,7 @@ export const KNOWN_CI_TOOL_NAMES = [
   GITHUB_GREP_TOOL_NAME,
   CODE_EXEC_TOOL_NAME,
   MCP_TOOL_NAME,
+  ...LSP_TOOL_NAMES,
 ] as const;
 
 export type CiToolName = (typeof KNOWN_CI_TOOL_NAMES)[number];
