@@ -260,23 +260,10 @@ function makeFakeMcpSession() {
     { definition: { name: "lsp_references" } },
     { definition: { name: "lsp_symbols" } },
   ];
-  // Turn-scoped activation like production ("changes take effect on the
-  // next agent turn"): setActiveToolsByName only stages names; the pending
-  // set materializes into state.tools when the next prompt (turn) runs. A
-  // synchronous state.tools read right after activation therefore sees
-  // nothing — exactly the false "tools were not enabled" failure this
-  // guards against. Do not "simplify" this back to a synchronous update.
-  let pendingNames: string[] | undefined;
-  const innerPrompt = agent.prompt;
-  agent.prompt = vi.fn(async (...args: unknown[]) => {
-    if (pendingNames) {
-      agent.state.tools = pendingNames.map((name) =>
-        name === "mcp" ? mcpTool : { name, label: name, execute: vi.fn() },
-      );
-      pendingNames = undefined;
-    }
-    return (innerPrompt as (...a: unknown[]) => Promise<unknown>)(...args);
-  });
+  // setActiveToolsByName assigns state.tools synchronously from the
+  // registry (verified against the installed SDK), mirroring production.
+  // The allowlist itself is not modeled here - see lsp-activation.test.ts
+  // for the real-session proof that the tools list gates activation.
   return {
     agent,
     extensionRunner: {
@@ -284,7 +271,10 @@ function makeFakeMcpSession() {
       emit: vi.fn().mockResolvedValue(undefined),
     },
     setActiveToolsByName: vi.fn((names: string[]) => {
-      pendingNames = names;
+      // Fake registry: every activated name resolves to a tool definition.
+      agent.state.tools = names.map((name) =>
+        name === "mcp" ? mcpTool : { name, label: name, execute: vi.fn() },
+      );
     }),
     dispose: vi.fn(),
   };

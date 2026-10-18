@@ -957,6 +957,11 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
             "find",
             "ls",
             ...(mcpConfig ? ["mcp"] : []),
+            // The tools list is also the registration allowlist: names
+            // missing here are filtered from the tool registry, so the
+            // session could never activate them below even though their
+            // extension registered them.
+            ...(lspEntries.length > 0 ? LSP_TOOL_NAMES : []),
             ...baseTools.map((tool) => tool.name),
           ]),
         ],
@@ -988,12 +993,16 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
           ...baseTools.map((tool) => tool.name),
         ]),
       ]);
-      // Activation is turn-scoped by library contract ("changes take effect
-      // on the next agent turn"), so agent.state.tools cannot confirm it
-      // here — reading it synchronously always yields nothing, which is
-      // exactly the false "not enabled" failure seen in CI. Registration
-      // (checked above) plus naming the tools active is the whole
-      // guarantee; the first agent turn picks them up from the registry.
+      // setActiveToolsByName assigns agent.state.tools synchronously via
+      // the registry, so a missing tool here means the allowlist filtered
+      // it at session creation — exactly the "tools were not enabled"
+      // failure seen in CI before lsp_* joined the tools list above.
+      const mcpTools = session.agent.state.tools.filter((tool) => mcpToolNames.includes(tool.name));
+      if (mcpConfig && mcpTools.length === 0)
+        throw new Error("MCP adapter tools were not enabled in the review agent");
+      const lspTools = session.agent.state.tools.filter((tool) => lspToolNames.includes(tool.name));
+      if (lspEntries.length > 0 && lspTools.length === 0)
+        throw new Error("LSP tools were not enabled in the review agent");
 
       agent = session.agent;
       // The system prompt is seeded via the resource loader's leading system
