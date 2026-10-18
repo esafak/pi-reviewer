@@ -143,14 +143,37 @@ describe("pi-lsp stock lifecycle", () => {
         // the child has processed the messages). A bounded reaping check
         // follows, so the no-orphans property is still asserted — the marker
         // only upgrades the failure from silent to diagnosable.
-        for (const fn of handlers.get("session_shutdown") ?? []) await fn();
-        const sequence = await waitForMarker(path.join(dir, "shutdown-sequence"), 10_000);
-        expect(sequence).toMatch(/^shutdown\nexit/);
-        expect(waitForExit(stubPath, 12_000)).toBe(true);
+        let shutdownAttempted = false;
+        try {
+          for (const fn of handlers.get("session_shutdown") ?? []) await fn();
+          shutdownAttempted = true;
+          const sequence = await waitForMarker(path.join(dir, "shutdown-sequence"), 10_000);
+          expect(sequence).toMatch(/^shutdown\nexit/);
+          expect(waitForExit(stubPath, 12_000)).toBe(true);
+        } finally {
+          // Guarantee: a graceful shutdown is always attempted, even when an
+          // earlier assertion failed — but it must never mask that failure.
+          // The hard-kill backstop then ensures the exact per-run stub copy
+          // cannot leak past this test whatever happened above.
+          if (!shutdownAttempted) {
+            try {
+              for (const fn of handlers.get("session_shutdown") ?? []) await fn();
+            } catch {
+              // Original failure (if any) takes precedence.
+            }
+          }
+          if (stubRunning(stubPath)) {
+            try {
+              execSync(`pkill -9 -f ${stubPath}`, { stdio: "ignore" });
+            } catch {
+              // Already gone.
+            }
+          }
+        }
       });
     } finally {
       await rm(dir, { recursive: true, force: true });
       await rm(agentDir, { recursive: true, force: true });
     }
-  }, 30_000);
+  }, 45_000);
 });
