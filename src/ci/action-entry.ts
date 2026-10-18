@@ -25,6 +25,7 @@ import {
 import { fetchReplySnapshot, handleReply } from "./reply.js";
 import { recoverSynchronizeReplies } from "./recovery.js";
 import { loadMcpConfigFromBase, resolveDefaultBranchSha } from "./mcp-config.js";
+import { loadLspOverridesFromBase, type LspServerOverrides } from "../core/lsp/config.js";
 import { log } from "./log.js";
 
 async function readEvent(): Promise<unknown> {
@@ -374,6 +375,21 @@ async function main(): Promise<void> {
     trustedDefaultBranchSha = resolveDefaultBranchSha(process.cwd(), defaultBranch, gitAuthArgs());
     mcpConfig = loadMcpConfigFromBase(process.cwd(), trustedDefaultBranchSha, mcpConfigPath);
   }
+  const lspConfigPath = process.env.PI_REVIEWER_LSP_CONFIG_FILE;
+  let lspOverrides: LspServerOverrides = {};
+  if (lspConfigPath?.trim()) {
+    if (!trustedDefaultBranchSha) {
+      const defaultBranch = repositoryDefaultBranch(payload);
+      if (!defaultBranch)
+        throw new Error("Cannot load lsp-config-file: repository default branch is unavailable");
+      trustedDefaultBranchSha = resolveDefaultBranchSha(
+        process.cwd(),
+        defaultBranch,
+        gitAuthArgs(),
+      );
+    }
+    lspOverrides = loadLspOverridesFromBase(process.cwd(), trustedDefaultBranchSha, lspConfigPath);
+  }
   const minSeverityRaw = process.env.MIN_SEVERITY?.toUpperCase();
   const minSeverity =
     minSeverityRaw === "CRITICAL" || minSeverityRaw === "WARN" || minSeverityRaw === "INFO"
@@ -439,6 +455,8 @@ async function main(): Promise<void> {
         summaryOnly: true,
         mcpConfig,
         mcpServerCwd: trustedMcpWorktree,
+        lspServers: process.env.PI_REVIEWER_LSP_SERVERS,
+        lspOverrides,
       });
       await applySummaryRegeneration({
         github,
@@ -480,6 +498,8 @@ async function main(): Promise<void> {
       isFirstReview: !hasPriorBodiedReview,
       mcpConfig,
       mcpServerCwd: trustedMcpWorktree,
+      lspServers: process.env.PI_REVIEWER_LSP_SERVERS,
+      lspOverrides,
     });
     if (event.kind === "synchronize") {
       const latest = await github.getPullRequest(repo, event.pr!);

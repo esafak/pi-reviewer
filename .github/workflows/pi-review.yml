@@ -87,6 +87,16 @@ jobs:
           run-install: false
           node-manager: false
 
+      # Dogfood LSP review: preinstall the TS language server (tsc-rs) so the
+      # Review step can run it. Pinned in .github/lsp-tools/package.json;
+      # Renovate updates it. Mirrors the require-preinstalled policy: the
+      # workflow owns binaries, never the action.
+      - name: Install LSP servers
+        shell: bash
+        run: |
+          npm ci --prefix .github/lsp-tools --no-audit --no-fund
+          echo "$GITHUB_WORKSPACE/.github/lsp-tools/node_modules/.bin" >> "$GITHUB_PATH"
+
       - name: Select provider API key
         shell: bash
         env:
