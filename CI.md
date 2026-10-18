@@ -222,11 +222,14 @@ whatever the server pushed.)
 Six preset servers cover the common languages, all Rust-based where mature:
 `ty` (Python), `markdown-oxide` (Markdown), `rust-analyzer` (Rust), `taplo`
 (TOML — requires a `--features lsp` build), `gopls` (Go), `tsc-rs`
-(TypeScript). Unset `lsp-servers` means all six, best-effort: each language is
-skipped with a warning when its binary is absent, so reviews work with zero
-config on preinstalled runners. Set `lsp-servers: 'none'` to disable LSP
-entirely. A comma-separated subset selects specific servers; an unknown id
-with no config entry fails fast.
+(TypeScript). Unset `lsp-servers` means all six, best-effort — plus any
+custom servers defined in `lsp-config-file`, which run without further
+configuration. Each language is skipped with a warning when its binary is
+absent, so reviews work with zero config on preinstalled runners. Set
+`lsp-servers: 'none'` to disable LSP entirely. A comma-separated subset
+selects specific servers, but an explicit selection must include every
+config-file id: leftover entries fail fast instead of being silently
+ignored.
 
 Binaries must be preinstalled by the workflow — the action never installs,
 fetches, or auto-downloads servers. This repository's own review workflow

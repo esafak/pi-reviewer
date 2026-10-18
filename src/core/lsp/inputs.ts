@@ -10,17 +10,18 @@ export type LspServerSelection = { disabled: true } | { disabled: false; ids: st
 
 /**
  * Parses the `lsp-servers` input (or its env equivalent). Unset/blank means
- * the best-effort default: every preset server. `extraIds` are trusted
- * config-file ids, accepted alongside presets so custom servers are
- * selectable; unknown ids without a trusted definition fail fast at build
- * time. `none` disables LSP entirely.
+ * the best-effort default: every preset server plus every trusted
+ * config-file id, so a config file defining a custom server works without
+ * enumerating presets. `extraIds` are trusted config-file ids, accepted
+ * alongside presets so custom servers are selectable; unknown ids without
+ * a trusted definition fail fast at build time. `none` disables LSP entirely.
  */
 export function parseLspServers(
   raw: string | undefined,
   extraIds: readonly string[] = [],
 ): LspServerSelection {
   const value = (raw ?? "").trim();
-  if (value === "") return { disabled: false, ids: [...LSP_PRESET_IDS] };
+  if (value === "") return { disabled: false, ids: [...new Set([...LSP_PRESET_IDS, ...extraIds])] };
   if (value.toLowerCase() === LSP_SERVERS_NONE) return { disabled: true };
   const ids = value
     .split(/[\n,]/)

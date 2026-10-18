@@ -11,9 +11,17 @@ describe("parseLspServers", () => {
     }
   });
 
-  it("disables LSP on exactly 'none'", () => {
+  it("includes trusted custom ids in the blank default, deduped", () => {
+    for (const raw of [undefined, "", "   "] as const) {
+      const selection = parseLspServers(raw, ["custom", "ty"]);
+      expect(selection.ids).toEqual([...LSP_PRESET_IDS, "custom"]);
+    }
+  });
+
+  it("disables LSP on exactly 'none' even with trusted extras", () => {
     expect(parseLspServers("none")).toEqual({ disabled: true });
     expect(parseLspServers("  NONE  ")).toEqual({ disabled: true });
+    expect(parseLspServers("none", ["custom"])).toEqual({ disabled: true });
   });
 
   it("parses a comma-separated subset, deduped", () => {

@@ -118,6 +118,35 @@ describe("resolveLspEntries", () => {
     });
     expect(entries).toMatchObject([{ id: "custom", bin: "custom-ls" }]);
   });
+
+  it("runs custom config-file servers under the blank default without enumerating presets", () => {
+    const entries = resolveLspEntries("comment", undefined, {
+      custom: { bin: "custom-ls", include: ["**/*.x"], rootMarkers: [".git"] },
+    });
+    expect(entries.map((entry) => entry.id)).toEqual(
+      expect.arrayContaining(["ty", "tsc-rs", "custom"]),
+    );
+  });
+
+  it("skips disabled custom entries under the blank default without failing", () => {
+    const entries = resolveLspEntries("comment", "   ", {
+      // No bin: enabled:false must bypass custom-definition validation.
+      custom: { enabled: false },
+    });
+    expect(entries.map((entry) => entry.id)).not.toContain("custom");
+  });
+
+  it("fails fast on malformed custom entries under the blank default", () => {
+    expect(() => resolveLspEntries("comment", undefined, { custom: { enabled: true } })).toThrow(
+      'Unknown LSP server "custom"',
+    );
+  });
+
+  it("still rejects config entries outside an explicit selection", () => {
+    expect(() => resolveLspEntries("comment", "ty", { gopls: { bin: "gopls" } })).toThrow(
+      "does not match any selected server",
+    );
+  });
 });
 
 describe("loadLspOverridesFromBase", () => {
