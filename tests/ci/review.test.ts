@@ -96,6 +96,7 @@ import { sendOutput } from "../../src/core/output.js";
 import { createReviewTool } from "../../src/core/review-tool.js";
 import { createReplyTool } from "../../src/core/reply-tool.js";
 import type { CiMcpConfig } from "../../src/ci/mcp-config.js";
+import { LSP_TOOL_NAMES } from "../../src/ci/tool-names.js";
 import {
   ALLOWED_REACTIONS,
   buildReplyPrompt,
@@ -594,6 +595,11 @@ describe("review", () => {
       expect.arrayContaining(["lsp_diagnostics", "lsp_hover", "lsp_definition"]),
     );
     expect(AgentMock).not.toHaveBeenCalled();
+    // The session tools allowlist is also the registration gate: lsp_*
+    // names must be present or the registry filters them out.
+    expect(createAgentSessionMock).toHaveBeenCalledWith(
+      expect.objectContaining({ tools: expect.arrayContaining([...LSP_TOOL_NAMES]) }),
+    );
     expect(records).toEqual(
       expect.arrayContaining([expect.objectContaining({ event: "review.lsp.enabled" })]),
     );
@@ -666,6 +672,9 @@ describe("review", () => {
     const names = fakeMcpSession.setActiveToolsByName.mock.calls[0][0] as string[];
     expect(names).toEqual(expect.arrayContaining(["mcp"]));
     expect(names).not.toEqual(expect.arrayContaining(["lsp_diagnostics"]));
+    expect(createAgentSessionMock).toHaveBeenCalledWith(
+      expect.objectContaining({ tools: expect.not.arrayContaining(["lsp_diagnostics"]) }),
+    );
   });
 
   it("cleans up the extension session and restores env when the run fails", async () => {
