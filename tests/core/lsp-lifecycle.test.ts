@@ -53,9 +53,13 @@ describe("pi-lsp stock lifecycle", () => {
   it("resolves definitions and reads navigation-warmed diagnostics, and tears down the server on session shutdown", async () => {
     const dir = await mkdtemp(path.join(tmpdir(), "pi-reviewer-lsp-lifecycle-"));
     const agentDir = await mkdtemp(path.join(tmpdir(), "pi-reviewer-lsp-agent-"));
+    // Hoisted for the cleanup boundary below: the outer finally must reach
+    // the stub and the session handlers no matter which assertion failed.
+    // Unique stub copy per run so pgrep cannot match another run.
+    const stubPath = path.join(dir, "stub-server.mjs");
+    const handlers = new Map<string, ((...args: never[]) => Promise<unknown>)[]>();
+    let shutdownAttempted = false;
     try {
-      // Unique stub copy per run so pgrep cannot match another run.
-      const stubPath = path.join(dir, "stub-server.mjs");
       await writeFile(stubPath, await readFile(STUB_SOURCE, "utf8"), { mode: 0o755 });
       chmodSync(stubPath, 0o755);
       await writeFile(path.join(dir, "lsp-stub-root"), "");
@@ -63,7 +67,6 @@ describe("pi-lsp stock lifecycle", () => {
       await writeFile(mainFile, "hello\n");
 
       const tools = new Map<string, { execute: (...args: never[]) => Promise<unknown> }>();
-      const handlers = new Map<string, ((...args: never[]) => Promise<unknown>)[]>();
       await withIsolatedAgentDir(agentDir, async () => {
         await writeTrustedLspConfig(agentDir, [
           {
@@ -143,35 +146,31 @@ describe("pi-lsp stock lifecycle", () => {
         // the child has processed the messages). A bounded reaping check
         // follows, so the no-orphans property is still asserted — the marker
         // only upgrades the failure from silent to diagnosable.
-        let shutdownAttempted = false;
-        try {
-          for (const fn of handlers.get("session_shutdown") ?? []) await fn();
-          shutdownAttempted = true;
-          const sequence = await waitForMarker(path.join(dir, "shutdown-sequence"), 10_000);
-          expect(sequence).toMatch(/^shutdown\nexit/);
-          expect(waitForExit(stubPath, 12_000)).toBe(true);
-        } finally {
-          // Guarantee: a graceful shutdown is always attempted, even when an
-          // earlier assertion failed — but it must never mask that failure.
-          // The hard-kill backstop then ensures the exact per-run stub copy
-          // cannot leak past this test whatever happened above.
-          if (!shutdownAttempted) {
-            try {
-              for (const fn of handlers.get("session_shutdown") ?? []) await fn();
-            } catch {
-              // Original failure (if any) takes precedence.
-            }
-          }
-          if (stubRunning(stubPath)) {
-            try {
-              execSync(`pkill -9 -f ${stubPath}`, { stdio: "ignore" });
-            } catch {
-              // Already gone.
-            }
-          }
-        }
+        for (const fn of handlers.get("session_shutdown") ?? []) await fn();
+        shutdownAttempted = true;
+        const sequence = await waitForMarker(path.join(dir, "shutdown-sequence"), 10_000);
+        expect(sequence).toMatch(/^shutdown\nexit/);
+        expect(waitForExit(stubPath, 12_000)).toBe(true);
       });
     } finally {
+      // Guarantee: a graceful shutdown is always attempted, even when an
+      // earlier assertion failed — but it must never mask that failure. The
+      // hard-kill backstop then ensures the exact per-run stub copy cannot
+      // leak past this test whatever happened above.
+      if (!shutdownAttempted) {
+        try {
+          for (const fn of handlers.get("session_shutdown") ?? []) await fn();
+        } catch {
+          // Original failure (if any) takes precedence.
+        }
+      }
+      if (stubRunning(stubPath)) {
+        try {
+          execSync(`pkill -9 -f ${stubPath}`, { stdio: "ignore" });
+        } catch {
+          // Already gone.
+        }
+      }
       await rm(dir, { recursive: true, force: true });
       await rm(agentDir, { recursive: true, force: true });
     }
