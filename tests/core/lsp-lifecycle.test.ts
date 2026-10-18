@@ -1,5 +1,5 @@
-import { execSync, execFileSync } from "node:child_process";
-import { chmodSync } from "node:fs";
+import { execFileSync, execSync } from "node:child_process";
+import { chmodSync, readFileSync } from "node:fs";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -29,6 +29,26 @@ function waitForExit(stubPath: string, timeoutMs: number): boolean {
   }
 }
 
+/**
+ * Handler resolution does not imply the child has processed the messages:
+ * poll the ordered marker file with a bounded deadline instead of reading
+ * it once. Returns whatever was recorded (possibly empty) so failures show
+ * the actual trigger sequence.
+ */
+async function waitForMarker(markerPath: string, timeoutMs: number): Promise<string> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    let text = "";
+    try {
+      text = readFileSync(markerPath, "utf8");
+    } catch {
+      // Not written yet.
+    }
+    if (text.includes("shutdown\nexit") || Date.now() > deadline) return text;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+}
+
 describe("pi-lsp stock lifecycle", () => {
   it("resolves definitions and reads navigation-warmed diagnostics, and tears down the server on session shutdown", async () => {
     const dir = await mkdtemp(path.join(tmpdir(), "pi-reviewer-lsp-lifecycle-"));
@@ -55,6 +75,10 @@ describe("pi-lsp stock lifecycle", () => {
             languageIdByExtension: { ".stub": "stub" },
             startupTimeoutMs: 15_000,
             diagnosticsWaitMs: 500,
+            // Spawn-time env (not process.env mutation: the server inherits
+            // the environment at spawn, so the marker path must travel in
+            // the server entry itself).
+            env: { STUB_SHUTDOWN_MARKER_FILE: path.join(dir, "shutdown-sequence") },
           },
         ]);
         const extension = await loadPiLspExtension();
@@ -113,10 +137,15 @@ describe("pi-lsp stock lifecycle", () => {
         expect(result.content[0]?.text).toContain("stub diagnostic");
         expect(stubRunning(stubPath)).toBe(true);
 
-        // Shutdown must end the server through the protocol path (the stub
-        // honors `exit`; SIGTERM stays ignored). Stock pi-lsp sends
-        // shutdown + exit, then falls back to signals.
+        // Shutdown must deliver the protocol goodbye in order: the stub
+        // appends each trigger to the marker file, and the test polls for
+        // the shutdown-then-exit prefix (handler resolution does not imply
+        // the child has processed the messages). A bounded reaping check
+        // follows, so the no-orphans property is still asserted — the marker
+        // only upgrades the failure from silent to diagnosable.
         for (const fn of handlers.get("session_shutdown") ?? []) await fn();
+        const sequence = await waitForMarker(path.join(dir, "shutdown-sequence"), 10_000);
+        expect(sequence).toMatch(/^shutdown\nexit/);
         expect(waitForExit(stubPath, 12_000)).toBe(true);
       });
     } finally {

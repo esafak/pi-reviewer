@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 // Test-only stub LSP server: answers definition with a fixed location and
-// publishes one fake diagnostic (naming the file) on didOpen. Exits on the
-// shutdown request, the `exit` notification, or stdio close — whichever
-// comes first — but ignores SIGTERM on purpose and keeps the event loop
-// alive past stdio teardown (ref'd interval), so the test proves teardown
-// through the protocol path rather than the signal path. Speaks LSP over stdio with Content-Length framing.
+// publishes one fake diagnostic (naming the file) on didOpen. Records every
+// shutdown trigger in receipt order to a marker file (shutdown request,
+// exit notification, stdio close) and terminates on the exit notification;
+// SIGTERM stays ignored and the event loop stays pinned, so the test can
+// prove the full protocol shutdown sequence rather than mere death. Speaks LSP over stdio with Content-Length framing.
 // Usage: node lsp-stub-server.mjs [--hang]
 // --hang consumes input without ever responding (startup-timeout testing).
 import { writeFileSync } from "node:fs";
@@ -36,6 +36,16 @@ function pump() {
     const message = JSON.parse(buffer.subarray(start, start + length).toString("utf8"));
     buffer = buffer.subarray(start + length);
     handle(message);
+  }
+}
+
+function recordTrigger(name) {
+  // Ordered receipt log (append-only): the test asserts shutdown-before-exit
+  // ordering, so triggers must never overwrite each other. Sync fs write —
+  // the marker is the delivery proof; process lifetime is asserted
+  // separately by the test's reaping check.
+  if (process.env.STUB_SHUTDOWN_MARKER_FILE) {
+    writeFileSync(process.env.STUB_SHUTDOWN_MARKER_FILE, `${name}\n`, { flag: "a" });
   }
 }
 
@@ -79,14 +89,21 @@ function handle(message) {
       },
     });
   }
-  // Cooperative shutdown: receipt of the shutdown request or the exit
-  // notification ends the process synchronously — no further scheduling,
-  // so no post-receipt race with stdio teardown or signals can strand it.
-  // (The stock client sends shutdown, then exit, then SIGTERM; the stub
-  // ignores SIGTERM, so the protocol path is what the lifecycle test
-  // exercises.) Responding is pointless: stock never reads the reply.
-  if (message.method === "shutdown" || message.method === "exit") {
-    process.exit(0);
+  // Cooperative shutdown: record each trigger in receipt order (append-only;
+  // the test asserts shutdown-before-exit). Answer the shutdown request but
+  // do NOT terminate on it; terminate on the exit notification, deferred a
+  // macrotask so buffered pipe writes get a chance to flush. Stock never
+  // reads the shutdown reply (best-effort write, no response handling), so
+  // no write-drain is needed for correctness — the sync marker file is the
+  // delivery proof and process lifetime is asserted separately.
+  if (message.method === "shutdown") {
+    recordTrigger("shutdown");
+    return;
+  }
+  if (message.method === "exit") {
+    recordTrigger("exit");
+    setImmediate(() => process.exit(0));
+    return;
   }
 }
 
@@ -95,8 +112,15 @@ process.stdin.on("data", (chunk) => {
   pump();
 });
 process.stdin.resume();
-// Belt and braces: if the client tears down stdio without the protocol
-// goodbye (best-effort writes), the closed pipe ends the stub instead of
-// stranding it on its keep-alive interval.
-process.stdin.on("end", () => process.exit(0));
-process.stdin.on("close", () => process.exit(0));
+// Fallback: if the client tears down stdio without the protocol goodbye
+// (best-effort writes), the closed pipe ends the stub instead of stranding
+// it on its keep-alive interval. Recorded like any other trigger, so a run
+// that only ever sees this still produces a diagnosable marker.
+process.stdin.on("end", () => {
+  recordTrigger("stdin-close");
+  setImmediate(() => process.exit(0));
+});
+process.stdin.on("close", () => {
+  recordTrigger("stdin-close");
+  setImmediate(() => process.exit(0));
+});
