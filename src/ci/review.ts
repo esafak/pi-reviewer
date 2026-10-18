@@ -619,20 +619,22 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
     // Startup availability per server: operators see what will run and what
     // was skipped before the agent starts. Binaries resolve per matched
     // workspace root, exactly as pi-lsp will spawn them; missing ones
-    // warn-and-skip per the require-preinstalled policy.
-    for (const probe of await probeServerBinaries(lspEntries, { cwd, roots: roots.matches })) {
-      if (probe.found) {
-        logger.info("review.lsp.server.available", "LSP server available", {
-          server: probe.id,
-          bin: probe.bin,
-        });
-      } else {
-        logger.warn("review.lsp.server.missing", "LSP server missing; language skipped", {
-          server: probe.id,
-          bin: probe.bin,
-          hint: probe.installHint,
-        });
-      }
+    // warn-and-skip per the require-preinstalled policy. All missing servers
+    // share one warn line so bare runners don't pay a line per language.
+    const probes = await probeServerBinaries(lspEntries, { cwd, roots: roots.matches });
+    for (const probe of probes.filter((candidate) => candidate.found)) {
+      logger.info("review.lsp.server.available", "LSP server available", {
+        server: probe.id,
+        bin: probe.bin,
+      });
+    }
+    const missing = probes.filter((candidate) => !candidate.found);
+    if (missing.length > 0) {
+      logger.warn("review.lsp.server.missing", "LSP servers missing; languages skipped", {
+        servers: missing.map(
+          (probe) => `${probe.id} (${probe.bin}: ${probe.installHint ?? "no install hint"})`,
+        ),
+      });
     }
   }
   const context = await loadContext({ cwd, diffFiles });
@@ -986,12 +988,12 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
           ...baseTools.map((tool) => tool.name),
         ]),
       ]);
-      const mcpTools = session.agent.state.tools.filter((tool) => mcpToolNames.includes(tool.name));
-      if (mcpConfig && mcpTools.length === 0)
-        throw new Error("MCP adapter tools were not enabled in the review agent");
-      const lspTools = session.agent.state.tools.filter((tool) => lspToolNames.includes(tool.name));
-      if (lspEntries.length > 0 && lspTools.length === 0)
-        throw new Error("LSP tools were not enabled in the review agent");
+      // Activation is turn-scoped by library contract ("changes take effect
+      // on the next agent turn"), so agent.state.tools cannot confirm it
+      // here — reading it synchronously always yields nothing, which is
+      // exactly the false "not enabled" failure seen in CI. Registration
+      // (checked above) plus naming the tools active is the whole
+      // guarantee; the first agent turn picks them up from the registry.
 
       agent = session.agent;
       // The system prompt is seeded via the resource loader's leading system

@@ -260,6 +260,23 @@ function makeFakeMcpSession() {
     { definition: { name: "lsp_references" } },
     { definition: { name: "lsp_symbols" } },
   ];
+  // Turn-scoped activation like production ("changes take effect on the
+  // next agent turn"): setActiveToolsByName only stages names; the pending
+  // set materializes into state.tools when the next prompt (turn) runs. A
+  // synchronous state.tools read right after activation therefore sees
+  // nothing — exactly the false "tools were not enabled" failure this
+  // guards against. Do not "simplify" this back to a synchronous update.
+  let pendingNames: string[] | undefined;
+  const innerPrompt = agent.prompt;
+  agent.prompt = vi.fn(async (...args: unknown[]) => {
+    if (pendingNames) {
+      agent.state.tools = pendingNames.map((name) =>
+        name === "mcp" ? mcpTool : { name, label: name, execute: vi.fn() },
+      );
+      pendingNames = undefined;
+    }
+    return (innerPrompt as (...a: unknown[]) => Promise<unknown>)(...args);
+  });
   return {
     agent,
     extensionRunner: {
@@ -267,10 +284,7 @@ function makeFakeMcpSession() {
       emit: vi.fn().mockResolvedValue(undefined),
     },
     setActiveToolsByName: vi.fn((names: string[]) => {
-      // Fake registry: every activated name resolves to a tool definition.
-      agent.state.tools = names.map((name) =>
-        name === "mcp" ? mcpTool : { name, label: name, execute: vi.fn() },
-      );
+      pendingNames = names;
     }),
     dispose: vi.fn(),
   };
@@ -604,6 +618,27 @@ describe("review", () => {
 
     expect(createAgentSessionMock).not.toHaveBeenCalled();
     expect(AgentMock).toHaveBeenCalled();
+  });
+
+  it("logs one line for all missing LSP servers", async () => {
+    const { sink, records } = createMemorySink();
+    await review({
+      cwd: "/repo",
+      repo: "owner/repo",
+      output: "comment",
+      lspServers: "ty,gopls",
+      lspOverrides: {
+        ty: { bin: "definitely-not-a-real-binary" },
+        gopls: { bin: "definitely-not-a-real-binary" },
+      },
+      logger: createLogger({ sink }),
+    });
+
+    const missing = records.filter(({ event }) => event === "review.lsp.server.missing");
+    expect(missing).toHaveLength(1);
+    expect(missing[0]?.fields.servers).toEqual(
+      expect.arrayContaining([expect.stringContaining("ty"), expect.stringContaining("gopls")]),
+    );
   });
 
   it("fails fast on unknown lsp-servers ids", async () => {
