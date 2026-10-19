@@ -2,7 +2,12 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { parseSummaryFlag, parseThinkingLevel, review } from "./review.js";
+import {
+  parseSummaryFlag,
+  parseThinkingLevel,
+  resolveExtraInstructions,
+  review,
+} from "./review.js";
 import { applySummaryRegeneration } from "./summary-command.js";
 import { COMMAND_HINT_FOOTER, prSummaryRangeLabel, stripPrSummaryBlock } from "../core/output.js";
 import { GitHubClient } from "./github.js";
@@ -453,6 +458,7 @@ async function main(): Promise<void> {
         githubToken: token,
         repo,
         summaryOnly: true,
+        extraInstructions: resolveExtraInstructions(),
         mcpConfig,
         mcpServerCwd: trustedMcpWorktree,
         lspServers: process.env.PI_REVIEWER_LSP_SERVERS,
@@ -496,6 +502,7 @@ async function main(): Promise<void> {
       repo,
       summary: parseSummaryFlag(process.env.PI_REVIEWER_SUMMARY),
       isFirstReview: !hasPriorBodiedReview,
+      extraInstructions: resolveExtraInstructions(),
       mcpConfig,
       mcpServerCwd: trustedMcpWorktree,
       lspServers: process.env.PI_REVIEWER_LSP_SERVERS,

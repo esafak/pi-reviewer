@@ -68,6 +68,9 @@ jobs:
           min-severity: \${{ inputs.min-severity || 'info' }}
           review-drafts: '${reviewDrafts ? "true" : "false"}'
           # summary: 'false' # opt out of PR summaries (enabled by default)
+          # extra-instructions: |
+          #   Focus on API boundary errors and missing rollback paths.
+          #   Ignore naming nits in test fixtures.
           # Optional workflow_dispatch inputs:
           # pr-number: 123
           # target-head: <ancestor SHA>

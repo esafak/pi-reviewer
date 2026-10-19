@@ -169,6 +169,11 @@ inputs:
     required: false
     default: "false"
 
+  extra-instructions:
+    description: "Additional maintainer-authored instructions appended to the CI review prompt as trusted guidance (default: empty — inject nothing)."
+    required: false
+    default: ""
+
   summary:
     description: "Post a collapsed PR summary (What/Why/Risk with an optional Mermaid diagram) on the PR's first review. Set to 'false' to opt out (default: true)."
     required: false
@@ -504,6 +509,7 @@ runs:
         PI_REVIEWER_CODE_EXEC_WALL_BUDGET_MS: ${{ inputs.code-exec-wall-time-budget-ms }}
         PI_REVIEWER_CODE_EXEC_MAX_STREAM_BYTES: ${{ inputs.code-exec-max-stream-bytes }}
         PI_REVIEWER_CODE_EXEC_IMAGE: ${{ inputs.code-exec-image }}
+        PI_REVIEWER_EXTRA_INSTRUCTIONS: ${{ inputs.extra-instructions }}
       run: >-
         "${{ github.action_path }}/node_modules/.bin/tsx"
         "${{ github.action_path }}/src/ci/action-entry.ts"

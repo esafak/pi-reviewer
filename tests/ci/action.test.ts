@@ -123,6 +123,12 @@ describe("GitHub Action Vite+ setup", () => {
     expect(action).toContain("PI_REVIEWER_SUMMARY: ${{ inputs.summary }}");
   });
 
+  it("maps the extra-instructions input to the CI environment", async () => {
+    const action = await readFile(path.join(process.cwd(), "action.yml"), "utf8");
+    expect(action).toContain("  extra-instructions:");
+    expect(action).toContain("PI_REVIEWER_EXTRA_INSTRUCTIONS: ${{ inputs.extra-instructions }}");
+  });
+
   it("keeps the action manifest valid YAML", async () => {
     const action = await readFile(path.join(process.cwd(), "action.yml"), "utf8");
     expect(() => YAML.parse(action)).not.toThrow();

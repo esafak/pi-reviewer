@@ -169,6 +169,13 @@ export interface ReviewOptions {
   /** True when no prior authenticated review with a body exists on the PR. */
   isFirstReview?: boolean;
   /**
+   * Caller-supplied free-text guidance appended to the CI system prompt as
+   * `<custom_instructions>`. Only trusted when the caller keeps it
+   * maintainer-controlled. Prefer the `extra-instructions` action input
+   * (PI_REVIEWER_EXTRA_INSTRUCTIONS) over setting this directly.
+   */
+  extraInstructions?: string;
+  /**
    * Summary regeneration (`/pi-summary`): run the agent for its overview only,
    * return the normalized result to the caller, and post nothing.
    */
@@ -461,6 +468,21 @@ export function parseDocDirs(raw: string | undefined): string[] {
 }
 
 /**
+ * Normalizes the `extra-instructions` free-text input. Blank input injects
+ * nothing; anything else is trimmed and passed through verbatim.
+ */
+export function parseExtraInstructions(raw: string | undefined): string | undefined {
+  if (!raw) return undefined;
+  const trimmed = raw.trim();
+  return trimmed ? trimmed : undefined;
+}
+
+/** Resolves the effective custom instructions from options, falling back to env. */
+export function resolveExtraInstructions(explicit?: string): string | undefined {
+  return parseExtraInstructions(explicit ?? process.env.PI_REVIEWER_EXTRA_INSTRUCTIONS);
+}
+
+/**
  * Parses the default-on `summary` flag. Unset/empty enables summaries; only an
  * explicit "false" disables them. Anything else enables with a warning, so a
  * typo never silently disables summaries. This intentionally differs from the
@@ -683,6 +705,11 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
   // before prompt construction keeps the omission check in one place.
   const prTitle = options.title?.trim() ? options.title : undefined;
   const prBody = options.body?.trim() ? options.body : undefined;
+  const extraInstructions = resolveExtraInstructions(options.extraInstructions);
+  if (extraInstructions)
+    logger.info("review.custom_instructions.loaded", "Custom instructions loaded", {
+      chars: extraInstructions.length,
+    });
   const systemPrompt = buildJSONSystemPrompt(
     context,
     options.minSeverity,
@@ -691,7 +718,7 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
     options.priorSummary,
     resolvedFindings,
     prTitle || prBody ? { title: prTitle, body: prBody } : undefined,
-    { summaryEnabled, skills: skillContext ?? undefined },
+    { summaryEnabled, skills: skillContext ?? undefined, extraInstructions },
   );
   // Search is deliberately CI-comment-only. Local terminal/file runs must not
   // receive network tools merely because CI configuration leaked into env.
