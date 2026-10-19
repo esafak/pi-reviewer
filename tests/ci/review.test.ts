@@ -1486,6 +1486,46 @@ describe("review", () => {
     expect(records.find(({ event }) => event === "review.mcp.failed")?.level).toBe("warn");
   });
 
+  it("warns on bare DeepWiki tool names without a server label", async () => {
+    fakeAgentEvents = [
+      {
+        type: "tool_execution_start",
+        toolName: "mcp",
+        toolCallId: "mcp-deepwiki-bare-call",
+        args: { tool: "read_wiki_structure" },
+      },
+      {
+        type: "tool_execution_end",
+        toolName: "mcp",
+        toolCallId: "mcp-deepwiki-bare-call",
+        isError: true,
+        result: {
+          details: { mode: "call", error: "tool_error" },
+          content: [
+            {
+              type: "text",
+              text: "Error fetching wiki for owner/repo: Repository not found.",
+            },
+          ],
+        },
+      },
+    ];
+    const { sink, records } = createMemorySink();
+    const mcpConfig: CiMcpConfig = { mcpServers: { deepwiki: { url: "https://mcp.example/mcp" } } };
+
+    await review({ cwd: "/repo", output: "comment", mcpConfig, logger: createLogger({ sink }) });
+
+    expect(sendOutputMock).toHaveBeenCalled();
+    const failed = records.find(({ event }) => event === "review.mcp.failed");
+    expect(failed?.level).toBe("warn");
+    expect(failed?.fields).toEqual({
+      servers: ["unknown"],
+      tools: ["read_wiki_structure"],
+      errorClasses: ["tool"],
+      additionalTools: "",
+    });
+  });
+
   it("still refuses to post on other DeepWiki errors", async () => {
     fakeAgentEvents = [
       {
@@ -1507,6 +1547,75 @@ describe("review", () => {
     ];
     const { sink, records } = createMemorySink();
     const mcpConfig: CiMcpConfig = { mcpServers: { deepwiki: { url: "https://mcp.example/mcp" } } };
+
+    await expect(
+      review({ cwd: "/repo", output: "comment", mcpConfig, logger: createLogger({ sink }) }),
+    ).rejects.toThrow("A configured MCP tool call failed; refusing to post the review");
+    expect(sendOutputMock).not.toHaveBeenCalled();
+    expect(records.find(({ event }) => event === "review.mcp.failed")?.level).toBe("error");
+  });
+
+  it("warns on repository-not-found from any server", async () => {
+    fakeAgentEvents = [
+      {
+        type: "tool_execution_start",
+        toolName: "mcp",
+        toolCallId: "mcp-docs-bare-call",
+        args: { server: "docs", tool: "ask_question", args: {} },
+      },
+      {
+        type: "tool_execution_end",
+        toolName: "mcp",
+        toolCallId: "mcp-docs-bare-call",
+        isError: true,
+        result: {
+          details: { mode: "call", error: "tool_error", server: "docs" },
+          content: [{ type: "text", text: "Repository not found." }],
+        },
+      },
+    ];
+    const { sink, records } = createMemorySink();
+    const mcpConfig: CiMcpConfig = {
+      mcpServers: {
+        deepwiki: { url: "https://mcp.example/mcp" },
+        docs: { url: "https://mcp.example/mcp" },
+      },
+    };
+
+    await review({ cwd: "/repo", output: "comment", mcpConfig, logger: createLogger({ sink }) });
+
+    expect(sendOutputMock).toHaveBeenCalled();
+    expect(records.find(({ event }) => event === "review.mcp.failed")?.level).toBe("warn");
+  });
+
+  it.each([
+    ["call_failed", { mode: "call", error: "call_failed", message: "fetch failed" }],
+    [
+      "input_required",
+      { mode: "call", error: "input_required_needs_ui", message: "approval needed" },
+    ],
+    ["unknown", { mode: "call", error: "bogus" }],
+  ])("still vetoes %s even with repository-not-found text", async (_label, details) => {
+    fakeAgentEvents = [
+      {
+        type: "tool_execution_start",
+        toolName: "mcp",
+        toolCallId: "mcp-non-tool-call",
+        args: { server: "docs", tool: "search_docs", args: {} },
+      },
+      {
+        type: "tool_execution_end",
+        toolName: "mcp",
+        toolCallId: "mcp-non-tool-call",
+        isError: true,
+        result: {
+          details,
+          content: [{ type: "text", text: "Repository not found." }],
+        },
+      },
+    ];
+    const { sink, records } = createMemorySink();
+    const mcpConfig: CiMcpConfig = { mcpServers: { docs: { url: "https://mcp.example/mcp" } } };
 
     await expect(
       review({ cwd: "/repo", output: "comment", mcpConfig, logger: createLogger({ sink }) }),

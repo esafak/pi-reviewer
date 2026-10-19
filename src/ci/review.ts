@@ -66,25 +66,21 @@ import { log } from "./log.js";
 import type { Logger } from "../logging/index.js";
 
 /**
- * DeepWiki only indexes public repositories, so "repository not found" for
- * a private repo is the normal case, not a failure worth vetoing: that
- * source is simply unavailable and the agent already continued without it.
- * Any other DeepWiki failure is abnormal and still vetoes the post, as does
- * anything from any other server. The distinction reads the result text
- * because the adapter reports every server-side rejection as bare
- * tool_error; the excerpt is matched in memory and never logged, and
- * unknown wording fails closed (vetoes). Observed across ask_wiki_question,
- * read_wiki_contents, and read_wiki_structure, the unindexed case always
- * contains "Repository not found".
+ * A "repository not found" tool rejection means the repository is
+ * unavailable through that MCP source and the agent already continued
+ * without it — not a failure worth vetoing. Any other MCP failure still
+ * vetoes the post. The distinction reads the result text because the
+ * adapter reports every server-side rejection as bare tool_error; the
+ * excerpt is matched in memory and never logged, and unknown wording fails
+ * closed (vetoes).
  */
-const DEEPWIKI_UNINDEXED_REPOSITORY_PATTERN = /repository not found/i;
+const MCP_UNINDEXED_REPOSITORY_PATTERN = /repository not found/i;
 
-function isDeepWikiRejection(failure: McpFailureEntry): boolean {
+function isUnindexedRejection(failure: McpFailureEntry): boolean {
   return (
     failure.signal.errorClass === "tool" &&
-    (failure.identity.server === "deepwiki" || failure.identity.tool.startsWith("deepwiki_")) &&
     failure.contentExcerpt !== undefined &&
-    DEEPWIKI_UNINDEXED_REPOSITORY_PATTERN.test(failure.contentExcerpt)
+    MCP_UNINDEXED_REPOSITORY_PATTERN.test(failure.contentExcerpt)
   );
 }
 
@@ -1458,11 +1454,11 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
       // Classes cover only the capped entries so every class has a visible tool.
       const errorClasses = [...new Set(entries.map((entry) => entry.signal.errorClass))];
       const additional = failedMcpCalls.size > entries.length ? " and other MCP tools" : "";
-      const onlyDeepWikiRejections = [...failedMcpCalls.values()].every(isDeepWikiRejection);
-      if (onlyDeepWikiRejections) {
+      const onlyUnindexedRejections = [...failedMcpCalls.values()].every(isUnindexedRejection);
+      if (onlyUnindexedRejections) {
         logger.warn(
           "review.mcp.failed",
-          "DeepWiki has no index for the repository; continuing without wiki answers",
+          "MCP repository unavailable; continuing without those answers",
           {
             servers,
             tools,
