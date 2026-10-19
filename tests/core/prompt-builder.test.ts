@@ -298,6 +298,53 @@ describe("buildJSONSystemPrompt — PR summary policy", () => {
   });
 });
 
+describe("buildJSONSystemPrompt — custom instructions", () => {
+  it("injects trimmed instructions as a trusted section", () => {
+    const prompt = buildJSONSystemPrompt(
+      { conventions: [], reviewRules: [] },
+      "INFO",
+      [],
+      [],
+      "",
+      [],
+      undefined,
+      { extraInstructions: "  Focus on rollbacks.  " },
+    );
+
+    expect(prompt).toContain("<custom_instructions>\nFocus on rollbacks.\n</custom_instructions>");
+    expect(prompt).toContain("maintainer-authored and trusted");
+  });
+
+  it("keeps trusted guidance ahead of PR-authored skills and PR context", () => {
+    const prompt = buildJSONSystemPrompt(
+      { conventions: [], reviewRules: [] },
+      "INFO",
+      [{ path: "docs/x.md", content: "doc" }],
+      [],
+      "",
+      [],
+      { title: "Add retry" },
+      {
+        extraInstructions: "Focus on rollbacks.",
+        skills: {
+          formatted: "trusted",
+          untrusted: [{ path: "skills/new/SKILL.md", content: "# New" }],
+        },
+      },
+    );
+
+    const trustedSkills = prompt.indexOf("<skills>");
+    const custom = prompt.indexOf("<custom_instructions>");
+    const untrusted = prompt.indexOf("<new_skills_under_review>");
+    const pr = prompt.indexOf("<pull_request>");
+    expect(trustedSkills).toBeGreaterThanOrEqual(0);
+    expect(untrusted).toBeGreaterThanOrEqual(0);
+    expect(trustedSkills).toBeLessThan(custom);
+    expect(custom).toBeLessThan(untrusted);
+    expect(untrusted).toBeLessThan(pr);
+  });
+});
+
 describe("buildJSONSystemPrompt — skills sections", () => {
   it("omits skills sections when no skills are given", () => {
     const prompt = buildJSONSystemPrompt({ conventions: [], reviewRules: [] });

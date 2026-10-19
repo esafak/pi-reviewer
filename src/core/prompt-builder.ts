@@ -39,6 +39,8 @@ export interface ReviewPromptOptions {
   summaryEnabled?: boolean;
   /** Progressive-disclosure skill guidance plus untrusted new-skill bodies. */
   skills?: SkillPromptSection;
+  /** Maintainer-authored free-text guidance. Rendered as trusted <custom_instructions>. */
+  extraInstructions?: string;
 }
 
 const SEVERITY_RULE: Record<MinSeverity, string | null> = {
@@ -157,6 +159,20 @@ export function buildJSONSystemPrompt(
   const skills = prSummary?.skills;
   if (skills?.formatted.trim())
     sections.push(`<skills>\n${skills.formatted}\n</skills>\n${PROMPTS.skills.trusted}`);
+  if (contextFiles && contextFiles.length > 0)
+    sections.push(contextFiles.map((f) => f.content).join("\n\n"));
+  // Caller-supplied free text from the workflow input. Treat it as trusted
+  // only when the caller keeps it maintainer-controlled (a literal or repo
+  // configuration value, never PR title/body/comments); the harness cannot
+  // verify where the workflow value came from. Keep it with the other trusted
+  // guidance, ahead of every PR-authored section below.
+  const extraInstructions = prSummary?.extraInstructions?.trim()
+    ? prSummary.extraInstructions.trim()
+    : "";
+  if (extraInstructions)
+    sections.push(
+      `<custom_instructions>\n${extraInstructions}\n</custom_instructions>\n${PROMPTS.customInstructions}`,
+    );
   if (skills && skills.untrusted.length > 0) {
     // Untrusted bodies are PR-authored: escape markup so a fenced section or
     // a spoofed file boundary cannot break out of the container.
@@ -167,8 +183,6 @@ export function buildJSONSystemPrompt(
       `<new_skills_under_review>\n${bodies}\n</new_skills_under_review>\n${PROMPTS.skills.untrusted}`,
     );
   }
-  if (contextFiles && contextFiles.length > 0)
-    sections.push(contextFiles.map((f) => f.content).join("\n\n"));
   // Author-stated intent precedes history so findings are read in context.
   const prTitle = prContext?.title?.trim() ? prContext.title.slice(0, PR_TITLE_LIMIT) : "";
   const prBody = prContext?.body?.trim() ? prContext.body.slice(0, PR_BODY_LIMIT) : "";

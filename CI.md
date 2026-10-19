@@ -416,6 +416,7 @@ To refresh the summary after the PR evolves, comment `/pi-summary` in the PR con
 | `min-severity` | no | Minimum severity: `info`, `warn`, or `critical` (default: `info`) |
 | `summary` | no | Post a collapsed PR summary (What/Why/Risk with an optional Mermaid diagram) on the PR's first review (default: `true`). Set to `'false'` to opt out. CI comment reviews only. |
 | `doc-dirs` | no | Comma-separated dirs to scan for docs to inject into the review (default: empty — inject nothing) |
+| `extra-instructions` | no | Additional maintainer-authored instructions appended to the CI prompt as trusted `<custom_instructions>` (default: empty — inject nothing) |
 | `web-search` | no | Enable regular CI web search (default: false) |
 | `search-provider` | no | `exa`, `brave`, or `duckduckgo`; explicit provider selection, no fallback. May also be set as `PI_REVIEWER_SEARCH_PROVIDER` in the caller workflow environment. |
 | `ai-search` | no | Enable separate provider-grounded AI search (default: false) |
@@ -706,6 +707,28 @@ description: Authentication flows, JWT tokens, session management
 ```
 
 At review time, the action extracts keywords from the changed file paths (e.g. `src/auth/login.ts` → `auth`, `login`), then injects any doc whose `description` or filename matches a keyword. Keep descriptions specific enough to avoid over-matching, but broad enough to cover the files they apply to.
+
+## Custom instructions
+
+Steer the CI review without forking the reviewer. `extra-instructions` is
+rendered verbatim as `<custom_instructions>` after trusted guidance
+(conventions, review rules, skills, doc context) and before PR-authored sections.
+
+```yaml
+      - uses: esafak/pi-reviewer@main
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          pi-api-key: ${{ secrets.PI_API_KEY }}
+          extra-instructions: |
+            Focus on API boundary errors and missing rollback paths.
+            Ignore naming nits in test fixtures.
+```
+
+Keep the value a maintainer-controlled literal — never interpolate PR title,
+body, branch names, or comments; the harness cannot verify where the value came
+from. Blank injects nothing. Prefer `AGENTS.md`/`REVIEW.md` for durable
+conventions; use this for per-workflow focus. Inspect the result via `dry-run`
+(`review.dry_run.system_prompt`).
 
 ## Bot identity
 

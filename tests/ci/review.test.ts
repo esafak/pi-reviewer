@@ -351,8 +351,26 @@ describe("review", () => {
     delete process.env.PI_REVIEWER_CODE_EXEC_MAX_CALLS;
     delete process.env.PI_REVIEWER_CODE_EXEC_WALL_BUDGET_MS;
     delete process.env.PI_REVIEWER_CODE_EXEC_MAX_STREAM_BYTES;
+    delete process.env.PI_REVIEWER_EXTRA_INSTRUCTIONS;
     // model is mandatory — provide a default for tests that don't exercise it
     process.env.PI_REVIEWER_MODEL = "anthropic/claude-opus-4-6";
+  });
+
+  it("prefers explicit extra instructions over env in the dry-run prompt", async () => {
+    process.env.PI_REVIEWER_EXTRA_INSTRUCTIONS = "from env";
+    const { sink, records } = createMemorySink();
+
+    await review({
+      cwd: "/repo",
+      dryRun: true,
+      extraInstructions: "from option",
+      logger: createLogger({ sink }),
+    });
+
+    const prompt = records.find(({ event }) => event === "review.dry_run.system_prompt")?.fields
+      .prompt as string;
+    expect(prompt).toContain("<custom_instructions>\nfrom option\n</custom_instructions>");
+    expect(prompt).not.toContain("from env");
   });
 
   it("dry-run logs source and prompt, without calling agent or output", async () => {
