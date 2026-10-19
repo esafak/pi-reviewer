@@ -96,6 +96,26 @@ const PRESETS: readonly LspPresetServer[] = [
     diagnosticsWaitMs: 3000,
     installHint: "install tsc-rs (npm install -D tsc-rs)",
   },
+  {
+    id: "kotlin-lsp",
+    bin: "kotlin-lsp",
+    args: ["--stdio"],
+    include: ["**/*.kt", "**/*.kts"],
+    rootMarkers: [
+      "settings.gradle",
+      "settings.gradle.kts",
+      "build.gradle",
+      "build.gradle.kts",
+      "pom.xml",
+      "workspace.json",
+      ".git",
+    ],
+    languageIdByExtension: { ".kt": "kotlin", ".kts": "kotlin" },
+    startupTimeoutMs: 45_000,
+    diagnosticsWaitMs: 3000,
+    installHint:
+      "install kotlin-lsp (brew install JetBrains/utils/kotlin-lsp or download from https://github.com/Kotlin/kotlin-lsp/releases)",
+  },
 ];
 
 export const LSP_PRESET_IDS: readonly string[] = PRESETS.map((preset) => preset.id);

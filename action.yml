@@ -56,7 +56,7 @@ inputs:
     required: false
 
   lsp-servers:
-    description: "Comma-separated LSP server preset ids for semantic review context (default: ty, markdown-oxide, rust-analyzer, taplo, gopls, tsc-rs). Set to 'none' to disable LSP."
+    description: "Comma-separated LSP server preset ids for semantic review context (default: ty, markdown-oxide, rust-analyzer, taplo, gopls, tsc-rs, kotlin-lsp). Set to 'none' to disable LSP."
     required: false
     default: ""
 
