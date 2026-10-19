@@ -80,7 +80,7 @@ jobs:
           # mcp-config-file: '.github/mcp.json'
           # Optional semantic review context via LSP (best-effort, CI comment reviews only).
           # Binaries must be preinstalled on the runner; missing ones warn and skip.
-          # lsp-servers: 'ty,markdown-oxide,rust-analyzer,taplo,gopls,tsc-rs' # default; 'none' disables
+          # lsp-servers: 'ty,markdown-oxide,rust-analyzer,taplo,gopls,tsc-rs,kotlin-lsp' # default; 'none' disables
           # lsp-config-file: '.github/lsp.json' # trusted override, read from the default branch
           # Optional web search configuration.
           # Exa/Brave use EXA_API_KEY/BRAVE_SEARCH_API_KEY; DuckDuckGo regular
@@ -219,10 +219,10 @@ guidance tells the agent to use diagnostics as breakage signal, not style
 findings. (No output filtering is applied: stock `lsp_diagnostics` returns
 whatever the server pushed.)
 
-Six preset servers cover the common languages, all Rust-based where mature:
+Seven preset servers cover the common languages, all Rust-based where mature:
 `ty` (Python), `markdown-oxide` (Markdown), `rust-analyzer` (Rust), `taplo`
 (TOML — requires a `--features lsp` build), `gopls` (Go), `tsc-rs`
-(TypeScript). Unset `lsp-servers` means all six, best-effort — plus any
+(TypeScript), `kotlin-lsp` (Kotlin). Unset `lsp-servers` means all seven, best-effort — plus any
 custom servers defined in `lsp-config-file`, which run without further
 configuration. Each language is skipped with a warning when its binary is
 absent, so reviews work with zero config on preinstalled runners. Set
