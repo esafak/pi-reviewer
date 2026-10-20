@@ -1626,16 +1626,25 @@ export async function sendOutput(options: OutputOptions): Promise<OutputMetadata
           );
           // Finalize the marker with the real review id, like every other
           // posting path: an unfinalized "reviewId":0 would break later
-          // batch-range matching against this review.
+          // batch-range matching against this review. Best-effort, matching
+          // the acknowledge path: a finalization failure still records the
+          // range below. The update pairs the marker with the notice text
+          // directly so no stale unfinalized copy survives in the body.
           if (posted?.id && options.batchMarker) {
             const finalized = options.batchMarker.replace(/("reviewId"\s*:\s*)0/, `$1${posted.id}`);
             if (finalized !== options.batchMarker)
-              await client.updateReview(
-                repo,
-                prNumber,
-                posted.id,
-                [finalized, noticeBody].join("\n\n"),
-              );
+              await client
+                .updateReview(
+                  repo,
+                  prNumber,
+                  posted.id,
+                  [finalized, renderSkippedDiffNotice(options.skippedDiff)].join("\n\n"),
+                )
+                .catch((error) =>
+                  console.warn(
+                    `[pi-reviewer] could not finalize batch marker: ${error instanceof Error ? error.message : String(error)}`,
+                  ),
+                );
           }
         } else {
           await (

@@ -4132,8 +4132,47 @@ describe("sendOutput skipped-diff notice", () => {
     expect(updateCall).toBeDefined();
     const updated = JSON.parse((updateCall![1] as { body: string }).body).body as string;
     expect(updated).toContain('"reviewId":9');
+    expect(updated).not.toContain('"reviewId":0');
     expect(updated).toContain("> [!WARNING]");
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/reactions"))).toBe(false);
+  });
+
+  it("still records the range when marker finalization fails", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          text: vi.fn().mockResolvedValue(JSON.stringify({ id: 9 })),
+        })
+        .mockRejectedValueOnce(new Error("transient"))
+        .mockResolvedValueOnce({
+          ok: true,
+          text: vi.fn().mockResolvedValue(JSON.stringify({ head: { sha: "head" } })),
+        });
+      vi.stubGlobal("fetch", fetchMock);
+
+      await sendOutput({
+        target: "comment",
+        none: true,
+        githubToken: "token123",
+        prNumber: 42,
+        repo: "owner/repo",
+        commitId: "head",
+        batchMarker:
+          '<!-- pi-reviewer:batch:v1 {"version":1,"fromSha":"a","toSha":"b","kind":"opened","actor":"bot","reviewId":0} -->',
+        skippedDiff: { files: ["backend/app.kt"], cap: 100_000, shortfall: 5_432 },
+      });
+
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining("[pi-reviewer] could not finalize batch marker"),
+      );
+      expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/pulls/42"))).toBe(true);
+      expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/reactions"))).toBe(false);
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 
   it("posts the notice as an issue comment when none has no commit", async () => {
