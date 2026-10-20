@@ -12,7 +12,13 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { loadContext, mergeContextFiles } from "../core/context.js";
-import { resolveDiff, extractDiffFiles } from "../core/diff-resolver.js";
+import { resolveRawDiff, extractDiffFiles } from "../core/diff-resolver.js";
+import {
+  filterDiff,
+  resolveExplicitMaxDiffChars,
+  resolveMaxDiffChars,
+  stripNoiseFiles,
+} from "../core/diff-filter.js";
 import { loadDocContext } from "../core/doc-context.js";
 import { loadSkillContext, resolveSkillDirs } from "../core/skill-context.js";
 import {
@@ -152,6 +158,12 @@ export interface ReviewOptions {
   lspServers?: string;
   /** Trusted per-id LSP overrides, loaded from the default branch. CI-comment only. */
   lspOverrides?: LspServerOverrides;
+  /**
+   * Explicit diff cap in chars. Precedence: this option >
+   * PI_REVIEWER_MAX_DIFF_CHARS env > config-file maxDiffChars. Unset means
+   * the cap is derived from the execution model's context window.
+   */
+  maxDiffChars?: number;
   fromSha?: string;
   batchMarker?: string;
   activeFindings?: ActiveFindingContext[];
@@ -594,7 +606,11 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
       "LSP disabled; only available for CI comment-output reviews",
     );
 
-  const { diff, source, warning, skippedFiles, changedFiles } = await resolveDiff({
+  const {
+    raw: rawDiff,
+    source,
+    changedFiles,
+  } = await resolveRawDiff({
     pr: options.pr,
     diff: options.diff,
     branch: options.branch,
@@ -603,10 +619,14 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
     toSha: options.commitId,
     allowEmpty: options.allowEmptyDiff,
   });
-  logger.info("review.diff.resolved", "Diff resolved", { source, size: diff.length });
-  if (warning) logger.warn("review.diff.warning", warning);
+  logger.info("review.diff.resolved", "Diff resolved", { source, size: rawDiff.length });
+  // Context covers the noise-stripped candidate set — every file the final
+  // size filter could keep. Size selection skips oversized sections rather
+  // than prefixing, so context must never come from an intermediate capped
+  // pass; the final filter below only runs once the prompt is measured.
+  const explicitMaxDiffChars = resolveExplicitMaxDiffChars(options.maxDiffChars);
 
-  const diffFiles = extractDiffFiles(diff);
+  const diffFiles = extractDiffFiles(stripNoiseFiles(rawDiff).kept.join(""));
   // Root diagnostic: which workspace root each changed file resolves to per
   // server, using pi-lsp's own matching. A file that matches no server is
   // reviewed from text alone; a file whose markers are missing skips that
@@ -811,6 +831,17 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
         ]
       : []),
   ].join("\n\n");
+  // The cap is derived from the execution model minus the prompt assembled
+  // above, so large-context models review more of large diffs. The model
+  // string is best-effort here: an unknown model keeps the 100k default and
+  // the throwing check below still owns model validation for the agent run.
+  const maxDiffChars = resolveMaxDiffChars({
+    explicit: explicitMaxDiffChars,
+    model: options.model ?? process.env.PI_REVIEWER_MODEL,
+    nonDiffChars: effectiveSystemPrompt.length,
+  });
+  const { diff, warning, skippedFiles } = filterDiff(rawDiff, maxDiffChars);
+  if (warning) logger.warn("review.diff.warning", warning);
   const userPrompt = buildUserPrompt(diff, skippedFiles);
 
   if (options.dryRun) {

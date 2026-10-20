@@ -1,5 +1,5 @@
 /**
- * Integration tests: `branch` key in config.json flows through to resolveDiff.
+ * Integration tests: `branch` key in config.json flows through to resolveRawDiff.
  * node:fs.readFileSync is wrapped so the real config module parses our test JSON
  * without touching the user's actual ~/.pi/pi-reviewer/config.json.
  */
@@ -12,7 +12,7 @@ vi.mock("node:fs", async (importActual) => {
 
 vi.mock("../../src/core/diff-resolver.js", async (importActual) => {
   const actual = await importActual<typeof import("../../src/core/diff-resolver.js")>();
-  return { ...actual, resolveDiff: vi.fn() };
+  return { ...actual, resolveRawDiff: vi.fn() };
 });
 
 vi.mock("../../src/core/context.js", async (importActual) => {
@@ -27,7 +27,7 @@ vi.mock("../../src/core/context.js", async (importActual) => {
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { readFileSync } from "node:fs";
 import { readConfig, readDefaultBranch } from "../../src/core/config.js";
-import { resolveDiff } from "../../src/core/diff-resolver.js";
+import { resolveRawDiff } from "../../src/core/diff-resolver.js";
 import { handleDryRun } from "../../extensions/pi-reviewer/handlers/dry-run.js";
 import type { ReviewCommandArgs } from "../../extensions/pi-reviewer/args.js";
 
@@ -81,8 +81,8 @@ function makeOpts(parsedOverrides: Partial<ReviewCommandArgs> = {}) {
 
 beforeEach(() => {
   vi.mocked(readFileSync).mockClear();
-  vi.mocked(resolveDiff).mockResolvedValue({
-    diff: "diff --git a/foo.ts\n",
+  vi.mocked(resolveRawDiff).mockResolvedValue({
+    raw: "diff --git a/foo.ts\n",
     source: "feat vs main",
     changedFiles: ["foo.ts"],
   });
@@ -110,19 +110,19 @@ describe("readConfig / readDefaultBranch", () => {
   });
 });
 
-describe("config branch flows through to resolveDiff", () => {
-  it("passes config branch to resolveDiff when no --branch flag is given", async () => {
+describe("config branch flows through to resolveRawDiff", () => {
+  it("passes config branch to resolveRawDiff when no --branch flag is given", async () => {
     mockConfigFile({ branch: "develop" });
     const opts = makeOpts();
     await handleDryRun(opts);
-    expect(resolveDiff).toHaveBeenCalledWith(expect.objectContaining({ branch: "develop" }));
+    expect(resolveRawDiff).toHaveBeenCalledWith(expect.objectContaining({ branch: "develop" }));
   });
 
   it("--branch flag overrides config branch", async () => {
     mockConfigFile({ branch: "develop" });
     const opts = makeOpts({ branch: "feature/override" });
     await handleDryRun(opts);
-    expect(resolveDiff).toHaveBeenCalledWith(
+    expect(resolveRawDiff).toHaveBeenCalledWith(
       expect.objectContaining({ branch: "feature/override" }),
     );
   });

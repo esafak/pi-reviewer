@@ -13,6 +13,7 @@ export interface CommonHandlerOptions {
   model: string | undefined;
   thinking: string | undefined;
   currentModelId: string | undefined;
+  sessionModel: { id: string; provider: string } | undefined;
   defaultModel: string | undefined;
   availableModels: ModelInfo[];
   defaultThinking: string | undefined;

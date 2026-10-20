@@ -1,12 +1,12 @@
 /**
  * Integration tests: real file system reads flow through handleDryRun into the system prompt.
  * loadContext is NOT mocked — actual file I/O happens against temp directories.
- * Only resolveDiff and collectProviderContext are mocked.
+ * Only resolveRawDiff and collectProviderContext are mocked.
  */
 
 vi.mock("../../src/core/diff-resolver.js", async (importActual) => {
   const actual = await importActual<typeof import("../../src/core/diff-resolver.js")>();
-  return { ...actual, resolveDiff: vi.fn() };
+  return { ...actual, resolveRawDiff: vi.fn() };
 });
 
 vi.mock("../../src/core/context.js", async (importActual) => {
@@ -20,7 +20,7 @@ vi.mock("../../src/core/ui/server/index.js", () => ({
 }));
 
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
-import { resolveDiff } from "../../src/core/diff-resolver.js";
+import { resolveRawDiff } from "../../src/core/diff-resolver.js";
 import { handleDryRun } from "../../extensions/pi-reviewer/handlers/dry-run.js";
 import { createTempProject } from "../fixtures/factory.js";
 import type { ReviewCommandArgs } from "../../extensions/pi-reviewer/args.js";
@@ -74,8 +74,8 @@ function makeOpts(cwd: string, parsedOverrides: Partial<ReviewCommandArgs> = {})
 }
 
 beforeEach(() => {
-  vi.mocked(resolveDiff).mockResolvedValue({
-    diff: "diff --git a/src/foo.ts b/src/foo.ts\n--- a/src/foo.ts\n+++ b/src/foo.ts\n@@ -1 +1 @@\n-old\n+new\n",
+  vi.mocked(resolveRawDiff).mockResolvedValue({
+    raw: "diff --git a/src/foo.ts b/src/foo.ts\n--- a/src/foo.ts\n+++ b/src/foo.ts\n@@ -1 +1 @@\n-old\n+new\n",
     source: "feat vs main",
     changedFiles: ["src/foo.ts"],
   });

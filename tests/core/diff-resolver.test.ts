@@ -6,7 +6,7 @@ vi.mock("node:child_process", () => ({
 }));
 
 import { execFileSync, execSync } from "node:child_process";
-import { resolveDiff, extractDiffFiles } from "../../src/core/diff-resolver.js";
+import { resolveDiff, resolveRawDiff, extractDiffFiles } from "../../src/core/diff-resolver.js";
 
 const execSyncMock = vi.mocked(execSync);
 const execFileSyncMock = vi.mocked(execFileSync);
@@ -250,5 +250,36 @@ describe("extractDiffFiles", () => {
   it("uses the b/ path for renamed files", () => {
     const diff = "diff --git a/src/old.ts b/src/new.ts\nindex 000..111 100644\n";
     expect(extractDiffFiles(diff)).toEqual(["src/new.ts"]);
+  });
+});
+
+describe("resolveRawDiff", () => {
+  beforeEach(() => {
+    execSyncMock.mockReset();
+    execFileSyncMock.mockReset();
+  });
+
+  it("returns the raw diff with changed files, unfiltered", async () => {
+    const raw = "diff --git a/a.ts b/a.ts\n".repeat(10);
+    execFileSyncMock.mockReturnValue(raw);
+    const result = await resolveRawDiff({ fromSha: "base", toSha: "head", cwd: "/repo" });
+    expect(result.raw).toBe(raw);
+    expect(result.source).toBe("git diff base..head");
+    expect(result.changedFiles).toEqual(Array.from({ length: 10 }, () => "a.ts"));
+  });
+
+  it("honors maxDiffChars through resolveDiff", async () => {
+    const section = (f: string) =>
+      `diff --git a/${f} b/${f}\n--- a/${f}\n+++ b/${f}\n@@ -1 +1 @@\n+x\n`;
+    execFileSyncMock.mockReturnValue(section("a.ts") + section("b.ts"));
+    const result = await resolveDiff({
+      fromSha: "base",
+      toSha: "head",
+      cwd: "/repo",
+      maxDiffChars: section("a.ts").length + 1,
+    });
+    expect(result.diff).toContain("a.ts");
+    expect(result.diff).not.toContain("b.ts");
+    expect(result.skippedFiles).toEqual(["b.ts"]);
   });
 });

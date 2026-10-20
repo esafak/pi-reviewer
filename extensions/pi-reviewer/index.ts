@@ -45,6 +45,7 @@ function resolveCommonOpts(
     model,
     thinking,
     currentModelId,
+    sessionModel,
     defaultModel,
     availableModels,
     defaultThinking,

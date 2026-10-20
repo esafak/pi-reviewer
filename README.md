@@ -148,11 +148,21 @@ Persistent settings are stored in `~/.pi/pi-reviewer/config.json`. All fields ar
 
 ### Diff size handling
 
-pi-reviewer automatically filters out noise files (lockfiles, `dist/`, `build/`, `.next/`, `node_modules/`, minified files, `.d.ts` files). If the remaining diff still exceeds 100k characters, whole file sections are dropped — never mid-hunk — and the agent is told which files were skipped.
+pi-reviewer automatically filters out noise files (lockfiles, `dist/`, `build/`, `.next/`, `node_modules/`, minified files, `.d.ts` files). If the remaining diff still exceeds the cap, whole file sections are dropped — never mid-hunk — and the agent is told which files were skipped.
 
 ```
 ⚠ 1 noise file excluded (package-lock.json) — 2 files skipped — diff exceeded 100,000 chars (src/big.ts, src/huge.ts)
 ```
+
+The cap defaults to the execution model's context window minus the assembled system prompt and tool/output headroom, clamped between the 100k-character floor and a 500k derived ceiling that bounds surprise cost on huge-context models. Unknown or custom models fall back to 100k. Set an explicit cap when the default doesn't fit — e.g. to include more of a large PR on a big model, or to fit a small one:
+
+- `/review --max-diff-chars 250000`
+- `~/.pi/pi-reviewer/config.json`: `{ "maxDiffChars": 250000 }`
+- Env: `PI_REVIEWER_MAX_DIFF_CHARS=250000` (also the `max-diff-chars` CI action input, which falls back to an inherited env value when unset)
+
+Precedence: flag/option > env `PI_REVIEWER_MAX_DIFF_CHARS` > config file `maxDiffChars` > model-derived default. An explicit value is honored verbatim — it may sit below the 100k floor or above the derived ceiling, so small models can still overflow on a heavy prompt; lower the cap for them.
+
+`--ssh` runs inject the prompt into your live session, whose prior history also consumes context but is not measured — keep sessions short or lower the cap when an SSH review fails on context length. (Local `/review` runs spawn a fresh `pi --no-session` process, so only the assembled prompt counts there.)
 
 ### Project conventions
 

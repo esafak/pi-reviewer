@@ -16,3 +16,26 @@ export function resolveCurrentModelId(
       : undefined;
   return entry ? `${entry.provider}/${entry.id}` : model;
 }
+
+/**
+ * Which model id to budget the diff cap against. SSH reviews run in the
+ * existing session agent, which a --model flag or configured model never
+ * switches, so the session model owns the budget — and without one there is
+ * no execution model to budget against, hence undefined (100k fallback).
+ * Local reviews spawn `pi --model`, and CI pins the agent model, so the
+ * override applies there.
+ */
+export interface BudgetModelOptions {
+  ssh: boolean;
+  currentModelId: string | undefined;
+  sessionModel: { id: string; provider: string } | undefined;
+}
+
+export function resolveBudgetModelId(options: BudgetModelOptions): string | undefined {
+  if (options.ssh) {
+    return options.sessionModel
+      ? `${options.sessionModel.provider}/${options.sessionModel.id}`
+      : undefined;
+  }
+  return options.currentModelId;
+}

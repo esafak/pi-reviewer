@@ -13,7 +13,12 @@ import {
   loadSkillContextRemote,
   resolveSkillDirs,
 } from "../../../src/core/skill-context.js";
-import { filterDiff } from "../../../src/core/diff-filter.js";
+import {
+  filterDiff,
+  resolveExplicitMaxDiffChars,
+  resolveMaxDiffChars,
+  stripNoiseFiles,
+} from "../../../src/core/diff-filter.js";
 import {
   buildJSONSystemPrompt,
   buildMarkdownSystemPrompt,
@@ -33,6 +38,7 @@ import { setReviewFooter } from "../footer.js";
 import { handleUIReview } from "./ui.js";
 import { buildContextGroups } from "./context.js";
 import { buildSSHDiffCommand, buildSSHOriginBaseCommand, type ReviewCommandArgs } from "../args.js";
+import { resolveBudgetModelId } from "../model.js";
 import type { CommonHandlerOptions } from "./types.js";
 
 export function buildSSHSource(
@@ -130,6 +136,7 @@ export async function handleSSHReview(opts: HandleSSHReviewOptions): Promise<voi
     loaderState,
     minSeverity,
     currentModelId,
+    sessionModel,
     thinking,
     defaultModel,
     availableModels,
@@ -163,17 +170,16 @@ export async function handleSSHReview(opts: HandleSSHReviewOptions): Promise<voi
       : Promise.resolve("origin/main"),
   ]);
 
-  const {
-    diff: sshDiff,
-    warning: sshDiffWarning,
-    skippedFiles: sshSkippedFiles,
-  } = filterDiff(rawSshDiff);
-  if (sshDiffWarning) notify(sshDiffWarning, "warning");
+  // SSH reviews run in the live session agent: a --model flag never switches
+  // it, so the diff budget follows the session model, not the override.
+  const budgetModelId = resolveBudgetModelId({ ssh: true, currentModelId, sessionModel });
+  const explicitMaxDiffChars = resolveExplicitMaxDiffChars(parsed.maxDiffChars);
+  const firstPassSshDiff = stripNoiseFiles(rawSshDiff).kept.join("");
 
-  // Context follows the filtered diff so providers and conventions describe
-  // the files actually under review, matching local mode and CI. Trust uses
-  // the raw list: files dropped by filterDiff stay attacker-controlled.
-  const sshDiffFiles = extractDiffFiles(sshDiff);
+  // Context covers the noise-stripped candidate set — every file the final
+  // size filter could keep. Trust uses the raw list: files dropped by
+  // filterDiff stay attacker-controlled.
+  const sshDiffFiles = extractDiffFiles(firstPassSshDiff);
   const sshTrustFiles = extractDiffFiles(rawSshDiff);
   const sshContext = sshState
     ? await loadContextSSH(
@@ -237,8 +243,6 @@ export async function handleSSHReview(opts: HandleSSHReviewOptions): Promise<voi
   if (allSshContextPaths.length > 0)
     notify(`Context:\n${allSshContextPaths.map((p) => `  ${p}`).join("\n")}`);
 
-  const userPrompt = buildUserPrompt(sshDiff, sshSkippedFiles);
-
   if (!parsed.ui) {
     const systemPrompt = buildMarkdownSystemPrompt(
       minSeverity,
@@ -246,7 +250,21 @@ export async function handleSSHReview(opts: HandleSSHReviewOptions): Promise<voi
       sshContextFiles,
       sshSkillContext ?? undefined,
     );
-    loaderState.stop = setReviewFooter(ctx, source, { model: currentModelId, thinking });
+    const {
+      diff: sshDiff,
+      warning: sshDiffWarning,
+      skippedFiles: sshSkippedFiles,
+    } = filterDiff(
+      rawSshDiff,
+      resolveMaxDiffChars({
+        explicit: explicitMaxDiffChars,
+        model: budgetModelId,
+        nonDiffChars: systemPrompt.length,
+      }),
+    );
+    if (sshDiffWarning) notify(sshDiffWarning, "warning");
+    const userPrompt = buildUserPrompt(sshDiff, sshSkippedFiles);
+    loaderState.stop = setReviewFooter(ctx, source, { model: budgetModelId, thinking });
     runSSHReview({ systemPrompt, userPrompt, pi, stopLoader: loaderState.stop, notify });
     return;
   }
@@ -261,7 +279,21 @@ export async function handleSSHReview(opts: HandleSSHReviewOptions): Promise<voi
     undefined,
     sshSkillContext ? { skills: sshSkillContext } : undefined,
   );
-  loaderState.stop = setReviewFooter(ctx, source, { model: currentModelId, thinking });
+  const {
+    diff: sshDiff,
+    warning: sshDiffWarning,
+    skippedFiles: sshSkippedFiles,
+  } = filterDiff(
+    rawSshDiff,
+    resolveMaxDiffChars({
+      explicit: explicitMaxDiffChars,
+      model: budgetModelId,
+      nonDiffChars: systemPrompt.length,
+    }),
+  );
+  if (sshDiffWarning) notify(sshDiffWarning, "warning");
+  const userPrompt = buildUserPrompt(sshDiff, sshSkippedFiles);
+  loaderState.stop = setReviewFooter(ctx, source, { model: budgetModelId, thinking });
   const result = await runSSHReviewAndWait({
     systemPrompt,
     userPrompt,
@@ -279,7 +311,7 @@ export async function handleSSHReview(opts: HandleSSHReviewOptions): Promise<voi
     ssh: true,
     cwd: ctx.cwd,
     notify,
-    currentModel: currentModelId,
+    currentModel: budgetModelId,
     currentThinking: thinking,
     defaultModel,
     availableModels,
