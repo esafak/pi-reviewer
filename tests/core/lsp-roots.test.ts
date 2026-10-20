@@ -3,8 +3,15 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vite-plus/test";
 
-import { buildLspServerEntries } from "../../src/core/lsp/config.js";
+import { buildLspPlan } from "../../src/core/lsp/config.js";
+import { parseLspServers } from "../../src/core/lsp/inputs.js";
 import { resolveLspRoots } from "../../src/core/lsp/roots.js";
+
+function candidateEntries(rawServers: string | undefined, overrides = {}) {
+  const selection = parseLspServers(rawServers, Object.keys(overrides));
+  if (selection.disabled) throw new Error("expected an enabled selection");
+  return buildLspPlan(selection, overrides).groups.flatMap((group) => group.candidates);
+}
 
 /**
  * Uses pi-lsp's real findProjectRoot + glob matchers (via resolveLspRoots),
@@ -26,7 +33,7 @@ describe("resolveLspRoots", () => {
       // parallel-suite load. No test here needs a real repository.
       await mkdir(path.join(dir, ".git"), { recursive: true });
 
-      const entries = buildLspServerEntries(["ty", "markdown-oxide", "taplo"], {});
+      const entries = candidateEntries("ty,markdown-oxide,taplo");
       const files = ["a.py", path.join("sub", "b.py"), "notes.md"];
       const { matches, skipped } = await resolveLspRoots(dir, files, entries);
 
@@ -49,7 +56,7 @@ describe("resolveLspRoots", () => {
       expect(skipped.filter((entry) => entry.server === "taplo")).toEqual([]);
 
       // A server whose markers exist nowhere reports why per file.
-      const orphan = buildLspServerEntries(["ty"], {
+      const orphan = candidateEntries("ty", {
         ty: { rootMarkers: ["definitely-no-such-marker"] },
       });
       const orphaned = await resolveLspRoots(dir, ["a.py"], orphan);

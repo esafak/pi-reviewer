@@ -80,7 +80,7 @@ For the full list of settings see [CI.md](./CI.md).
 | `review-drafts` | Review draft PRs | `false` |
 | `doc-dirs` | Inject matching project docs (`.md` with `description` frontmatter) | off |
 | `skills-dirs` | Skill dirs loaded as review guidance (`.pi/skills`, `.claude/skills`, `.agents/skills`, `skills`); `'none'` disables | default on |
-| `lsp-servers` | Semantic context (hover/definition/references); subset or `'none'` to disable. Binaries must be preinstalled | best-effort on |
+| `lsp-servers` | Semantic context (hover/definition/references); pins a language's server, or `'none'` to disable. Binaries must be preinstalled | best-effort on |
 | `code-exec` | Run tests/typechecks in a no-network sandbox to verify findings before flagging | `false` |
 | `extra-instructions` | Maintainer-written focus notes, appended verbatim | off |
 

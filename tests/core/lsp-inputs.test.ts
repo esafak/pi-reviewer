@@ -1,20 +1,11 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import { parseLspServers } from "../../src/core/lsp/inputs.js";
-import { LSP_PRESET_IDS } from "../../src/core/lsp/presets.js";
 
 describe("parseLspServers", () => {
-  it("defaults to every preset when unset or blank", () => {
+  it("leaves every language unpinned when unset or blank", () => {
     for (const raw of [undefined, "", "   "]) {
-      const selection = parseLspServers(raw);
-      expect(selection).toEqual({ disabled: false, ids: [...LSP_PRESET_IDS] });
-    }
-  });
-
-  it("includes trusted custom ids in the blank default, deduped", () => {
-    for (const raw of [undefined, "", "   "] as const) {
-      const selection = parseLspServers(raw, ["custom", "ty"]);
-      expect(selection.ids).toEqual([...LSP_PRESET_IDS, "custom"]);
+      expect(parseLspServers(raw)).toEqual({ disabled: false, pinned: {} });
     }
   });
 
@@ -24,22 +15,31 @@ describe("parseLspServers", () => {
     expect(parseLspServers("none", ["custom"])).toEqual({ disabled: true });
   });
 
-  it("parses a comma-separated subset, deduped", () => {
-    expect(parseLspServers("tsc-rs, ty,tsc-rs")).toEqual({
+  it("pins the named languages and leaves the others alone", () => {
+    expect(parseLspServers("pyright")).toEqual({
       disabled: false,
-      ids: ["tsc-rs", "ty"],
+      pinned: { python: ["pyright"] },
     });
-  });
-
-  it("fails fast on unknown ids so typos cannot silently narrow coverage", () => {
-    expect(() => parseLspServers("tsc-rs,pyright")).toThrow('Unknown LSP server "pyright"');
-    expect(() => parseLspServers("none,ty")).toThrow('Unknown LSP server "none"');
-  });
-
-  it("accepts trusted custom ids alongside presets", () => {
+    expect(parseLspServers("ty,tsrs, gopls")).toEqual({
+      disabled: false,
+      pinned: { python: ["ty"], typescript: ["tsrs"], go: ["gopls"] },
+    });
     expect(parseLspServers("ty,custom", ["custom"])).toEqual({
       disabled: false,
-      ids: ["ty", "custom"],
+      pinned: { python: ["ty"] },
     });
+  });
+
+  it("keeps the built-in preference order among the named candidates", () => {
+    expect(parseLspServers("pyright,ty")).toEqual({
+      disabled: false,
+      pinned: { python: ["ty", "pyright"] },
+    });
+  });
+
+  it("fails fast on ids that name no server to run", () => {
+    expect(() => parseLspServers("tsc-rs,pyreflly")).toThrow('Unknown LSP server "pyreflly"');
+    expect(() => parseLspServers("none,ty")).toThrow('Unknown LSP server "none"');
+    expect(() => parseLspServers("python")).toThrow('"python" is a language, not a server');
   });
 });

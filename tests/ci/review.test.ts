@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
-import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { createLogger, createMemorySink } from "../../src/logging/index.js";
@@ -672,32 +672,98 @@ describe("review", () => {
     expect(AgentMock).toHaveBeenCalled();
   });
 
-  it("logs one line for all missing LSP servers", async () => {
+  it("warns once per language when no server binary is available", async () => {
     const { sink, records } = createMemorySink();
-    await review({
-      cwd: "/repo",
-      repo: "owner/repo",
-      output: "comment",
-      lspServers: "ty,gopls",
-      lspOverrides: {
-        ty: { bin: "definitely-not-a-real-binary" },
-        gopls: { bin: "definitely-not-a-real-binary" },
-      },
-      logger: createLogger({ sink }),
-    });
+    const directory = await mkdtemp(path.join(tmpdir(), "pi-reviewer-lsp-missing-test-"));
+    try {
+      extractDiffFilesMock.mockReturnValueOnce(["a.ts"]);
+      await review({
+        cwd: directory,
+        repo: "owner/repo",
+        output: "comment",
+        lspServers: "tsc-rs",
+        lspOverrides: { "tsc-rs": { bin: path.join(directory, "absent-tsc-rs") } },
+        logger: createLogger({ sink }),
+      });
 
-    const missing = records.filter(({ event }) => event === "review.lsp.server.missing");
-    expect(missing).toHaveLength(1);
-    expect(missing[0]?.fields.servers).toEqual(
-      expect.arrayContaining([expect.stringContaining("ty"), expect.stringContaining("gopls")]),
-    );
+      const missing = records.filter(({ event }) => event === "review.lsp.language.missing");
+      expect(missing).toHaveLength(1);
+      expect(missing[0]?.fields.language).toBe("typescript");
+      expect(missing[0]?.fields.candidates).toEqual([expect.stringContaining("tsc-rs")]);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 
   it("fails fast on unknown lsp-servers ids", async () => {
     await expect(
-      review({ cwd: "/repo", repo: "owner/repo", output: "comment", lspServers: "pyright" }),
-    ).rejects.toThrow('Unknown LSP server "pyright"');
+      review({ cwd: "/repo", repo: "owner/repo", output: "comment", lspServers: "pyreflly" }),
+    ).rejects.toThrow('Unknown LSP server "pyreflly"');
     expect(createAgentSessionMock).not.toHaveBeenCalled();
+  });
+
+  it("warns when the selected server does not serve the changed files", async () => {
+    const { sink, records } = createMemorySink();
+    const directory = await mkdtemp(path.join(tmpdir(), "pi-reviewer-lsp-cover-test-"));
+    try {
+      // A real root marker, so the changed Python file resolves to a root.
+      await mkdir(path.join(directory, ".git"), { recursive: true });
+      await writeFile(path.join(directory, "x.py"), "x = 1\n", "utf8");
+      // An installed server whose include patterns never match that file.
+      const installed = path.join(directory, "pyrefly-bin");
+      await writeFile(installed, "#!/bin/sh\nexit 0\n", "utf8");
+      await chmod(installed, 0o755);
+      extractDiffFilesMock.mockReturnValueOnce(["x.py"]);
+      await review({
+        cwd: directory,
+        repo: "owner/repo",
+        output: "comment",
+        lspServers: "ty,pyrefly",
+        lspOverrides: {
+          ty: { bin: path.join(directory, "absent-ty") },
+          pyrefly: { bin: installed, include: ["**/*.pyi"] },
+        },
+        logger: createLogger({ sink }),
+      });
+
+      const uncovered = records.filter(({ event }) => event === "review.lsp.language.uncovered");
+      expect(uncovered).toHaveLength(1);
+      expect(uncovered[0]?.fields.language).toBe("python");
+      expect(uncovered[0]?.fields.files).toEqual(["x.py"]);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("warns when the changed file matched no candidate of the language", async () => {
+    const { sink, records } = createMemorySink();
+    const directory = await mkdtemp(path.join(tmpdir(), "pi-reviewer-lsp-skip-test-"));
+    try {
+      await mkdir(path.join(directory, ".git"), { recursive: true });
+      await writeFile(path.join(directory, "x.py"), "x = 1\n", "utf8");
+      const installed = path.join(directory, "pyrefly-bin");
+      await writeFile(installed, "#!/bin/sh\nexit 0\n", "utf8");
+      await chmod(installed, 0o755);
+      extractDiffFilesMock.mockReturnValueOnce(["x.py"]);
+      await review({
+        cwd: directory,
+        repo: "owner/repo",
+        output: "comment",
+        lspServers: "ty,pyrefly",
+        lspOverrides: {
+          // Matches the file, but no workspace root holds it.
+          ty: { bin: path.join(directory, "absent-ty"), rootMarkers: ["absent-marker"] },
+          pyrefly: { bin: installed, include: ["**/*.pyi"] },
+        },
+        logger: createLogger({ sink }),
+      });
+
+      const uncovered = records.filter(({ event }) => event === "review.lsp.language.uncovered");
+      expect(uncovered).toHaveLength(1);
+      expect(uncovered[0]?.fields.files).toEqual(["x.py"]);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 
   it("keeps MCP and LSP tools namespaced in a combined session", async () => {
