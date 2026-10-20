@@ -1,0 +1,850 @@
+Review	UNKNOWN STEP	﻿2026-10-20T04:04:27.4118975Z Current runner version: '2.337.0'
+Review	UNKNOWN STEP	2026-10-20T04:04:27.4140697Z ##[group]Runner Image Provisioner
+Review	UNKNOWN STEP	2026-10-20T04:04:27.4141726Z Hosted Compute Agent
+Review	UNKNOWN STEP	2026-10-20T04:04:27.4142489Z Version: 20261015.610
+Review	UNKNOWN STEP	2026-10-20T04:04:27.4143355Z Commit: 267fdb4e8bbec4ab5ea31367f3a00d5c480c7656
+Review	UNKNOWN STEP	2026-10-20T04:04:27.4144316Z Build Date: 2026-10-14T17:06:54Z
+Review	UNKNOWN STEP	2026-10-20T04:04:27.4145020Z Worker ID: {a13f74b4-6158-4acf-b45d-706e53e8892f}
+Review	UNKNOWN STEP	2026-10-20T04:04:27.4145950Z Region: centralus
+Review	UNKNOWN STEP	2026-10-20T04:04:27.4146537Z Cloud: Azure
+Review	UNKNOWN STEP	2026-10-20T04:04:27.4147072Z ##[endgroup]
+Review	UNKNOWN STEP	2026-10-20T04:04:27.4148369Z ##[group]Operating System
+Review	UNKNOWN STEP	2026-10-20T04:04:27.4149014Z Ubuntu
+Review	UNKNOWN STEP	2026-10-20T04:04:27.4149509Z 24.04.5
+Review	UNKNOWN STEP	2026-10-20T04:04:27.4150126Z LTS
+Review	UNKNOWN STEP	2026-10-20T04:04:27.4150668Z ##[endgroup]
+Review	UNKNOWN STEP	2026-10-20T04:04:27.4151285Z ##[group]Runner Image
+Review	UNKNOWN STEP	2026-10-20T04:04:27.4151870Z Image: ubuntu-24.04
+Review	UNKNOWN STEP	2026-10-20T04:04:27.4152470Z Version: 20261018.339.1
+Review	UNKNOWN STEP	2026-10-20T04:04:27.4153680Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20261018.339/images/ubuntu/Ubuntu2404-Readme.md
+Review	UNKNOWN STEP	2026-10-20T04:04:27.4154948Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20261018.339
+Review	UNKNOWN STEP	2026-10-20T04:04:27.4156014Z ##[endgroup]
+Review	UNKNOWN STEP	2026-10-20T04:04:27.4157147Z ##[group]GITHUB_TOKEN Permissions
+Review	UNKNOWN STEP	2026-10-20T04:04:27.4159038Z Contents: read
+Review	UNKNOWN STEP	2026-10-20T04:04:27.4159624Z Issues: write
+Review	UNKNOWN STEP	2026-10-20T04:04:27.4160448Z Metadata: read
+Review	UNKNOWN STEP	2026-10-20T04:04:27.4161084Z PullRequests: write
+Review	UNKNOWN STEP	2026-10-20T04:04:27.4161676Z ##[endgroup]
+Review	UNKNOWN STEP	2026-10-20T04:04:27.4163307Z Secret source: Actions
+Review	UNKNOWN STEP	2026-10-20T04:04:27.4164244Z Cache mode: write
+Review	UNKNOWN STEP	2026-10-20T04:04:27.4165112Z Prepare workflow directory
+Review	UNKNOWN STEP	2026-10-20T04:04:27.4395194Z Prepare all required actions
+Review	UNKNOWN STEP	2026-10-20T04:04:27.4428178Z Getting action download info
+Review	UNKNOWN STEP	2026-10-20T04:04:27.6643399Z Download action repository 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1' (SHA:3d3c42e5aac5ba805825da76410c181273ba90b1)
+Review	UNKNOWN STEP	2026-10-20T04:04:27.7445381Z Download action repository 'actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1' (SHA:bcd2ba49218906704ab6c1aa796996da409d3eb1)
+Review	UNKNOWN STEP	2026-10-20T04:04:28.0389469Z Download action repository 'voidzero-dev/setup-vp@3754dd7dbdb32bd8f6d28b6043de13ad3a75f21f' (SHA:3754dd7dbdb32bd8f6d28b6043de13ad3a75f21f)
+Review	UNKNOWN STEP	2026-10-20T04:04:28.4690522Z Complete job name: Review
+Review	UNKNOWN STEP	2026-10-20T04:04:28.5304004Z ##[group]Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+Review	UNKNOWN STEP	2026-10-20T04:04:28.5304784Z with:
+Review	UNKNOWN STEP	2026-10-20T04:04:28.5305174Z   fetch-depth: 0
+Review	UNKNOWN STEP	2026-10-20T04:04:28.5305595Z   ref: 9f13b3ebd4bcc9fd600ee23891ef17997a87a6fa
+Review	UNKNOWN STEP	2026-10-20T04:04:28.5306280Z   repository: esafak/pi-reviewer
+Review	UNKNOWN STEP	2026-10-20T04:04:28.5308797Z   token: ***
+Review	UNKNOWN STEP	2026-10-20T04:04:28.5309176Z   ssh-strict: true
+Review	UNKNOWN STEP	2026-10-20T04:04:28.5309562Z   ssh-user: git
+Review	UNKNOWN STEP	2026-10-20T04:04:28.5309961Z   persist-credentials: true
+Review	UNKNOWN STEP	2026-10-20T04:04:28.5310391Z   clean: true
+Review	UNKNOWN STEP	2026-10-20T04:04:28.5310799Z   sparse-checkout-cone-mode: true
+Review	UNKNOWN STEP	2026-10-20T04:04:28.5311248Z   fetch-tags: false
+Review	UNKNOWN STEP	2026-10-20T04:04:28.5311657Z   show-progress: true
+Review	UNKNOWN STEP	2026-10-20T04:04:28.5312100Z   lfs: false
+Review	UNKNOWN STEP	2026-10-20T04:04:28.5312488Z   submodules: false
+Review	UNKNOWN STEP	2026-10-20T04:04:28.5312893Z   set-safe-directory: true
+Review	UNKNOWN STEP	2026-10-20T04:04:28.5313324Z   allow-unsafe-pr-checkout: false
+Review	UNKNOWN STEP	2026-10-20T04:04:28.5313877Z ##[endgroup]
+Review	UNKNOWN STEP	2026-10-20T04:04:28.6030787Z Syncing repository: esafak/pi-reviewer
+Review	UNKNOWN STEP	2026-10-20T04:04:28.6032724Z ##[group]Getting Git version info
+Review	UNKNOWN STEP	2026-10-20T04:04:28.6033502Z Working directory is '/home/runner/work/pi-reviewer/pi-reviewer'
+Review	UNKNOWN STEP	2026-10-20T04:04:28.6034750Z [command]/usr/bin/git version
+Review	UNKNOWN STEP	2026-10-20T04:04:28.6102325Z git version 2.55.0
+Review	UNKNOWN STEP	2026-10-20T04:04:28.6117566Z ##[endgroup]
+Review	UNKNOWN STEP	2026-10-20T04:04:28.6137008Z Temporarily overriding HOME='/home/runner/work/_temp/d98dfa1a-e7dd-4868-b0a0-d567f720f89e' before making global git config changes
+Review	UNKNOWN STEP	2026-10-20T04:04:28.6138080Z Adding repository directory to the temporary git global config as a safe directory
+Review	UNKNOWN STEP	2026-10-20T04:04:28.6138953Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/pi-reviewer/pi-reviewer
+Review	UNKNOWN STEP	2026-10-20T04:04:28.6185261Z Deleting the contents of '/home/runner/work/pi-reviewer/pi-reviewer'
+Review	UNKNOWN STEP	2026-10-20T04:04:28.6189190Z ##[group]Determining repository object format
+Review	UNKNOWN STEP	2026-10-20T04:04:28.6190444Z ##[endgroup]
+Review	UNKNOWN STEP	2026-10-20T04:04:28.6191226Z ##[group]Initializing the repository
+Review	UNKNOWN STEP	2026-10-20T04:04:28.6194676Z [command]/usr/bin/git init /home/runner/work/pi-reviewer/pi-reviewer
+Review	UNKNOWN STEP	2026-10-20T04:04:28.6279500Z hint: Using 'master' as the name for the initial branch. This default branch name
+Review	UNKNOWN STEP	2026-10-20T04:04:28.6281531Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+Review	UNKNOWN STEP	2026-10-20T04:04:28.6283102Z hint: to use in all of your new repositories, which will suppress this warning,
+Review	UNKNOWN STEP	2026-10-20T04:04:28.6284408Z hint: call:
+Review	UNKNOWN STEP	2026-10-20T04:04:28.6285503Z hint:
+Review	UNKNOWN STEP	2026-10-20T04:04:28.6286501Z hint: 	git config --global init.defaultBranch <name>
+Review	UNKNOWN STEP	2026-10-20T04:04:28.6287424Z hint:
+Review	UNKNOWN STEP	2026-10-20T04:04:28.6288295Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+Review	UNKNOWN STEP	2026-10-20T04:04:28.6289573Z hint: 'development'. The just-created branch can be renamed via this command:
+Review	UNKNOWN STEP	2026-10-20T04:04:28.6290632Z hint:
+Review	UNKNOWN STEP	2026-10-20T04:04:28.6291241Z hint: 	git branch -m <name>
+Review	UNKNOWN STEP	2026-10-20T04:04:28.6291907Z hint:
+Review	UNKNOWN STEP	2026-10-20T04:04:28.6292759Z hint: Disable this message with "git config set advice.defaultBranchName false"
+Review	UNKNOWN STEP	2026-10-20T04:04:28.6294095Z Initialized empty Git repository in /home/runner/work/pi-reviewer/pi-reviewer/.git/
+Review	UNKNOWN STEP	2026-10-20T04:04:28.6298069Z [command]/usr/bin/git remote add origin https://github.com/esafak/pi-reviewer
+Review	UNKNOWN STEP	2026-10-20T04:04:28.6346298Z ##[endgroup]
+Review	UNKNOWN STEP	2026-10-20T04:04:28.6347439Z ##[group]Disabling automatic garbage collection
+Review	UNKNOWN STEP	2026-10-20T04:04:28.6358530Z [command]/usr/bin/git config --local gc.auto 0
+Review	UNKNOWN STEP	2026-10-20T04:04:28.6396943Z ##[endgroup]
+Review	UNKNOWN STEP	2026-10-20T04:04:28.6398029Z ##[group]Setting up auth
+Review	UNKNOWN STEP	2026-10-20T04:04:28.6398853Z Removing SSH command configuration
+Review	UNKNOWN STEP	2026-10-20T04:04:28.6407894Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+Review	UNKNOWN STEP	2026-10-20T04:04:28.6450457Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+Review	UNKNOWN STEP	2026-10-20T04:04:28.6773141Z Removing HTTP extra header
+Review	UNKNOWN STEP	2026-10-20T04:04:28.6777665Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+Review	UNKNOWN STEP	2026-10-20T04:04:28.6817628Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+Review	UNKNOWN STEP	2026-10-20T04:04:28.7018796Z Removing includeIf entries pointing to credentials config files
+Review	UNKNOWN STEP	2026-10-20T04:04:28.7019719Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+Review	UNKNOWN STEP	2026-10-20T04:04:28.7060296Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+Review	UNKNOWN STEP	2026-10-20T04:04:28.7268162Z [command]/usr/bin/git config --file /home/runner/work/_temp/git-credentials-ca25bc1e-f7da-4588-bddd-3f4ba4d432c3.config http.https://github.com/.extraheader AUTHORIZATION: basic ***
+Review	UNKNOWN STEP	2026-10-20T04:04:28.7313921Z [command]/usr/bin/git config --local includeIf.gitdir:/home/runner/work/pi-reviewer/pi-reviewer/.git.path /home/runner/work/_temp/git-credentials-ca25bc1e-f7da-4588-bddd-3f4ba4d432c3.config
+Review	UNKNOWN STEP	2026-10-20T04:04:28.7356235Z [command]/usr/bin/git config --local includeIf.gitdir:/home/runner/work/pi-reviewer/pi-reviewer/.git/worktrees/*.path /home/runner/work/_temp/git-credentials-ca25bc1e-f7da-4588-bddd-3f4ba4d432c3.config
+Review	UNKNOWN STEP	2026-10-20T04:04:28.7398646Z [command]/usr/bin/git config --local includeIf.gitdir:/github/workspace/.git.path /github/runner_temp/git-credentials-ca25bc1e-f7da-4588-bddd-3f4ba4d432c3.config
+Review	UNKNOWN STEP	2026-10-20T04:04:28.7439044Z [command]/usr/bin/git config --local includeIf.gitdir:/github/workspace/.git/worktrees/*.path /github/runner_temp/git-credentials-ca25bc1e-f7da-4588-bddd-3f4ba4d432c3.config
+Review	UNKNOWN STEP	2026-10-20T04:04:28.7476979Z ##[endgroup]
+Review	UNKNOWN STEP	2026-10-20T04:04:28.7477730Z ##[group]Fetching the repository
+Review	UNKNOWN STEP	2026-10-20T04:04:28.7482167Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules origin +refs/heads/*:refs/remotes/origin/* +refs/tags/*:refs/tags/*
+Review	UNKNOWN STEP	2026-10-20T04:04:29.7989709Z From https://github.com/esafak/pi-reviewer
+Review	UNKNOWN STEP	2026-10-20T04:04:29.7991109Z  * [new branch]      docs-ci-forward -> origin/docs-ci-forward
+Review	UNKNOWN STEP	2026-10-20T04:04:29.7992369Z  * [new branch]      main            -> origin/main
+Review	UNKNOWN STEP	2026-10-20T04:04:29.7993858Z  * [new branch]      renovate/marked-18.x-lockfile -> origin/renovate/marked-18.x-lockfile
+Review	UNKNOWN STEP	2026-10-20T04:04:29.7995867Z  * [new branch]      renovate/pi-mcp-adapter-5.x -> origin/renovate/pi-mcp-adapter-5.x
+Review	UNKNOWN STEP	2026-10-20T04:04:29.7998287Z  * [new branch]      renovate/vitejs-plugin-react-6.x-lockfile -> origin/renovate/vitejs-plugin-react-6.x-lockfile
+Review	UNKNOWN STEP	2026-10-20T04:04:29.8002715Z [command]/usr/bin/git rev-parse --verify --quiet 9f13b3ebd4bcc9fd600ee23891ef17997a87a6fa^{object}
+Review	UNKNOWN STEP	2026-10-20T04:04:29.8034396Z 9f13b3ebd4bcc9fd600ee23891ef17997a87a6fa
+Review	UNKNOWN STEP	2026-10-20T04:04:29.8039708Z ##[endgroup]
+Review	UNKNOWN STEP	2026-10-20T04:04:29.8041986Z ##[group]Determining the checkout info
+Review	UNKNOWN STEP	2026-10-20T04:04:29.8044598Z ##[endgroup]
+Review	UNKNOWN STEP	2026-10-20T04:04:29.8046052Z [command]/usr/bin/git sparse-checkout disable
+Review	UNKNOWN STEP	2026-10-20T04:04:29.8100533Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+Review	UNKNOWN STEP	2026-10-20T04:04:29.8143347Z ##[group]Checking out the ref
+Review	UNKNOWN STEP	2026-10-20T04:04:29.8146254Z [command]/usr/bin/git checkout --progress --force 9f13b3ebd4bcc9fd600ee23891ef17997a87a6fa
+Review	UNKNOWN STEP	2026-10-20T04:04:29.8819505Z Note: switching to '9f13b3ebd4bcc9fd600ee23891ef17997a87a6fa'.
+Review	UNKNOWN STEP	2026-10-20T04:04:29.8820998Z 
+Review	UNKNOWN STEP	2026-10-20T04:04:29.8821792Z You are in 'detached HEAD' state. You can look around, make experimental
+Review	UNKNOWN STEP	2026-10-20T04:04:29.8823568Z changes and commit them, and you can discard any commits you make in this
+Review	UNKNOWN STEP	2026-10-20T04:04:29.8825358Z state without impacting any branches by switching back to a branch.
+Review	UNKNOWN STEP	2026-10-20T04:04:29.8826847Z 
+Review	UNKNOWN STEP	2026-10-20T04:04:29.8827875Z If you want to create a new branch to retain commits you create, you may
+Review	UNKNOWN STEP	2026-10-20T04:04:29.8830112Z do so (now or later) by using -c with the switch command. Example:
+Review	UNKNOWN STEP	2026-10-20T04:04:29.8831347Z 
+Review	UNKNOWN STEP	2026-10-20T04:04:29.8832532Z   git switch -c <new-branch-name>
+Review	UNKNOWN STEP	2026-10-20T04:04:29.8833520Z 
+Review	UNKNOWN STEP	2026-10-20T04:04:29.8834134Z Or undo this operation with:
+Review	UNKNOWN STEP	2026-10-20T04:04:29.8835034Z 
+Review	UNKNOWN STEP	2026-10-20T04:04:29.8835775Z   git switch -
+Review	UNKNOWN STEP	2026-10-20T04:04:29.8836597Z 
+Review	UNKNOWN STEP	2026-10-20T04:04:29.8837880Z Turn off this advice by setting config variable advice.detachedHead to false
+Review	UNKNOWN STEP	2026-10-20T04:04:29.8839294Z 
+Review	UNKNOWN STEP	2026-10-20T04:04:29.8840446Z HEAD is now at 9f13b3e docs: CI-forward README and single-file CI guide for marketplace
+Review	UNKNOWN STEP	2026-10-20T04:04:29.8845336Z ##[endgroup]
+Review	UNKNOWN STEP	2026-10-20T04:04:29.8887190Z [command]/usr/bin/git log -1 --format=%H
+Review	UNKNOWN STEP	2026-10-20T04:04:29.8922404Z 9f13b3ebd4bcc9fd600ee23891ef17997a87a6fa
+Review	UNKNOWN STEP	2026-10-20T04:04:29.9142095Z ##[group]Run git fetch origin '+refs/pull/*/head:refs/remotes/origin/pr/*' --no-tags
+Review	UNKNOWN STEP	2026-10-20T04:04:29.9143881Z ^[[36;1mgit fetch origin '+refs/pull/*/head:refs/remotes/origin/pr/*' --no-tags^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:29.9273617Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+Review	UNKNOWN STEP	2026-10-20T04:04:29.9274833Z ##[endgroup]
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7669759Z From https://github.com/esafak/pi-reviewer
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7670267Z  * [new ref]         refs/pull/1/head   -> origin/pr/1
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7670663Z  * [new ref]         refs/pull/10/head  -> origin/pr/10
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7671064Z  * [new ref]         refs/pull/100/head -> origin/pr/100
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7671484Z  * [new ref]         refs/pull/101/head -> origin/pr/101
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7671883Z  * [new ref]         refs/pull/102/head -> origin/pr/102
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7672290Z  * [new ref]         refs/pull/103/head -> origin/pr/103
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7672778Z  * [new ref]         refs/pull/104/head -> origin/pr/104
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7673181Z  * [new ref]         refs/pull/105/head -> origin/pr/105
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7673963Z  * [new ref]         refs/pull/106/head -> origin/pr/106
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7674350Z  * [new ref]         refs/pull/107/head -> origin/pr/107
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7674740Z  * [new ref]         refs/pull/108/head -> origin/pr/108
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7675126Z  * [new ref]         refs/pull/109/head -> origin/pr/109
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7675533Z  * [new ref]         refs/pull/11/head  -> origin/pr/11
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7676107Z  * [new ref]         refs/pull/110/head -> origin/pr/110
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7676492Z  * [new ref]         refs/pull/111/head -> origin/pr/111
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7676744Z  * [new ref]         refs/pull/112/head -> origin/pr/112
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7676989Z  * [new ref]         refs/pull/113/head -> origin/pr/113
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7677239Z  * [new ref]         refs/pull/114/head -> origin/pr/114
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7677493Z  * [new ref]         refs/pull/115/head -> origin/pr/115
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7677742Z  * [new ref]         refs/pull/116/head -> origin/pr/116
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7677991Z  * [new ref]         refs/pull/117/head -> origin/pr/117
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7678252Z  * [new ref]         refs/pull/118/head -> origin/pr/118
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7678508Z  * [new ref]         refs/pull/119/head -> origin/pr/119
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7678763Z  * [new ref]         refs/pull/12/head  -> origin/pr/12
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7679015Z  * [new ref]         refs/pull/120/head -> origin/pr/120
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7679264Z  * [new ref]         refs/pull/121/head -> origin/pr/121
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7679508Z  * [new ref]         refs/pull/122/head -> origin/pr/122
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7679758Z  * [new ref]         refs/pull/123/head -> origin/pr/123
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7680083Z  * [new ref]         refs/pull/124/head -> origin/pr/124
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7680632Z  * [new ref]         refs/pull/125/head -> origin/pr/125
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7680879Z  * [new ref]         refs/pull/126/head -> origin/pr/126
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7681128Z  * [new ref]         refs/pull/127/head -> origin/pr/127
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7681375Z  * [new ref]         refs/pull/128/head -> origin/pr/128
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7681623Z  * [new ref]         refs/pull/129/head -> origin/pr/129
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7681871Z  * [new ref]         refs/pull/13/head  -> origin/pr/13
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7682122Z  * [new ref]         refs/pull/130/head -> origin/pr/130
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7682368Z  * [new ref]         refs/pull/131/head -> origin/pr/131
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7682619Z  * [new ref]         refs/pull/132/head -> origin/pr/132
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7682864Z  * [new ref]         refs/pull/133/head -> origin/pr/133
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7683114Z  * [new ref]         refs/pull/134/head -> origin/pr/134
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7683358Z  * [new ref]         refs/pull/135/head -> origin/pr/135
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7683605Z  * [new ref]         refs/pull/136/head -> origin/pr/136
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7684015Z  * [new ref]         refs/pull/137/head -> origin/pr/137
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7684269Z  * [new ref]         refs/pull/138/head -> origin/pr/138
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7684520Z  * [new ref]         refs/pull/139/head -> origin/pr/139
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7684766Z  * [new ref]         refs/pull/14/head  -> origin/pr/14
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7685016Z  * [new ref]         refs/pull/140/head -> origin/pr/140
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7685260Z  * [new ref]         refs/pull/141/head -> origin/pr/141
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7685508Z  * [new ref]         refs/pull/142/head -> origin/pr/142
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7685965Z  * [new ref]         refs/pull/143/head -> origin/pr/143
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7686336Z  * [new ref]         refs/pull/144/head -> origin/pr/144
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7686704Z  * [new ref]         refs/pull/145/head -> origin/pr/145
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7687100Z  * [new ref]         refs/pull/146/head -> origin/pr/146
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7687480Z  * [new ref]         refs/pull/147/head -> origin/pr/147
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7687883Z  * [new ref]         refs/pull/148/head -> origin/pr/148
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7688273Z  * [new ref]         refs/pull/149/head -> origin/pr/149
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7688818Z  * [new ref]         refs/pull/15/head  -> origin/pr/15
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7689203Z  * [new ref]         refs/pull/150/head -> origin/pr/150
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7689707Z  * [new ref]         refs/pull/151/head -> origin/pr/151
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7690080Z  * [new ref]         refs/pull/152/head -> origin/pr/152
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7690480Z  * [new ref]         refs/pull/153/head -> origin/pr/153
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7690730Z  * [new ref]         refs/pull/154/head -> origin/pr/154
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7690981Z  * [new ref]         refs/pull/155/head -> origin/pr/155
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7691227Z  * [new ref]         refs/pull/156/head -> origin/pr/156
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7691495Z  * [new ref]         refs/pull/157/head -> origin/pr/157
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7691784Z  * [new ref]         refs/pull/158/head -> origin/pr/158
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7692038Z  * [new ref]         refs/pull/159/head -> origin/pr/159
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7692284Z  * [new ref]         refs/pull/16/head  -> origin/pr/16
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7692541Z  * [new ref]         refs/pull/160/head -> origin/pr/160
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7692789Z  * [new ref]         refs/pull/161/head -> origin/pr/161
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7693040Z  * [new ref]         refs/pull/162/head -> origin/pr/162
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7693285Z  * [new ref]         refs/pull/163/head -> origin/pr/163
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7693533Z  * [new ref]         refs/pull/164/head -> origin/pr/164
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7693777Z  * [new ref]         refs/pull/165/head -> origin/pr/165
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7694021Z  * [new ref]         refs/pull/166/head -> origin/pr/166
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7694267Z  * [new ref]         refs/pull/167/head -> origin/pr/167
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7694512Z  * [new ref]         refs/pull/168/head -> origin/pr/168
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7694760Z  * [new ref]         refs/pull/17/head  -> origin/pr/17
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7695006Z  * [new ref]         refs/pull/18/head  -> origin/pr/18
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7695266Z  * [new ref]         refs/pull/19/head  -> origin/pr/19
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7695529Z  * [new ref]         refs/pull/2/head   -> origin/pr/2
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7695989Z  * [new ref]         refs/pull/20/head  -> origin/pr/20
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7696244Z  * [new ref]         refs/pull/21/head  -> origin/pr/21
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7696495Z  * [new ref]         refs/pull/22/head  -> origin/pr/22
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7696744Z  * [new ref]         refs/pull/23/head  -> origin/pr/23
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7696995Z  * [new ref]         refs/pull/24/head  -> origin/pr/24
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7697242Z  * [new ref]         refs/pull/25/head  -> origin/pr/25
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7697495Z  * [new ref]         refs/pull/26/head  -> origin/pr/26
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7697745Z  * [new ref]         refs/pull/27/head  -> origin/pr/27
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7697996Z  * [new ref]         refs/pull/28/head  -> origin/pr/28
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7698377Z  * [new ref]         refs/pull/29/head  -> origin/pr/29
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7698631Z  * [new ref]         refs/pull/3/head   -> origin/pr/3
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7698889Z  * [new ref]         refs/pull/30/head  -> origin/pr/30
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7699137Z  * [new ref]         refs/pull/31/head  -> origin/pr/31
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7699386Z  * [new ref]         refs/pull/32/head  -> origin/pr/32
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7699632Z  * [new ref]         refs/pull/33/head  -> origin/pr/33
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7699883Z  * [new ref]         refs/pull/34/head  -> origin/pr/34
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7700129Z  * [new ref]         refs/pull/35/head  -> origin/pr/35
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7700381Z  * [new ref]         refs/pull/36/head  -> origin/pr/36
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7700631Z  * [new ref]         refs/pull/37/head  -> origin/pr/37
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7700881Z  * [new ref]         refs/pull/38/head  -> origin/pr/38
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7701127Z  * [new ref]         refs/pull/39/head  -> origin/pr/39
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7701380Z  * [new ref]         refs/pull/40/head  -> origin/pr/40
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7701628Z  * [new ref]         refs/pull/41/head  -> origin/pr/41
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7701960Z  * [new ref]         refs/pull/42/head  -> origin/pr/42
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7702208Z  * [new ref]         refs/pull/43/head  -> origin/pr/43
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7702453Z  * [new ref]         refs/pull/44/head  -> origin/pr/44
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7702703Z  * [new ref]         refs/pull/45/head  -> origin/pr/45
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7702952Z  * [new ref]         refs/pull/46/head  -> origin/pr/46
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7703204Z  * [new ref]         refs/pull/47/head  -> origin/pr/47
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7703452Z  * [new ref]         refs/pull/48/head  -> origin/pr/48
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7703701Z  * [new ref]         refs/pull/49/head  -> origin/pr/49
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7703949Z  * [new ref]         refs/pull/5/head   -> origin/pr/5
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7704200Z  * [new ref]         refs/pull/50/head  -> origin/pr/50
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7704453Z  * [new ref]         refs/pull/51/head  -> origin/pr/51
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7704704Z  * [new ref]         refs/pull/52/head  -> origin/pr/52
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7704958Z  * [new ref]         refs/pull/53/head  -> origin/pr/53
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7705206Z  * [new ref]         refs/pull/54/head  -> origin/pr/54
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7705453Z  * [new ref]         refs/pull/55/head  -> origin/pr/55
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7705883Z  * [new ref]         refs/pull/56/head  -> origin/pr/56
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7706137Z  * [new ref]         refs/pull/57/head  -> origin/pr/57
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7706386Z  * [new ref]         refs/pull/58/head  -> origin/pr/58
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7706637Z  * [new ref]         refs/pull/59/head  -> origin/pr/59
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7706886Z  * [new ref]         refs/pull/6/head   -> origin/pr/6
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7707139Z  * [new ref]         refs/pull/60/head  -> origin/pr/60
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7707386Z  * [new ref]         refs/pull/61/head  -> origin/pr/61
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7707640Z  * [new ref]         refs/pull/62/head  -> origin/pr/62
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7707887Z  * [new ref]         refs/pull/63/head  -> origin/pr/63
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7708141Z  * [new ref]         refs/pull/64/head  -> origin/pr/64
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7708388Z  * [new ref]         refs/pull/65/head  -> origin/pr/65
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7708637Z  * [new ref]         refs/pull/66/head  -> origin/pr/66
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7708883Z  * [new ref]         refs/pull/67/head  -> origin/pr/67
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7709131Z  * [new ref]         refs/pull/68/head  -> origin/pr/68
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7709376Z  * [new ref]         refs/pull/69/head  -> origin/pr/69
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7709624Z  * [new ref]         refs/pull/7/head   -> origin/pr/7
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7709875Z  * [new ref]         refs/pull/70/head  -> origin/pr/70
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7710126Z  * [new ref]         refs/pull/71/head  -> origin/pr/71
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7710395Z  * [new ref]         refs/pull/72/head  -> origin/pr/72
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7710768Z  * [new ref]         refs/pull/73/head  -> origin/pr/73
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7711181Z  * [new ref]         refs/pull/74/head  -> origin/pr/74
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7711489Z  * [new ref]         refs/pull/75/head  -> origin/pr/75
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7711738Z  * [new ref]         refs/pull/76/head  -> origin/pr/76
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7711987Z  * [new ref]         refs/pull/77/head  -> origin/pr/77
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7712236Z  * [new ref]         refs/pull/78/head  -> origin/pr/78
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7712483Z  * [new ref]         refs/pull/79/head  -> origin/pr/79
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7712739Z  * [new ref]         refs/pull/8/head   -> origin/pr/8
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7712989Z  * [new ref]         refs/pull/80/head  -> origin/pr/80
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7713240Z  * [new ref]         refs/pull/81/head  -> origin/pr/81
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7713484Z  * [new ref]         refs/pull/82/head  -> origin/pr/82
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7713730Z  * [new ref]         refs/pull/83/head  -> origin/pr/83
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7713984Z  * [new ref]         refs/pull/84/head  -> origin/pr/84
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7714231Z  * [new ref]         refs/pull/85/head  -> origin/pr/85
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7714588Z  * [new ref]         refs/pull/86/head  -> origin/pr/86
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7714851Z  * [new ref]         refs/pull/87/head  -> origin/pr/87
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7715104Z  * [new ref]         refs/pull/88/head  -> origin/pr/88
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7715355Z  * [new ref]         refs/pull/89/head  -> origin/pr/89
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7715605Z  * [new ref]         refs/pull/9/head   -> origin/pr/9
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7716030Z  * [new ref]         refs/pull/90/head  -> origin/pr/90
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7716277Z  * [new ref]         refs/pull/91/head  -> origin/pr/91
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7716530Z  * [new ref]         refs/pull/92/head  -> origin/pr/92
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7716778Z  * [new ref]         refs/pull/93/head  -> origin/pr/93
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7717028Z  * [new ref]         refs/pull/94/head  -> origin/pr/94
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7717285Z  * [new ref]         refs/pull/95/head  -> origin/pr/95
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7717530Z  * [new ref]         refs/pull/96/head  -> origin/pr/96
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7717789Z  * [new ref]         refs/pull/97/head  -> origin/pr/97
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7718036Z  * [new ref]         refs/pull/98/head  -> origin/pr/98
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7718285Z  * [new ref]         refs/pull/99/head  -> origin/pr/99
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7827708Z ##[group]Run actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7828038Z with:
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7828764Z   client-id: ***
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7832841Z   private-key: ***
+Review	UNKNOWN STEP	
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7833205Z   permission-contents: write
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7833599Z   permission-pull-requests: write
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7834013Z   permission-issues: write
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7834363Z   skip-token-revoke: false
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7834798Z   github-api-url: https://api.github.com
+Review	UNKNOWN STEP	2026-10-20T04:04:30.7835194Z ##[endgroup]
+Review	UNKNOWN STEP	2026-10-20T04:04:30.8356462Z Inputs 'owner' and 'repositories' are not set. Creating token for this repository (esafak/pi-reviewer).
+Review	UNKNOWN STEP	2026-10-20T04:04:31.3181055Z ##[group]Run voidzero-dev/setup-vp@3754dd7dbdb32bd8f6d28b6043de13ad3a75f21f
+Review	UNKNOWN STEP	2026-10-20T04:04:31.3181348Z with:
+Review	UNKNOWN STEP	2026-10-20T04:04:31.3181512Z   cache: true
+Review	UNKNOWN STEP	2026-10-20T04:04:31.3181674Z   run-install: false
+Review	UNKNOWN STEP	2026-10-20T04:04:31.3181847Z   node-manager: false
+Review	UNKNOWN STEP	2026-10-20T04:04:31.3182017Z   sfw: false
+Review	UNKNOWN STEP	2026-10-20T04:04:31.3182172Z   cache-save: true
+Review	UNKNOWN STEP	2026-10-20T04:04:31.3182340Z ##[endgroup]
+Review	UNKNOWN STEP	2026-10-20T04:04:31.4031252Z Resolved Vite+ version '1.0.0' from package.json
+Review	UNKNOWN STEP	2026-10-20T04:04:31.4035995Z Installing Vite+@1.0.0...
+Review	UNKNOWN STEP	2026-10-20T04:04:31.4063974Z [command]/usr/bin/bash -c set +u
+Review	UNKNOWN STEP	2026-10-20T04:04:31.4064556Z set -eo pipefail
+Review	UNKNOWN STEP	2026-10-20T04:04:31.4064976Z installer_file="$(mktemp "${TMPDIR:-/tmp}/setup-vp-install.XXXXXX")"
+Review	UNKNOWN STEP	2026-10-20T04:04:31.4065471Z trap 'rm -f "$installer_file"' EXIT
+Review	UNKNOWN STEP	2026-10-20T04:04:31.4065957Z : > "$SETUP_VP_DIRS_FILE"
+Review	UNKNOWN STEP	2026-10-20T04:04:31.4066297Z if command -v curl >/dev/null 2>&1; then
+Review	UNKNOWN STEP	2026-10-20T04:04:31.4067320Z   curl -fsSL --connect-timeout 5 --max-time 15 "https://raw.githubusercontent.com/voidzero-dev/vite-plus/v1.0.0/packages/cli/install.sh" -o "$installer_file"
+Review	UNKNOWN STEP	2026-10-20T04:04:31.4068098Z elif command -v wget >/dev/null 2>&1; then
+Review	UNKNOWN STEP	2026-10-20T04:04:31.4068946Z   wget -q -T 15 -t 1 -O "$installer_file" "https://raw.githubusercontent.com/voidzero-dev/vite-plus/v1.0.0/packages/cli/install.sh"
+Review	UNKNOWN STEP	2026-10-20T04:04:31.4069990Z else
+Review	UNKNOWN STEP	2026-10-20T04:04:31.4070497Z   echo "setup-vp: curl or wget is required to download the installer." >&2
+Review	UNKNOWN STEP	2026-10-20T04:04:31.4071067Z   exit 127
+Review	UNKNOWN STEP	2026-10-20T04:04:31.4071457Z fi
+Review	UNKNOWN STEP	2026-10-20T04:04:31.4071850Z source "$installer_file"
+Review	UNKNOWN STEP	2026-10-20T04:04:31.4072408Z vp_dir="${SHIM_DIR:-${INSTALL_DIR:-${VP_HOME:-$HOME/.vite-plus}}/bin}"
+Review	UNKNOWN STEP	2026-10-20T04:04:31.4072983Z if [ -x "$vp_dir/vp" ]; then
+Review	UNKNOWN STEP	2026-10-20T04:04:31.4073467Z   "$vp_dir/vp" --version > "$SETUP_VP_DIRS_FILE"
+Review	UNKNOWN STEP	2026-10-20T04:04:31.4074003Z   VP_DUMP_DIRS=1 "$vp_dir/vp" >> "$SETUP_VP_DIRS_FILE"
+Review	UNKNOWN STEP	2026-10-20T04:04:31.4074479Z fi
+Review	UNKNOWN STEP	2026-10-20T04:04:31.9984541Z info: installing vite-plus@1.0.0...
+Review	UNKNOWN STEP	2026-10-20T04:04:31.9985467Z info: Preparing Node.js and pnpm...
+Review	UNKNOWN STEP	2026-10-20T04:04:33.5727675Z info: Installing dependencies...
+Review	UNKNOWN STEP	2026-10-20T04:04:35.3171876Z ✓ Dependencies installed.
+Review	UNKNOWN STEP	2026-10-20T04:04:35.3183944Z Setup:
+Review	UNKNOWN STEP	2026-10-20T04:04:35.3184289Z   Preparing vite-plus environment.
+Review	UNKNOWN STEP	2026-10-20T04:04:35.3184532Z 
+Review	UNKNOWN STEP	2026-10-20T04:04:35.3212380Z Created Shims:
+Review	UNKNOWN STEP	2026-10-20T04:04:35.3212971Z   /home/runner/.local/share/vite-plus/bin/node
+Review	UNKNOWN STEP	2026-10-20T04:04:35.3213574Z   /home/runner/.local/share/vite-plus/bin/npm
+Review	UNKNOWN STEP	2026-10-20T04:04:35.3214244Z   /home/runner/.local/share/vite-plus/bin/npx
+Review	UNKNOWN STEP	2026-10-20T04:04:35.3214644Z   /home/runner/.local/share/vite-plus/bin/pnpm
+Review	UNKNOWN STEP	2026-10-20T04:04:35.3215019Z   /home/runner/.local/share/vite-plus/bin/pnpx
+Review	UNKNOWN STEP	2026-10-20T04:04:35.3215371Z   /home/runner/.local/share/vite-plus/bin/pn
+Review	UNKNOWN STEP	2026-10-20T04:04:35.3215885Z   /home/runner/.local/share/vite-plus/bin/pnx
+Review	UNKNOWN STEP	2026-10-20T04:04:35.3216219Z   /home/runner/.local/share/vite-plus/bin/yarn
+Review	UNKNOWN STEP	2026-10-20T04:04:35.3216629Z   /home/runner/.local/share/vite-plus/bin/yarnpkg
+Review	UNKNOWN STEP	2026-10-20T04:04:35.3217008Z   /home/runner/.local/share/vite-plus/bin/bun
+Review	UNKNOWN STEP	2026-10-20T04:04:35.3217356Z   /home/runner/.local/share/vite-plus/bin/bunx
+Review	UNKNOWN STEP	2026-10-20T04:04:35.3217701Z   /home/runner/.local/share/vite-plus/bin/vpx
+Review	UNKNOWN STEP	2026-10-20T04:04:35.3218048Z   /home/runner/.local/share/vite-plus/bin/vpr
+Review	UNKNOWN STEP	2026-10-20T04:04:35.3218258Z 
+Review	UNKNOWN STEP	2026-10-20T04:04:35.3218371Z Next Steps:
+Review	UNKNOWN STEP	2026-10-20T04:04:35.3218617Z   For Bash, run:
+Review	UNKNOWN STEP	2026-10-20T04:04:35.3218893Z   . "/home/runner/.config/vite-plus/env"
+Review	UNKNOWN STEP	2026-10-20T04:04:35.3219107Z 
+Review	UNKNOWN STEP	2026-10-20T04:04:35.3219418Z   If your ~/.bashrc does not already load Vite+, add this command for interactive non-login Bash sessions.
+Review	UNKNOWN STEP	2026-10-20T04:04:35.3220012Z   Login Bash shells must also load the command through their login profile.
+Review	UNKNOWN STEP	2026-10-20T04:04:35.3220324Z 
+Review	UNKNOWN STEP	2026-10-20T04:04:35.3220618Z   Restart an already-running IDE to load its environment. Run `vp env doctor` to verify.
+Review	UNKNOWN STEP	2026-10-20T04:04:35.3225312Z ✓ Vite+ setup complete.
+Review	UNKNOWN STEP	2026-10-20T04:04:35.3437384Z Disabling Vite+ Node.js version management...
+Review	UNKNOWN STEP	2026-10-20T04:04:35.3446675Z [command]/home/runner/.local/share/vite-plus/bin/vp env off node
+Review	UNKNOWN STEP	2026-10-20T04:04:35.3511301Z ✓ Node.js management set to system-first.
+Review	UNKNOWN STEP	2026-10-20T04:04:35.3511595Z 
+Review	UNKNOWN STEP	2026-10-20T04:04:35.3511877Z Selected commands and shims will now prefer system tools, falling back to managed tools.
+Review	UNKNOWN STEP	2026-10-20T04:04:35.3512220Z 
+Review	UNKNOWN STEP	2026-10-20T04:04:35.3512371Z Run `vp env on` to always use Vite+ managed tools.
+Review	UNKNOWN STEP	2026-10-20T04:04:35.3520741Z Auto-detected lock file: pnpm-lock.yaml
+Review	UNKNOWN STEP	2026-10-20T04:04:35.3521275Z Using lock file: /home/runner/work/pi-reviewer/pi-reviewer/pnpm-lock.yaml
+Review	UNKNOWN STEP	2026-10-20T04:04:35.3521656Z Resolving dependency cache directory in: /home/runner/work/pi-reviewer/pi-reviewer
+Review	UNKNOWN STEP	2026-10-20T04:04:36.0468991Z Cache hit for: vite-plus-Linux-x64-pnpm-929b1739cf2a8e69a82f7682f60083687bdcf0292960b67bb4cba8e560cec5b2
+Review	UNKNOWN STEP	2026-10-20T04:04:37.2418188Z Received 117440512 of 354549175 (33.1%), 111.9 MBs/sec
+Review	UNKNOWN STEP	2026-10-20T04:04:38.2457005Z Received 297795584 of 354549175 (84.0%), 141.9 MBs/sec
+Review	UNKNOWN STEP	2026-10-20T04:04:38.5245618Z Received 354549175 of 354549175 (100.0%), 148.0 MBs/sec
+Review	UNKNOWN STEP	2026-10-20T04:04:38.5246393Z Cache Size: ~338 MB (354549175 B)
+Review	UNKNOWN STEP	2026-10-20T04:04:38.5266907Z [command]/usr/bin/tar -xf /home/runner/work/_temp/fbcaa648-7cab-441f-af1a-373808a92175/cache.tzst -P -C /home/runner/work/pi-reviewer/pi-reviewer --use-compress-program unzstd
+Review	UNKNOWN STEP	2026-10-20T04:04:40.8618563Z Cache restored successfully
+Review	UNKNOWN STEP	2026-10-20T04:04:41.1013332Z Cache restored from key: vite-plus-Linux-x64-pnpm-929b1739cf2a8e69a82f7682f60083687bdcf0292960b67bb4cba8e560cec5b2
+Review	UNKNOWN STEP	2026-10-20T04:04:41.1186128Z vp v1.0.0
+Review	UNKNOWN STEP	2026-10-20T04:04:41.1186348Z 
+Review	UNKNOWN STEP	2026-10-20T04:04:41.1186468Z Local vite-plus:
+Review	UNKNOWN STEP	2026-10-20T04:04:41.1186743Z   vite-plus  Not found
+Review	UNKNOWN STEP	2026-10-20T04:04:41.1186909Z 
+Review	UNKNOWN STEP	2026-10-20T04:04:41.1187015Z Tools:
+Review	UNKNOWN STEP	2026-10-20T04:04:41.1187266Z   vite             Not found
+Review	UNKNOWN STEP	2026-10-20T04:04:41.1187564Z   rolldown         Not found
+Review	UNKNOWN STEP	2026-10-20T04:04:41.1187848Z   vitest           Not found
+Review	UNKNOWN STEP	2026-10-20T04:04:41.1188185Z   oxfmt            Not found
+Review	UNKNOWN STEP	2026-10-20T04:04:41.1188531Z   oxlint           Not found
+Review	UNKNOWN STEP	2026-10-20T04:04:41.1189139Z   oxlint-tsgolint  Not found
+Review	UNKNOWN STEP	2026-10-20T04:04:41.1189413Z   tsdown           Not found
+Review	UNKNOWN STEP	2026-10-20T04:04:41.1189573Z 
+Review	UNKNOWN STEP	2026-10-20T04:04:41.1189681Z Environment:
+Review	UNKNOWN STEP	2026-10-20T04:04:41.1189938Z   Package manager  pnpm v12.9.1
+Review	UNKNOWN STEP	2026-10-20T04:04:41.1190254Z   Node.js          v24.22.0 (devEngines.runtime)
+Review	UNKNOWN STEP	2026-10-20T04:04:41.1470052Z ##[group]Run npm ci --prefix .github/lsp-tools --no-audit --no-fund
+Review	UNKNOWN STEP	2026-10-20T04:04:41.1470412Z ^[[36;1mnpm ci --prefix .github/lsp-tools --no-audit --no-fund^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:41.1470756Z ^[[36;1mecho "$GITHUB_WORKSPACE/.github/lsp-tools/node_modules/.bin" >> "$GITHUB_PATH"^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:41.1517475Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+Review	UNKNOWN STEP	2026-10-20T04:04:41.1517728Z env:
+Review	UNKNOWN STEP	2026-10-20T04:04:41.1518561Z   PATH: /home/runner/.local/share/vite-plus/bin:/snap/bin:/home/runner/.local/bin:/opt/pipx_bin:/home/runner/.cargo/bin:/home/runner/.config/composer/vendor/bin:/usr/local/.ghcup/bin:/home/runner/.dotnet/tools:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin:/home/runner/.local/share/vite-plus/fallback-bin
+Review	UNKNOWN STEP	2026-10-20T04:04:41.1519391Z ##[endgroup]
+Review	UNKNOWN STEP	2026-10-20T04:04:42.4862469Z 
+Review	UNKNOWN STEP	2026-10-20T04:04:42.4863156Z added 2 packages in 1s
+Review	UNKNOWN STEP	2026-10-20T04:04:42.5358081Z ##[group]Run if [ -z "$MODEL_NAME" ]; then
+Review	UNKNOWN STEP	2026-10-20T04:04:42.5358365Z ^[[36;1mif [ -z "$MODEL_NAME" ]; then^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:42.5358631Z ^[[36;1m  echo "::error::Repository variable MODEL_NAME is required"^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:42.5358879Z ^[[36;1m  exit 1^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:42.5359044Z ^[[36;1mfi^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:42.5359219Z ^[[36;1mprovider="${MODEL_NAME%%/*}"^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:42.5359428Z ^[[36;1mcase "$provider" in^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:42.5359633Z ^[[36;1m  openai) key="$OPENAI_API_KEY" ;;^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:42.5359866Z ^[[36;1m  anthropic) key="$ANTHROPIC_API_KEY" ;;^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:42.5360096Z ^[[36;1m  zai) key="$ZAI_API_KEY" ;;^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:42.5360377Z ^[[36;1m  *) echo "::error::Unsupported provider in MODEL_NAME: $provider"; exit 1 ;;^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:42.5360668Z ^[[36;1mesac^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:42.5360840Z ^[[36;1mif [ -z "$key" ]; then^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:42.5361104Z ^[[36;1m  echo "::error::No API key configured for provider: $provider"^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:42.5361384Z ^[[36;1m  exit 1^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:42.5361546Z ^[[36;1mfi^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:42.5361744Z ^[[36;1mprintf 'PI_API_KEY=%s\n' "$key" >> "$GITHUB_ENV"^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:42.5404583Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+Review	UNKNOWN STEP	2026-10-20T04:04:42.5404831Z env:
+Review	UNKNOWN STEP	2026-10-20T04:04:42.5405553Z   PATH: /home/runner/.local/share/vite-plus/bin:/snap/bin:/home/runner/.local/bin:/opt/pipx_bin:/home/runner/.cargo/bin:/home/runner/.config/composer/vendor/bin:/usr/local/.ghcup/bin:/home/runner/.dotnet/tools:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin:/home/runner/.local/share/vite-plus/fallback-bin
+Review	UNKNOWN STEP	2026-10-20T04:04:42.5406379Z   MODEL_NAME: zai/glm-5.3
+Review	UNKNOWN STEP	2026-10-20T04:04:42.5406581Z   OPENAI_API_KEY: 
+Review	UNKNOWN STEP	2026-10-20T04:04:42.5406758Z   ANTHROPIC_API_KEY: 
+Review	UNKNOWN STEP	2026-10-20T04:04:42.5407093Z   ZAI_API_KEY: ***
+Review	UNKNOWN STEP	2026-10-20T04:04:42.5407265Z ##[endgroup]
+Review	UNKNOWN STEP	2026-10-20T04:04:42.5739267Z Prepare all required actions
+Review	UNKNOWN STEP	2026-10-20T04:04:42.5739756Z Getting action download info
+Review	UNKNOWN STEP	2026-10-20T04:04:42.6849155Z Download action repository 'pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413' (SHA:ea17c68df8912ef543352723c149a84f56e3d413)
+Review	UNKNOWN STEP	2026-10-20T04:04:42.9871828Z Download action repository 'actions/setup-node@820762786026740c76f36085b0efc47a31fe5020' (SHA:820762786026740c76f36085b0efc47a31fe5020)
+Review	UNKNOWN STEP	2026-10-20T04:04:43.6804803Z Download action repository 'actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9' (SHA:55cc8345863c7cc4c66a329aec7e433d2d1c52a9)
+Review	UNKNOWN STEP	2026-10-20T04:04:44.3507933Z Download action repository 'actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a' (SHA:043fb46d1a93c77aae656e7c1c64a875d1fc6a0a)
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8786422Z ##[group]Run ./
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8786764Z with:
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8788359Z   github-token: ***
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8788604Z   pi-api-key: ***
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8788779Z   model: zai/glm-5.3
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8789010Z   thinking: off
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8789177Z   debug: false
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8789348Z   review-drafts: false
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8789561Z   min-severity: warn
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8789767Z   github-scope: token-accessible
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8789999Z   ai-search-provider: exa
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8790190Z   search-provider: exa
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8790365Z   gh: true
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8790526Z   ai-search: true
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8790695Z   web-search: true
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8790865Z   cache: true
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8791028Z   setup-gh: true
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8791203Z   search-max-queries: 3
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8791391Z   ai-search-max-queries: 1
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8791579Z   search-max-results: 5
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8791762Z   ai-search-max-sources: 5
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8791952Z   search-timeout-ms: 8000
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8792148Z   ai-search-timeout-ms: 15000
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8792354Z   registry-wall-time-budget-ms: 15000
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8792572Z   search-required: false
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8792759Z   ai-search-required: false
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8792943Z   code-exec: false
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8793116Z   code-exec-timeout-ms: 120000
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8793308Z   code-exec-max-calls: 5
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8793502Z   code-exec-wall-time-budget-ms: 360000
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8793729Z   code-exec-max-stream-bytes: 32768
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8793934Z   summary: true
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8794102Z   setup-node: true
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8794268Z env:
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8794973Z   PATH: /home/runner/.local/share/vite-plus/bin:/snap/bin:/home/runner/.local/bin:/opt/pipx_bin:/home/runner/.cargo/bin:/home/runner/.config/composer/vendor/bin:/usr/local/.ghcup/bin:/home/runner/.dotnet/tools:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin:/home/runner/.local/share/vite-plus/fallback-bin
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8795859Z   PI_API_KEY: ***
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8796059Z   EXA_API_KEY: ***
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8796230Z ##[endgroup]
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8837636Z ##[start-action display=Detect preinstalled toolchain;id=__self.toolchain]
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8870504Z ##[group]Run node_ready=false
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8870818Z ^[[36;1mnode_ready=false^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8871030Z ^[[36;1mif command -v node >/dev/null 2>&1; then^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8871343Z ^[[36;1m  major=$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || true)^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8871627Z ^[[36;1m  case "$major" in^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8871806Z ^[[36;1m    ''|*[!0-9]*) ;;^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8872014Z ^[[36;1m    *) [ "$major" -ge 24 ] && node_ready=true ;;^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8872232Z ^[[36;1m  esac^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8872393Z ^[[36;1mfi^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8872561Z ^[[36;1m^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8872839Z ^[[36;1m# CI.md contract: pnpm must match the consumer's package.json. Honor the^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8873213Z ^[[36;1m# consumer's packageManager only when it pins pnpm; a foreign manager's^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8873727Z ^[[36;1m# version must never be passed to pnpm/action-setup. Fall back to the^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8874065Z ^[[36;1m# action's own manifest when the consumer has none or pins another manager.^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8874429Z ^[[36;1mconsumer_package_json="/home/runner/work/pi-reviewer/pi-reviewer/package.json"^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8874863Z ^[[36;1m[ -f "$consumer_package_json" ] || consumer_package_json="/home/runner/work/pi-reviewer/pi-reviewer/.//package.json"^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8875211Z ^[[36;1mexpected_pnpm=""^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8875424Z ^[[36;1mif [ -f "$consumer_package_json" ]; then^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8875992Z ^[[36;1m  consumer_package_manager=$(awk -F'"' '/"packageManager"/ { print $4; exit }' "$consumer_package_json")^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8876350Z ^[[36;1m  case "$consumer_package_manager" in^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8876714Z ^[[36;1m    pnpm@*) expected_pnpm="${consumer_package_manager#pnpm@}"; expected_pnpm="${expected_pnpm%%+*}" ;;^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8877185Z ^[[36;1m    pnpm|"") ;;^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8877554Z ^[[36;1m    *) echo "[pi-reviewer] consumer packageManager \"$consumer_package_manager\" is not pnpm; using the action default pnpm" ;;^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8877920Z ^[[36;1m  esac^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8878086Z ^[[36;1mfi^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8878325Z ^[[36;1m# The action ships a lockfileVersion 9.0 lockfile and installs its own^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8878666Z ^[[36;1m# dependencies in action_path, so the selected pnpm must be able to read^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8879001Z ^[[36;1m# it. Fail early instead of letting `vp install` reject the lockfile.^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8879277Z ^[[36;1mcase "${expected_pnpm%%.*}" in^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8879491Z ^[[36;1m  ''|*[!0-9]*) ;;^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8879704Z ^[[36;1m  *) if [ "${expected_pnpm%%.*}" -lt 9 ]; then^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8880136Z ^[[36;1m       echo "::error::[pi-reviewer] the action's pnpm-lock.yaml (lockfileVersion 9.0) requires pnpm >= 9; the consumer packageManager pins ${expected_pnpm}"^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8880557Z ^[[36;1m       exit 1^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8880742Z ^[[36;1m     fi ;;^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8880910Z ^[[36;1mesac^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8881080Z ^[[36;1mpnpm_ready=false^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8881297Z ^[[36;1mif command -v pnpm >/dev/null 2>&1; then^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8881554Z ^[[36;1m  actual_pnpm=$(pnpm --version 2>/dev/null || true)^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8881836Z ^[[36;1m  [ "$actual_pnpm" = "$expected_pnpm" ] && pnpm_ready=true^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8882075Z ^[[36;1mfi^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8882234Z ^[[36;1m^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8882490Z ^[[36;1mexpected_vite_plus=$(awk '$1 == "vite-plus:" { print $2; exit }' pnpm-workspace.yaml)^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8882783Z ^[[36;1mvite_plus_ready=false^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8882995Z ^[[36;1mif command -v vp >/dev/null 2>&1; then^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8883272Z ^[[36;1m  # vp currently reports `vp v<version>` on its first output line.^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8883669Z ^[[36;1m  actual_vite_plus=$(vp --version 2>/dev/null | awk 'NR == 1 { sub(/^v/, "", $2); print $2; exit }' || true)^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8884041Z ^[[36;1m  is_version_at_least() {^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8884300Z ^[[36;1m    local actual="$1" minimum="$2"^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8884572Z ^[[36;1m    local actual_core="${actual%%-*}" minimum_core="${minimum%%-*}"^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8884981Z ^[[36;1m    local actual_major actual_minor actual_patch minimum_major minimum_minor minimum_patch^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8885461Z ^[[36;1m    IFS=. read -r actual_major actual_minor actual_patch <<< "$actual_core"^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8885999Z ^[[36;1m    IFS=. read -r minimum_major minimum_minor minimum_patch <<< "$minimum_core"^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8886406Z ^[[36;1m    actual_major=${actual_major:-0}; actual_minor=${actual_minor:-0}; actual_patch=${actual_patch:-0}^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8886866Z ^[[36;1m    minimum_major=${minimum_major:-0}; minimum_minor=${minimum_minor:-0}; minimum_patch=${minimum_patch:-0}^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8887429Z ^[[36;1m    case "$actual_major.$actual_minor.$actual_patch.$minimum_major.$minimum_minor.$minimum_patch" in^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8887753Z ^[[36;1m      *[!0-9.]*) return 1 ;;^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8887956Z ^[[36;1m    esac^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8888161Z ^[[36;1m    if [ "$actual_major" -gt "$minimum_major" ] || \^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8888495Z ^[[36;1m      { [ "$actual_major" -eq "$minimum_major" ] && [ "$actual_minor" -gt "$minimum_minor" ]; } || \^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8888938Z ^[[36;1m      { [ "$actual_major" -eq "$minimum_major" ] && [ "$actual_minor" -eq "$minimum_minor" ] && [ "$actual_patch" -gt "$minimum_patch" ]; }; then^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8889292Z ^[[36;1m      return 0^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8889469Z ^[[36;1m    fi^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8889786Z ^[[36;1m    if [ "$actual_major" -ne "$minimum_major" ] || [ "$actual_minor" -ne "$minimum_minor" ] || [ "$actual_patch" -ne "$minimum_patch" ]; then^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8890209Z ^[[36;1m      return 1^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8890383Z ^[[36;1m    fi^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8890621Z ^[[36;1m    # A prerelease has lower precedence than the corresponding stable^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8890933Z ^[[36;1m    # release, so 0.3.0-beta must not satisfy a 0.3.0 minimum.^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8891208Z ^[[36;1m    case "$actual" in^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8891483Z ^[[36;1m      *-*) case "$minimum" in *-*) return 0 ;; *) return 1 ;; esac ;;^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8891749Z ^[[36;1m      *) return 0 ;;^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8891928Z ^[[36;1m    esac^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8892095Z ^[[36;1m  }^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8892412Z ^[[36;1m  if [ -n "$actual_vite_plus" ] && [ -n "$expected_vite_plus" ] && is_version_at_least "$actual_vite_plus" "$expected_vite_plus"; then^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8892762Z ^[[36;1m    vite_plus_ready=true^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8892959Z ^[[36;1m  fi^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8893123Z ^[[36;1mfi^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8893277Z ^[[36;1m^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8893524Z ^[[36;1mprintf 'Toolchain availability: node=%s pnpm=%s vite-plus=%s\n' \^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8893826Z ^[[36;1m  "$node_ready" "$pnpm_ready" "$vite_plus_ready"^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8894052Z ^[[36;1m{^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8894233Z ^[[36;1m  printf 'node_ready=%s\n' "$node_ready"^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8894476Z ^[[36;1m  printf 'pnpm_ready=%s\n' "$pnpm_ready"^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8894733Z ^[[36;1m  printf 'vite_plus_ready=%s\n' "$vite_plus_ready"^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8894999Z ^[[36;1m  printf 'expected_pnpm=%s\n' "$expected_pnpm"^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8895232Z ^[[36;1m} >> "$GITHUB_OUTPUT"^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8938126Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8938372Z env:
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8939060Z   PATH: /home/runner/.local/share/vite-plus/bin:/snap/bin:/home/runner/.local/bin:/opt/pipx_bin:/home/runner/.cargo/bin:/home/runner/.config/composer/vendor/bin:/usr/local/.ghcup/bin:/home/runner/.dotnet/tools:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin:/home/runner/.local/share/vite-plus/fallback-bin
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8939959Z   PI_API_KEY: ***
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8940202Z   EXA_API_KEY: ***
+Review	UNKNOWN STEP	2026-10-20T04:04:44.8940449Z ##[endgroup]
+Review	UNKNOWN STEP	2026-10-20T04:04:44.9510532Z Toolchain availability: node=false pnpm=true vite-plus=true
+Review	UNKNOWN STEP	2026-10-20T04:04:44.9523175Z ##[end-action id=__self.toolchain;outcome=success;conclusion=success;duration_ms=68]
+Review	UNKNOWN STEP	2026-10-20T04:04:44.9525393Z ##[start-action display=Setup pnpm;id=__self.__pnpm_action-setup]
+Review	UNKNOWN STEP	2026-10-20T04:04:44.9533218Z ##[end-action id=__self.__pnpm_action-setup;outcome=skipped;conclusion=skipped;duration_ms=0]
+Review	UNKNOWN STEP	2026-10-20T04:04:44.9534683Z ##[start-action display=Setup Node;id=__self.__actions_setup-node]
+Review	UNKNOWN STEP	2026-10-20T04:04:45.0078649Z ##[group]Run actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+Review	UNKNOWN STEP	2026-10-20T04:04:45.0079087Z with:
+Review	UNKNOWN STEP	2026-10-20T04:04:45.0079358Z   node-version: 24
+Review	UNKNOWN STEP	2026-10-20T04:04:45.0079658Z   check-latest: false
+Review	UNKNOWN STEP	2026-10-20T04:04:45.0081877Z   token: ***
+Review	UNKNOWN STEP	2026-10-20T04:04:45.0082155Z   package-manager-cache: true
+Review	UNKNOWN STEP	2026-10-20T04:04:45.0082454Z env:
+Review	UNKNOWN STEP	2026-10-20T04:04:45.0083782Z   PATH: /home/runner/.local/share/vite-plus/bin:/snap/bin:/home/runner/.local/bin:/opt/pipx_bin:/home/runner/.cargo/bin:/home/runner/.config/composer/vendor/bin:/usr/local/.ghcup/bin:/home/runner/.dotnet/tools:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin:/home/runner/.local/share/vite-plus/fallback-bin
+Review	UNKNOWN STEP	2026-10-20T04:04:45.0085042Z   PI_API_KEY: ***
+Review	UNKNOWN STEP	2026-10-20T04:04:45.0085357Z   EXA_API_KEY: ***
+Review	UNKNOWN STEP	2026-10-20T04:04:45.0085729Z ##[endgroup]
+Review	UNKNOWN STEP	2026-10-20T04:04:45.1004127Z Found in cache @ /opt/hostedtoolcache/node/24.22.0/x64
+Review	UNKNOWN STEP	2026-10-20T04:04:45.1007274Z ##[group]Environment details
+Review	UNKNOWN STEP	2026-10-20T04:04:45.6961615Z node: v24.22.0
+Review	UNKNOWN STEP	2026-10-20T04:04:45.6976501Z npm: 11.19.1
+Review	UNKNOWN STEP	2026-10-20T04:04:45.6976729Z yarn: 4.18.1
+Review	UNKNOWN STEP	2026-10-20T04:04:45.6977745Z ##[endgroup]
+Review	UNKNOWN STEP	2026-10-20T04:04:45.7051610Z ##[end-action id=__self.__actions_setup-node;outcome=success;conclusion=success;duration_ms=751]
+Review	UNKNOWN STEP	2026-10-20T04:04:45.7054320Z ##[start-action display=Prepare executable temporary directory;id=__self.executable-temp]
+Review	UNKNOWN STEP	2026-10-20T04:04:45.7060904Z ##[end-action id=__self.executable-temp;outcome=skipped;conclusion=skipped;duration_ms=0]
+Review	UNKNOWN STEP	2026-10-20T04:04:45.7062803Z ##[start-action display=Setup Vite+;id=__self.__voidzero-dev_setup-vp]
+Review	UNKNOWN STEP	2026-10-20T04:04:45.7066334Z ##[end-action id=__self.__voidzero-dev_setup-vp;outcome=skipped;conclusion=skipped;duration_ms=0]
+Review	UNKNOWN STEP	2026-10-20T04:04:45.7067593Z ##[start-action display=Verify Node.js version;id=__self.__run]
+Review	UNKNOWN STEP	2026-10-20T04:04:45.7157656Z ##[group]Run major=$(node -p 'process.versions.node.split(".")[0]')
+Review	UNKNOWN STEP	2026-10-20T04:04:45.7158017Z ^[[36;1mmajor=$(node -p 'process.versions.node.split(".")[0]')^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:45.7158286Z ^[[36;1mif [ "$major" -lt 24 ]; then^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:45.7158640Z ^[[36;1m  echo "::error::pi-reviewer requires Node >= 24 (found $(node -v)). Use setup-node: true or provide Node >= 24."^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:45.7158987Z ^[[36;1m  exit 1^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:45.7159162Z ^[[36;1mfi^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:45.7206747Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+Review	UNKNOWN STEP	2026-10-20T04:04:45.7207009Z env:
+Review	UNKNOWN STEP	2026-10-20T04:04:45.7207717Z   PATH: /home/runner/.local/share/vite-plus/bin:/snap/bin:/home/runner/.local/bin:/opt/pipx_bin:/home/runner/.cargo/bin:/home/runner/.config/composer/vendor/bin:/usr/local/.ghcup/bin:/home/runner/.dotnet/tools:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin:/home/runner/.local/share/vite-plus/fallback-bin
+Review	UNKNOWN STEP	2026-10-20T04:04:45.7208689Z   PI_API_KEY: ***
+Review	UNKNOWN STEP	2026-10-20T04:04:45.7208902Z   EXA_API_KEY: ***
+Review	UNKNOWN STEP	2026-10-20T04:04:45.7209078Z ##[endgroup]
+Review	UNKNOWN STEP	2026-10-20T04:04:45.7515928Z ##[end-action id=__self.__run;outcome=success;conclusion=success;duration_ms=44]
+Review	UNKNOWN STEP	2026-10-20T04:04:45.7518172Z ##[start-action display=Resolve pnpm store and lockfile hash;id=__self.pnpm-meta]
+Review	UNKNOWN STEP	2026-10-20T04:04:45.7557415Z ##[group]Run echo "store-path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+Review	UNKNOWN STEP	2026-10-20T04:04:45.7557873Z ^[[36;1mecho "store-path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:45.7558259Z ^[[36;1mecho "lock-hash=$(sha256sum pnpm-lock.yaml | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:45.7601446Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+Review	UNKNOWN STEP	2026-10-20T04:04:45.7601711Z env:
+Review	UNKNOWN STEP	2026-10-20T04:04:45.7602455Z   PATH: /home/runner/.local/share/vite-plus/bin:/snap/bin:/home/runner/.local/bin:/opt/pipx_bin:/home/runner/.cargo/bin:/home/runner/.config/composer/vendor/bin:/usr/local/.ghcup/bin:/home/runner/.dotnet/tools:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin:/home/runner/.local/share/vite-plus/fallback-bin
+Review	UNKNOWN STEP	2026-10-20T04:04:45.7603345Z   PI_API_KEY: ***
+Review	UNKNOWN STEP	2026-10-20T04:04:45.7603555Z   EXA_API_KEY: ***
+Review	UNKNOWN STEP	2026-10-20T04:04:45.7603735Z ##[endgroup]
+Review	UNKNOWN STEP	2026-10-20T04:04:45.7864816Z ##[end-action id=__self.pnpm-meta;outcome=success;conclusion=success;duration_ms=34]
+Review	UNKNOWN STEP	2026-10-20T04:04:45.7867150Z ##[start-action display=Cache pnpm store;id=__self.__actions_cache]
+Review	UNKNOWN STEP	2026-10-20T04:04:45.8066312Z ##[group]Run actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+Review	UNKNOWN STEP	2026-10-20T04:04:45.8076628Z with:
+Review	UNKNOWN STEP	2026-10-20T04:04:45.8076953Z   path: /home/runner/.local/share/pnpm/store/v11
+Review	UNKNOWN STEP	2026-10-20T04:04:45.8077474Z   key: Linux-pi-reviewer-pnpm-da3d06c3c6adf25b97ee57d6b9b1e4255ea0327ed30dedf2e39d3111d482a34b
+Review	UNKNOWN STEP	2026-10-20T04:04:45.8077837Z   restore-keys: Linux-pi-reviewer-pnpm-
+Review	UNKNOWN STEP	
+Review	UNKNOWN STEP	2026-10-20T04:04:45.8078076Z   enableCrossOsArchive: false
+Review	UNKNOWN STEP	2026-10-20T04:04:45.8078278Z   fail-on-cache-miss: false
+Review	UNKNOWN STEP	2026-10-20T04:04:45.8078474Z   lookup-only: false
+Review	UNKNOWN STEP	2026-10-20T04:04:45.8078657Z   save-always: false
+Review	UNKNOWN STEP	2026-10-20T04:04:45.8078835Z env:
+Review	UNKNOWN STEP	2026-10-20T04:04:45.8079555Z   PATH: /home/runner/.local/share/vite-plus/bin:/snap/bin:/home/runner/.local/bin:/opt/pipx_bin:/home/runner/.cargo/bin:/home/runner/.config/composer/vendor/bin:/usr/local/.ghcup/bin:/home/runner/.dotnet/tools:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin:/home/runner/.local/share/vite-plus/fallback-bin
+Review	UNKNOWN STEP	2026-10-20T04:04:45.8080594Z   PI_API_KEY: ***
+Review	UNKNOWN STEP	2026-10-20T04:04:45.8080813Z   EXA_API_KEY: ***
+Review	UNKNOWN STEP	2026-10-20T04:04:45.8080991Z ##[endgroup]
+Review	UNKNOWN STEP	2026-10-20T04:04:46.0265291Z Cache not found for input keys: Linux-pi-reviewer-pnpm-da3d06c3c6adf25b97ee57d6b9b1e4255ea0327ed30dedf2e39d3111d482a34b, Linux-pi-reviewer-pnpm-
+Review	UNKNOWN STEP	2026-10-20T04:04:46.0327268Z ##[end-action id=__self.__actions_cache;outcome=success;conclusion=success;duration_ms=245]
+Review	UNKNOWN STEP	2026-10-20T04:04:46.0329581Z ##[start-action display=Install dependencies;id=__self.__run_2]
+Review	UNKNOWN STEP	2026-10-20T04:04:46.1260810Z ##[group]Run vp install --frozen-lockfile
+Review	UNKNOWN STEP	2026-10-20T04:04:46.1261130Z ^[[36;1mvp install --frozen-lockfile^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:46.1304987Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+Review	UNKNOWN STEP	2026-10-20T04:04:46.1305256Z env:
+Review	UNKNOWN STEP	2026-10-20T04:04:46.1306158Z   PATH: /home/runner/.local/share/vite-plus/bin:/snap/bin:/home/runner/.local/bin:/opt/pipx_bin:/home/runner/.cargo/bin:/home/runner/.config/composer/vendor/bin:/usr/local/.ghcup/bin:/home/runner/.dotnet/tools:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin:/home/runner/.local/share/vite-plus/fallback-bin
+Review	UNKNOWN STEP	2026-10-20T04:04:46.1307098Z   PI_API_KEY: ***
+Review	UNKNOWN STEP	2026-10-20T04:04:46.1307313Z   EXA_API_KEY: ***
+Review	UNKNOWN STEP	2026-10-20T04:04:46.1307493Z ##[endgroup]
+Review	UNKNOWN STEP	2026-10-20T04:04:46.1987761Z ? Verifying lockfile against supply-chain policies (572 entries)...
+Review	UNKNOWN STEP	2026-10-20T04:04:46.2930342Z Packages are hard linked from the content-addressable store to the virtual store.
+Review	UNKNOWN STEP	2026-10-20T04:04:46.2931129Z   Content-addressable store is at: /home/runner/.local/share/pnpm/store/v11
+Review	UNKNOWN STEP	2026-10-20T04:04:46.2931673Z   Virtual store is at:             node_modules/.pnpm
+Review	UNKNOWN STEP	2026-10-20T04:04:48.3141935Z ✓ Lockfile passes supply-chain policies (572 entries in 2.1s)
+Review	UNKNOWN STEP	2026-10-20T04:04:48.3142519Z Lockfile is up to date, resolution step is skipped
+Review	UNKNOWN STEP	2026-10-20T04:04:48.3203905Z Packages: +389
+Review	UNKNOWN STEP	2026-10-20T04:04:48.3204339Z ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+Review	UNKNOWN STEP	2026-10-20T04:04:48.3422938Z Progress: resolved 389, reused 389, downloaded 0, added 389, done
+Review	UNKNOWN STEP	2026-10-20T04:04:48.3474373Z .../node_modules/protobufjs postinstall$ node scripts/postinstall
+Review	UNKNOWN STEP	2026-10-20T04:04:48.3811747Z .../node_modules/protobufjs postinstall: Done
+Review	UNKNOWN STEP	2026-10-20T04:04:48.3872256Z .../node_modules/@google/genai preinstall$ echo 'preinstall: no-op'
+Review	UNKNOWN STEP	2026-10-20T04:04:48.3996297Z .../node_modules/@google/genai preinstall: preinstall: no-op
+Review	UNKNOWN STEP	2026-10-20T04:04:48.4006521Z .../node_modules/@google/genai preinstall: Done
+Review	UNKNOWN STEP	2026-10-20T04:04:48.4149845Z Ignored build scripts: koffi@3.3.2, node-pty@1.1.0.
+Review	UNKNOWN STEP	2026-10-20T04:04:48.4150333Z Run "pnpm approve-builds" to pick which dependencies should be allowed to run scripts.
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6075832Z 
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6076521Z dependencies:
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6076954Z + @earendil-works/pi-agent-core 1.2.0
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6077333Z + @earendil-works/pi-ai 1.2.0
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6077731Z + @earendil-works/pi-coding-agent 1.2.0
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6078106Z + @earendil-works/pi-tui 1.2.0
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6078663Z + @microsoft/mxc-sdk 1.0.0
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6078962Z + dompurify 3.4.16
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6079248Z + highlight.js 11.12.0
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6079517Z + pi-lsp 0.1.7
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6079782Z + pi-mcp-adapter 5.0.0
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6080041Z + tsx 4.23.15
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6080176Z 
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6080298Z devDependencies:
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6080604Z + @octokit/graphql-schema 15.26.1
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6080946Z + @testing-library/react 16.3.3
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6081325Z + @testing-library/user-event 14.6.7
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6081647Z + @types/node 24.19.1
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6081906Z + @types/react 19.3.0
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6082533Z + @types/react-dom 19.3.0
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6082848Z + @vitejs/plugin-react 6.1.1
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6083135Z + jsdom 30.1.2
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6083383Z + marked 18.0.14
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6083819Z + react 19.3.0
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6084247Z + react-dom 19.3.0
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6088114Z + typescript 7.0.2
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6088782Z + vite <- @voidzero-dev/vite-plus-core 1.0.0
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6089374Z + vite-plugin-singlefile 2.3.3
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6089614Z + vite-plus 1.0.0
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6089795Z + vitest 5.0.3
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6089963Z + yaml 2.9.1
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6090061Z 
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6090189Z Done in 2.4s using pnpm v12.9.1
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6332251Z ##[end-action id=__self.__run_2;outcome=success;conclusion=success;duration_ms=2600]
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6337785Z ##[start-action display=Ensure bubblewrap for sandboxed code-exec;id=__self.__run_3]
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6341431Z ##[end-action id=__self.__run_3;outcome=skipped;conclusion=skipped;duration_ms=0]
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6342620Z ##[start-action display=Ensure gh CLI;id=__self.__run_4]
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6358672Z ##[group]Run if command -v gh >/dev/null 2>&1; then
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6358967Z ^[[36;1mif command -v gh >/dev/null 2>&1; then^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6359228Z ^[[36;1m  echo "[pi-reviewer] gh CLI available"^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6359478Z ^[[36;1melif [ "$RUNNER_OS" = "Linux" ]; then^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6359719Z ^[[36;1m  echo "[pi-reviewer] installing gh CLI"^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6360152Z ^[[36;1m  sudo apt-get update && sudo apt-get install -y gh || echo "::warning::[pi-reviewer] gh installation failed; read-only gh tool will be unavailable"^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6360546Z ^[[36;1melse^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6360824Z ^[[36;1m  echo "::warning::[pi-reviewer] gh CLI missing; install it with setup-gh-cli for this runner"^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6361129Z ^[[36;1mfi^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6402204Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6402449Z env:
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6403149Z   PATH: /home/runner/.local/share/vite-plus/bin:/snap/bin:/home/runner/.local/bin:/opt/pipx_bin:/home/runner/.cargo/bin:/home/runner/.config/composer/vendor/bin:/usr/local/.ghcup/bin:/home/runner/.dotnet/tools:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin:/home/runner/.local/share/vite-plus/fallback-bin
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6404014Z   PI_API_KEY: ***
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6404217Z   EXA_API_KEY: ***
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6404389Z ##[endgroup]
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6459934Z [pi-reviewer] gh CLI available
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6466096Z ##[end-action id=__self.__run_4;outcome=success;conclusion=success;duration_ms=12]
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6472239Z ##[start-action display=Run review;id=__self.__run_5]
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6485182Z ##[group]Run "/home/runner/work/pi-reviewer/pi-reviewer/.//node_modules/.bin/tsx" "/home/runner/work/pi-reviewer/pi-reviewer/.//src/ci/action-entry.ts"
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6485965Z ^[[36;1m"/home/runner/work/pi-reviewer/pi-reviewer/.//node_modules/.bin/tsx" "/home/runner/work/pi-reviewer/pi-reviewer/.//src/ci/action-entry.ts"^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6520215Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6520467Z env:
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6521288Z   PATH: /home/runner/.local/share/vite-plus/bin:/snap/bin:/home/runner/.local/bin:/opt/pipx_bin:/home/runner/.cargo/bin:/home/runner/.config/composer/vendor/bin:/usr/local/.ghcup/bin:/home/runner/.dotnet/tools:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin:/home/runner/.local/share/vite-plus/fallback-bin
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6522119Z   PI_API_KEY: ***
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6522324Z   EXA_API_KEY: ***
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6523704Z   GITHUB_TOKEN: ***
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6523876Z   REVIEW_DRAFTS: false
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6524065Z   PI_REVIEWER_MODEL: zai/glm-5.3
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6524268Z   PI_REVIEWER_THINKING: off
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6524456Z   PI_REVIEWER_DEBUG: false
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6524727Z   PI_REVIEWER_THINKING_ARTIFACT: /home/runner/work/_temp/pi-reviewer-thinking.jsonl
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6525011Z   MIN_SEVERITY: warn
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6525191Z   PI_REVIEWER_MAX_DIFF_CHARS: 
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6525479Z   PI_REVIEWER_SUMMARY: true
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6525792Z   PI_REVIEWER_DOC_DIRS: 
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6525977Z   PI_REVIEWER_SKILLS_DIRS: 
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6526174Z   PI_REVIEWER_MCP_CONFIG_FILE: 
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6526367Z   PI_REVIEWER_LSP_SERVERS: 
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6526554Z   PI_REVIEWER_LSP_CONFIG_FILE: 
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6526752Z   PI_REVIEWER_WEB_SEARCH: true
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6526949Z   PI_REVIEWER_SEARCH_PROVIDER: exa
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6527154Z   PI_REVIEWER_AI_SEARCH: true
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6527356Z   PI_REVIEWER_AI_SEARCH_PROVIDER: exa
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6527718Z   PI_REVIEWER_GITHUB_SCOPE: token-accessible
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6527958Z   PI_REVIEWER_GH: true
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6528146Z   PI_REVIEWER_SEARCH_MAX_QUERIES: 3
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6528361Z   PI_REVIEWER_AI_SEARCH_MAX_QUERIES: 1
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6528578Z   PI_REVIEWER_SEARCH_MAX_RESULTS: 5
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6528787Z   PI_REVIEWER_AI_SEARCH_MAX_SOURCES: 5
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6529005Z   PI_REVIEWER_SEARCH_TIMEOUT_MS: 8000
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6529223Z   PI_REVIEWER_AI_SEARCH_TIMEOUT_MS: 15000
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6529458Z   PI_REVIEWER_REGISTRY_WALL_TIME_BUDGET_MS: 15000
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6529691Z   PI_REVIEWER_SEARCH_REQUIRED: false
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6529910Z   PI_REVIEWER_AI_SEARCH_REQUIRED: false
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6530123Z   PI_REVIEWER_CODE_EXEC: false
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6530329Z   PI_REVIEWER_CODE_EXEC_TIMEOUT_MS: 120000
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6530546Z   PI_REVIEWER_CODE_EXEC_MAX_CALLS: 5
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6530766Z   PI_REVIEWER_CODE_EXEC_WALL_BUDGET_MS: 360000
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6530998Z   PI_REVIEWER_CODE_EXEC_MAX_STREAM_BYTES: 32768
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6531220Z   PI_REVIEWER_CODE_EXEC_IMAGE: 
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6531422Z   PI_REVIEWER_EXTRA_INSTRUCTIONS: 
+Review	UNKNOWN STEP	2026-10-20T04:04:48.6531653Z ##[endgroup]
+Review	UNKNOWN STEP	2026-10-20T04:04:51.6683004Z ^[[36mINFO Reviewing pull request ^[[94mfromSha^[[0m=^[[32med10e4c4c8f47f689307975c2147a084d0b72dd0^[[0m ^[[94mpullRequest^[[0m=^[[32m^[[33m168^[[0m^[[0m ^[[94mtoSha^[[0m=^[[32m9f13b3ebd4bcc9fd600ee23891ef17997a87a6fa^[[0m^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:51.8093191Z Preparing worktree (detached HEAD 9f13b3e)
+Review	UNKNOWN STEP	2026-10-20T04:04:51.8193699Z ^[[36mINFO Diff resolved ^[[94msize^[[0m=^[[32m^[[33m87678^[[0m^[[0m ^[[94msource^[[0m=^[[32mgit diff ed10e4c4c8f47f689307975c2147a084d0b72dd0..9f13b3ebd4bcc9fd600ee23891ef17997a87a6fa^[[0m^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:51.8327498Z ^[[36mINFO LSP workspace root ^[[94mfiles^[[0m=^[[32m^[[33m3^[[0m^[[0m ^[[94mroot^[[0m=^[[32m/tmp/pi-reviewer-PSbAf1^[[0m ^[[94mserver^[[0m=^[[32mmarkdown-oxide^[[0m^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:51.8348884Z ^[[36mINFO LSP server available ^[[94mbin^[[0m=^[[32mrust-analyzer^[[0m ^[[94mserver^[[0m=^[[32mrust-analyzer^[[0m^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:51.8350790Z ^[[36mINFO LSP server available ^[[94mbin^[[0m=^[[32mtsc-rs^[[0m ^[[94mserver^[[0m=^[[32mtsc-rs^[[0m^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:51.8355891Z ^[[33mWARN LSP servers missing; languages skipped ^[[94mservers^[[0m=^[[32m["^[[32mty (ty: install ty (uv tool install ty / pip install ty))^[[0m","^[[32mmarkdown-oxide (markdown-oxide: install markdown-oxide (cargo install markdown-oxide))^[[0m","^[[32mtaplo (taplo: install taplo with LSP support (cargo install taplo-cli --features lsp --locked))^[[0m","^[[32mgopls (gopls: install gopls (go install golang.org/x/tools/gopls@latest))^[[0m","^[[32mkotlin-lsp (kotlin-lsp: install kotlin-lsp (brew install JetBrains/utils/kotlin-lsp or download from https://github.com/Kotlin/kotlin-lsp/releases))^[[0m"]^[[0m^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:51.8495047Z ^[[36mINFO Context loaded ^[[94mpaths^[[0m=^[[32m["^[[32mAGENTS.md^[[0m"]^[[0m^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:52.0732980Z ^[[36mINFO Tool availability ^[[94mavailable^[[0m=^[[32m["^[[32mweb_search^[[0m","^[[32mweb_ai_search^[[0m","^[[32mpackage_lookup^[[0m","^[[32mgithub_search^[[0m","^[[32mgithub_read^[[0m","^[[32mgithub_grep^[[0m","^[[32mlsp_diagnostics^[[0m","^[[32mlsp_hover^[[0m","^[[32mlsp_definition^[[0m","^[[32mlsp_references^[[0m","^[[32mlsp_symbols^[[0m"]^[[0m ^[[94munavailable^[[0m=^[[32m["^[[32mcode_exec^[[0m","^[[32mmcp^[[0m"]^[[0m^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:52.0737974Z ^[[36mINFO Diff budget applied ^[[94mcap^[[0m=^[[32m^[[33m500000^[[0m^[[0m ^[[94mheadroom^[[0m=^[[32m^[[33m412322^[[0m^[[0m ^[[94mreviewedChars^[[0m=^[[32m^[[33m87678^[[0m^[[0m ^[[94mshortfall^[[0m=^[[32m^[[33m0^[[0m^[[0m ^[[94mskipped^[[0m=^[[32m^[[33m0^[[0m^[[0m^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:52.0739402Z ^[[36mINFO Running agent ^[[94mmodel^[[0m=^[[32mopenai-completions^[[0m^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:04:52.1315017Z ^[[36mINFO LSP enabled ^[[94mservers^[[0m=^[[32m["^[[32mty^[[0m","^[[32mmarkdown-oxide^[[0m","^[[32mrust-analyzer^[[0m","^[[32mtaplo^[[0m","^[[32mgopls^[[0m","^[[32mtsc-rs^[[0m","^[[32mkotlin-lsp^[[0m"]^[[0m ^[[94mtoolCount^[[0m=^[[32m^[[33m5^[[0m^[[0m^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:05:28.2114269Z ^[[33mWARN GitHub read failed ^[[94merror^[[0m=^[[32mgh wall-time budget exhausted^[[0m^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:05:44.7982529Z ^[[36mINFO Agent completed via submit_review tool ^[[94maction^[[0m=^[[32mreview^[[0m ^[[94mcomments^[[0m=^[[32m^[[33m1^[[0m^[[0m^[[0m
+Review	UNKNOWN STEP	2026-10-20T04:05:45.3221415Z ##[error]ERROR Action failed error=Error: PR head changed while the review was running; refusing to post a stale batch
+Review	UNKNOWN STEP	    at sendOutput (/home/runner/work/pi-reviewer/pi-reviewer/src/core/output.ts:1780:15)
+Review	UNKNOWN STEP	    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+Review	UNKNOWN STEP	    at async review (/home/runner/work/pi-reviewer/pi-reviewer/src/ci/review.ts:1552:5)
+Review	UNKNOWN STEP	    at async main (/home/runner/work/pi-reviewer/pi-reviewer/src/ci/action-entry.ts:481:5)
+Review	UNKNOWN STEP	    at async <anonymous> (/home/runner/work/pi-reviewer/pi-reviewer/src/ci/action-entry.ts:562:3)
+Review	UNKNOWN STEP	2026-10-20T04:05:45.3486827Z ##[error]Process completed with exit code 1.
+Review	UNKNOWN STEP	2026-10-20T04:05:45.3492598Z ##[end-action id=__self.__run_5;outcome=failure;conclusion=failure;duration_ms=56701]
+Review	UNKNOWN STEP	2026-10-20T04:05:45.3496146Z ##[start-action display=Upload model thinking artifact;id=__self.__actions_upload-artifact]
+Review	UNKNOWN STEP	2026-10-20T04:05:45.3500453Z ##[end-action id=__self.__actions_upload-artifact;outcome=skipped;conclusion=skipped;duration_ms=0]
+Review	UNKNOWN STEP	2026-10-20T04:05:45.3501735Z ##[start-action display=Clean up executable temporary directory;id=__self.__run_6]
+Review	UNKNOWN STEP	2026-10-20T04:05:45.3507725Z ##[end-action id=__self.__run_6;outcome=skipped;conclusion=skipped;duration_ms=0]
+Review	UNKNOWN STEP	2026-10-20T04:05:45.3702632Z Post job cleanup.
+Review	UNKNOWN STEP	2026-10-20T04:05:45.3706189Z ##[start-action display=Cache pnpm store;id=__da481207-8628-4683-8d10-4b5cb7729632.__actions_cache]
+Review	UNKNOWN STEP	2026-10-20T04:05:45.3707718Z ##[end-action id=__da481207-8628-4683-8d10-4b5cb7729632.__actions_cache;outcome=skipped;conclusion=skipped;duration_ms=0]
+Review	UNKNOWN STEP	2026-10-20T04:05:45.3708927Z ##[start-action display=Setup Node;id=__da481207-8628-4683-8d10-4b5cb7729632.__actions_setup-node]
+Review	UNKNOWN STEP	2026-10-20T04:05:45.3710103Z ##[end-action id=__da481207-8628-4683-8d10-4b5cb7729632.__actions_setup-node;outcome=skipped;conclusion=skipped;duration_ms=0]
+Review	UNKNOWN STEP	2026-10-20T04:05:45.3788162Z Post job cleanup.
+Review	UNKNOWN STEP	2026-10-20T04:05:45.6822970Z Token revoked
+Review	UNKNOWN STEP	2026-10-20T04:05:45.7134483Z Post job cleanup.
+Review	UNKNOWN STEP	2026-10-20T04:05:45.7688672Z [command]/usr/bin/git version
+Review	UNKNOWN STEP	2026-10-20T04:05:45.7726326Z git version 2.55.0
+Review	UNKNOWN STEP	2026-10-20T04:05:45.7752186Z Temporarily overriding HOME='/home/runner/work/_temp/4bf208be-951c-4f21-8c8d-34133b9d197d' before making global git config changes
+Review	UNKNOWN STEP	2026-10-20T04:05:45.7753309Z Adding repository directory to the temporary git global config as a safe directory
+Review	UNKNOWN STEP	2026-10-20T04:05:45.7754293Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/pi-reviewer/pi-reviewer
+Review	UNKNOWN STEP	2026-10-20T04:05:45.7786503Z Removing SSH command configuration
+Review	UNKNOWN STEP	2026-10-20T04:05:45.7792244Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+Review	UNKNOWN STEP	2026-10-20T04:05:45.7831215Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+Review	UNKNOWN STEP	2026-10-20T04:05:45.8042000Z Removing HTTP extra header
+Review	UNKNOWN STEP	2026-10-20T04:05:45.8048091Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+Review	UNKNOWN STEP	2026-10-20T04:05:45.8088271Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+Review	UNKNOWN STEP	2026-10-20T04:05:45.8308401Z Removing includeIf entries pointing to credentials config files
+Review	UNKNOWN STEP	2026-10-20T04:05:45.8312973Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+Review	UNKNOWN STEP	2026-10-20T04:05:45.8350986Z includeif.gitdir:/home/runner/work/pi-reviewer/pi-reviewer/.git.path
+Review	UNKNOWN STEP	2026-10-20T04:05:45.8351547Z includeif.gitdir:/home/runner/work/pi-reviewer/pi-reviewer/.git/worktrees/*.path
+Review	UNKNOWN STEP	2026-10-20T04:05:45.8351912Z includeif.gitdir:/github/workspace/.git.path
+Review	UNKNOWN STEP	2026-10-20T04:05:45.8352474Z includeif.gitdir:/github/workspace/.git/worktrees/*.path
+Review	UNKNOWN STEP	2026-10-20T04:05:45.8357251Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/home/runner/work/pi-reviewer/pi-reviewer/.git.path
+Review	UNKNOWN STEP	2026-10-20T04:05:45.8388340Z /home/runner/work/_temp/git-credentials-ca25bc1e-f7da-4588-bddd-3f4ba4d432c3.config
+Review	UNKNOWN STEP	2026-10-20T04:05:45.8395540Z [command]/usr/bin/git config --local --unset includeif.gitdir:/home/runner/work/pi-reviewer/pi-reviewer/.git.path \/home\/runner\/work\/_temp\/git\-credentials\-ca25bc1e\-f7da\-4588\-bddd\-3f4ba4d432c3\.config
+Review	UNKNOWN STEP	2026-10-20T04:05:45.8437534Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/home/runner/work/pi-reviewer/pi-reviewer/.git/worktrees/*.path
+Review	UNKNOWN STEP	2026-10-20T04:05:45.8473528Z /home/runner/work/_temp/git-credentials-ca25bc1e-f7da-4588-bddd-3f4ba4d432c3.config
+Review	UNKNOWN STEP	2026-10-20T04:05:45.8480366Z [command]/usr/bin/git config --local --unset includeif.gitdir:/home/runner/work/pi-reviewer/pi-reviewer/.git/worktrees/*.path \/home\/runner\/work\/_temp\/git\-credentials\-ca25bc1e\-f7da\-4588\-bddd\-3f4ba4d432c3\.config
+Review	UNKNOWN STEP	2026-10-20T04:05:45.8527333Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git.path
+Review	UNKNOWN STEP	2026-10-20T04:05:45.8558914Z /github/runner_temp/git-credentials-ca25bc1e-f7da-4588-bddd-3f4ba4d432c3.config
+Review	UNKNOWN STEP	2026-10-20T04:05:45.8564481Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/.git.path \/github\/runner_temp\/git\-credentials\-ca25bc1e\-f7da\-4588\-bddd\-3f4ba4d432c3\.config
+Review	UNKNOWN STEP	2026-10-20T04:05:45.8602224Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git/worktrees/*.path
+Review	UNKNOWN STEP	2026-10-20T04:05:45.8632503Z /github/runner_temp/git-credentials-ca25bc1e-f7da-4588-bddd-3f4ba4d432c3.config
+Review	UNKNOWN STEP	2026-10-20T04:05:45.8638286Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/.git/worktrees/*.path \/github\/runner_temp\/git\-credentials\-ca25bc1e\-f7da\-4588\-bddd\-3f4ba4d432c3\.config
+Review	UNKNOWN STEP	2026-10-20T04:05:45.8676831Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+Review	UNKNOWN STEP	2026-10-20T04:05:45.8860179Z Removing credentials config '/home/runner/work/_temp/git-credentials-ca25bc1e-f7da-4588-bddd-3f4ba4d432c3.config'
+Review	UNKNOWN STEP	2026-10-20T04:05:45.8979650Z Cleaning up orphan processes

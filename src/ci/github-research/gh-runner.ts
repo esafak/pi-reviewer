@@ -44,33 +44,75 @@ export function safeGhFailure(error: unknown): string {
     .replace(/(?:token|authorization|bearer)\s*[:=]?\s*\S+/gi, "[redacted]")
     .slice(0, 240);
 }
-export function createGhRunner(token: string, run = exec) {
-  const started = Date.now();
-  let calls = 0,
-    bytes = 0;
-  return async (args: string[]) => {
+export interface GhRunnerOptions {
+  /** Dispatched subprocess attempts allowed per runner. */
+  maxRequests?: number;
+  /** Cumulative subprocess wait time allowed, in milliseconds. */
+  wallMs?: number;
+  /** Per-subprocess timeout, in milliseconds. */
+  timeoutMs?: number;
+  /** Monotonic clock, injectable so tests can drive the budget. */
+  now?: () => number;
+  /** Working directory for every subprocess, pinned so a checkout cannot move. */
+  cwd?: string;
+}
+function assertLimit(name: string, value: number): void {
+  // A non-finite or non-positive limit would make the budget checks
+  // meaningless, and a NaN timeout would slip past the below-1 check.
+  if (!Number.isFinite(value) || value <= 0) throw new Error(`Invalid gh limit: ${name}`);
+}
+export function createGhRunner(token: string, run = exec, options: GhRunnerOptions = {}) {
+  const maxRequests = options.maxRequests ?? MAX_GH_REQUESTS;
+  const wallMs = options.wallMs ?? GH_WALL_MS;
+  const timeoutMs = options.timeoutMs ?? GH_TIMEOUT_MS;
+  const now = options.now ?? (() => performance.now());
+  const cwd = options.cwd;
+  assertLimit("maxRequests", maxRequests);
+  assertLimit("wallMs", wallMs);
+  assertLimit("timeoutMs", timeoutMs);
+  // The request count, the elapsed-time accounting, and the aggregate byte
+  // budget are shared state, so subprocesses are dispatched one at a time:
+  // concurrent callers cannot oversubscribe any of them.
+  let attempts = 0;
+  let waited = 0;
+  let bytes = 0;
+  let tail: Promise<unknown> = Promise.resolve();
+  const dispatch = async (args: string[]): Promise<string> => {
     const invalid = validateGhArgs(args);
     if (invalid) throw new Error(invalid);
-    if (calls++ >= MAX_GH_REQUESTS) throw new Error("gh request budget exhausted");
-    const remaining = GH_WALL_MS - (Date.now() - started);
-    if (remaining <= 0) throw new Error("gh wall-time budget exhausted");
+    // Both budget checks run inside the serialized section, before the
+    // subprocess is dispatched, so a rejected call spends neither an attempt
+    // nor any of the time allowance.
+    if (attempts >= maxRequests) throw new Error("gh request budget exhausted");
+    const allowance = Math.floor(Math.min(timeoutMs, wallMs - waited));
+    // The clock is fractional and the subprocess timeout must be an integer;
+    // a timeout of 0 would disable the timeout rather than expire it.
+    if (allowance < 1) throw new Error("GitHub research time budget exhausted for this review");
+    attempts += 1;
     // Contents downloads feed the grep cache; the model sees only a truncated
     // preview enforced by the client, so raw bytes are exempt from the
     // model-facing aggregate while still bounded per fetch.
     const isContentsFetch =
       args[0] === "api" && typeof args[1] === "string" && args[1].includes("/contents/");
+    // A diff and a run log are plain text of unbounded length. They are read
+    // with the download ceiling and truncated to the model-facing budget, so
+    // the research budget applies to what the model sees rather than to the
+    // raw stream.
+    const isPlainText = args.includes("--log") || (args[0] === "pr" && args[1] === "diff");
+    const started = now();
     try {
       let stdout: string | Buffer;
       try {
         ({ stdout } = await run("gh", args, {
           env: { GH_TOKEN: token, PATH: process.env.PATH },
-          timeout: Math.min(GH_TIMEOUT_MS, remaining),
-          // Logs use the code-exec per-stream ceiling before applying the smaller research result budget.
-          maxBuffer: args.includes("--log")
-            ? 32 * 1024 + 1
-            : isContentsFetch
-              ? MAX_GH_FILE_BYTES + 1
-              : MAX_GH_RESULT_BYTES + 1,
+          timeout: allowance,
+          // Every subprocess resolves its repository from the same pinned
+          // directory, so a checkout cannot move under a running review.
+          ...(cwd ? { cwd } : {}),
+          // Logs and diffs use the download ceiling; every other command uses
+          // the smaller research result budget.
+          maxBuffer:
+            isPlainText || isContentsFetch ? MAX_GH_FILE_BYTES + 1 : MAX_GH_RESULT_BYTES + 1,
           encoding: "utf8",
         }));
       } catch (error) {
@@ -94,10 +136,7 @@ export function createGhRunner(token: string, run = exec) {
           throw new Error("gh output budget exhausted");
         return value;
       }
-      let truncated = value;
-      if (args.includes("--log") && Buffer.byteLength(truncated) > MAX_GH_RESULT_BYTES)
-        throw new Error("gh output budget exhausted");
-      if (args.includes("--log")) truncated = truncateUtf8WithMarker(truncated, 4 * 1024);
+      const truncated = isPlainText ? truncateUtf8WithMarker(value, 4 * 1024) : value;
       const size = Buffer.byteLength(truncated);
       if (size > MAX_GH_RESULT_BYTES || bytes + size > MAX_GH_TOTAL_BYTES)
         throw new Error("gh output budget exhausted");
@@ -109,6 +148,24 @@ export function createGhRunner(token: string, run = exec) {
       if (e instanceof Error && /maxbuffer/i.test(e.message))
         throw new Error("gh output budget exhausted");
       throw new Error(safeGhFailure(e));
+    } finally {
+      // A subprocess that throws, times out, or is killed still consumed the
+      // allowance it burned. The measurement covers the postprocessing after
+      // the subprocess returns, which is a rounding error next to a network
+      // round trip.
+      waited += now() - started;
     }
+  };
+  return (args: string[]): Promise<string> => {
+    // The queue survives a rejected subprocess: the next call still runs.
+    const result = tail.then(
+      () => dispatch(args),
+      () => dispatch(args),
+    );
+    tail = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
   };
 }

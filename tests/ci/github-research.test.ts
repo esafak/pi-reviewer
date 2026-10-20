@@ -7,7 +7,9 @@ import {
   unavailableGitHubResearchWarnings,
 } from "../../src/ci/github-research/config.js";
 import { createGitHubResearchClient } from "../../src/ci/github-research/client.js";
+import type { GitHubResearchClient } from "../../src/ci/github-research/client.js";
 import { createGitHubResearchTools } from "../../src/ci/github-research/tool.js";
+import { githubReadSchema } from "../../src/ci/github-research/tool.js";
 import { validateGhArgs } from "../../src/ci/github-research/gh-allowlist.js";
 import { createGhRunner } from "../../src/ci/github-research/gh-runner.js";
 import { readCachedRange, saveCachedFile } from "../../src/ci/github-research/cache.js";
@@ -65,6 +67,15 @@ describe("gh-backed GitHub research", () => {
     ])
       expect(validateGhArgs(a)).toBeTruthy();
   });
+  it("no longer allows the removed read commands and options", () => {
+    // `pr status` and `repo view --branch` left the read contract.
+    expect(validateGhArgs(["pr", "status", "--repo", "o/r"])).toContain("not allowed");
+    expect(validateGhArgs(["repo", "view", "o/r", "--branch", "main"])).toContain("not allowed");
+    // The search side keeps its own branch and status filters, which reach
+    // the run list command.
+    expect(validateGhArgs(["run", "list", "--branch", "main"])).toBeUndefined();
+    expect(validateGhArgs(["run", "list", "--status", "queued"])).toBeUndefined();
+  });
   it("uses execFile arguments and bounds output", async () => {
     const run = vi.fn().mockResolvedValue({ stdout: "[]" });
     const runner = createGhRunner("secret", run as never);
@@ -105,6 +116,652 @@ describe("gh-backed GitHub research", () => {
     const limited = createGhRunner("t", vi.fn().mockResolvedValue({ stdout: "ok" }) as never);
     for (let i = 0; i < 8; i++) await limited(["repo", "view"]);
     await expect(limited(["repo", "view"])).rejects.toThrow("request budget");
+  });
+  describe("time budget", () => {
+    // The runner measures time spent inside the subprocess, so the clock is
+    // injected and the mock exec is what advances it.
+    interface TimedRun {
+      mock: { calls: Array<[string, string[], { timeout?: number }]> };
+    }
+    const timeoutsOf = (run: TimedRun) => run.mock.calls.map((call) => call[2]?.timeout);
+    it("does not spend the allowance on time between calls", async () => {
+      let now = 0;
+      const run = vi.fn(async () => {
+        now += 1;
+        return { stdout: "ok" };
+      });
+      const gh = createGhRunner("t", run as never, { now: () => now });
+      for (let i = 0; i < 8; i++) {
+        now += 60_000;
+        await expect(gh(["repo", "view"])).resolves.toBe("ok");
+      }
+      expect(run).toHaveBeenCalledTimes(8);
+    });
+    it("fails without dispatching once the allowance is spent", async () => {
+      let now = 0;
+      const run = vi.fn(async () => {
+        now += 100;
+        return { stdout: "ok" };
+      });
+      const gh = createGhRunner("t", run as never, { now: () => now, wallMs: 500, timeoutMs: 500 });
+      for (let i = 0; i < 5; i++) await gh(["repo", "view"]);
+      await expect(gh(["repo", "view"])).rejects.toThrow("time budget exhausted");
+      expect(run).toHaveBeenCalledTimes(5);
+      await expect(gh(["repo", "view"])).rejects.toThrow("time budget exhausted");
+      expect(run).toHaveBeenCalledTimes(5);
+    });
+    it("shrinks the subprocess timeout as the allowance is consumed", async () => {
+      let now = 0;
+      const run = vi.fn(async () => {
+        now += 400;
+        return { stdout: "ok" };
+      });
+      const gh = createGhRunner("t", run as never, {
+        now: () => now,
+        wallMs: 1000,
+        timeoutMs: 300,
+      });
+      await gh(["repo", "view"]);
+      await gh(["repo", "view"]);
+      await gh(["repo", "view"]);
+      // The timeout is the per-call ceiling until the remaining allowance
+      // drops below it, then it shrinks with the allowance.
+      expect(timeoutsOf(run)).toEqual([300, 300, 200]);
+    });
+    it("charges the allowance for a subprocess that throws", async () => {
+      let now = 0;
+      const run = vi.fn(async () => {
+        now += 100;
+        throw new Error("boom");
+      });
+      const gh = createGhRunner("t", run as never, {
+        now: () => now,
+        wallMs: 250,
+        timeoutMs: 5000,
+      });
+      await expect(gh(["repo", "view"])).rejects.toThrow("boom");
+      await expect(gh(["repo", "view"])).rejects.toThrow("boom");
+      await expect(gh(["repo", "view"])).rejects.toThrow("boom");
+      expect(run).toHaveBeenCalledTimes(3);
+      await expect(gh(["repo", "view"])).rejects.toThrow("time budget exhausted");
+      expect(run).toHaveBeenCalledTimes(3);
+    });
+    it("keeps the queue alive after a rejected subprocess", async () => {
+      const run = vi
+        .fn()
+        .mockRejectedValueOnce(new Error("first failed"))
+        .mockResolvedValue({ stdout: "ok" });
+      const gh = createGhRunner("t", run as never);
+      await expect(gh(["repo", "view"])).rejects.toThrow("first failed");
+      await expect(gh(["repo", "view"])).resolves.toBe("ok");
+    });
+    it("dispatches one subprocess at a time so concurrent calls share one allowance", async () => {
+      let now = 0;
+      let active = 0;
+      let peak = 0;
+      const run = vi.fn(async () => {
+        active += 1;
+        peak = Math.max(peak, active);
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        now += 10;
+        active -= 1;
+        return { stdout: "ok" };
+      });
+      const gh = createGhRunner("t", run as never, {
+        now: () => now,
+        wallMs: 1000,
+        timeoutMs: 5000,
+      });
+      const results = await Promise.all([
+        gh(["repo", "view"]),
+        gh(["repo", "view"]),
+        gh(["repo", "view"]),
+      ]);
+      expect(results).toEqual(["ok", "ok", "ok"]);
+      expect(peak).toBe(1);
+    });
+    it("passes an integer timeout for a fractional clock", async () => {
+      let now = 0;
+      const run = vi.fn(async () => {
+        now += 5.25;
+        return { stdout: "ok" };
+      });
+      const gh = createGhRunner("t", run as never, {
+        now: () => now,
+        wallMs: 100,
+        timeoutMs: 5000,
+      });
+      await gh(["repo", "view"]);
+      await gh(["repo", "view"]);
+      const timeouts = timeoutsOf(run);
+      expect(timeouts).toEqual([100, 94]);
+      expect(timeouts.every((timeout) => Number.isInteger(timeout))).toBe(true);
+      // Below a millisecond the call is rejected rather than dispatched with
+      // a timeout of 0, which would disable the timeout instead of expiring it.
+      let barely = 0;
+      const barelyRun = vi.fn(async () => {
+        barely += 9.6;
+        return { stdout: "ok" };
+      });
+      const barelyGh = createGhRunner("t", barelyRun as never, {
+        now: () => barely,
+        wallMs: 10,
+        timeoutMs: 5000,
+      });
+      await barelyGh(["repo", "view"]);
+      await expect(barelyGh(["repo", "view"])).rejects.toThrow("time budget exhausted");
+      expect(barelyRun).toHaveBeenCalledTimes(1);
+    });
+    it("rejects a limit that is not a finite positive number", () => {
+      const run = vi.fn().mockResolvedValue({ stdout: "ok" });
+      expect(() => createGhRunner("t", run as never, { wallMs: Number.NaN })).toThrow(
+        "Invalid gh limit",
+      );
+      expect(() => createGhRunner("t", run as never, { timeoutMs: 0 })).toThrow("Invalid gh limit");
+    });
+  });
+
+  describe("visibility probe cache", () => {
+    const publicRepo = { stdout: "false" };
+    const privateRepo = { stdout: "true" };
+    const pullRequest = { stdout: JSON.stringify({ number: 1, title: "t" }) };
+    const checkout = (host: string) => ({
+      stdout: JSON.stringify({
+        isPrivate: false,
+        nameWithOwner: "org/repo",
+        url: `https://${host}/org/repo`,
+      }),
+    });
+
+    interface Fixture {
+      calls: string[][];
+      /** The keyed visibility probes issued for a repository. */
+      keyed: (repo: string) => number;
+      /** The checkout visibility probes issued. */
+      checkoutProbes: () => number;
+      client: GitHubResearchClient;
+    }
+    // One client over a mocked gh: the mock records every argv so a test can
+    // count probes against content requests.
+    const fixture = (respond: (args: string[]) => { stdout: string }): Fixture => {
+      const calls: string[][] = [];
+      const run = vi.fn(async (_cmd: string, args: string[]) => {
+        calls.push(args);
+        return respond(args);
+      });
+      return {
+        calls,
+        keyed: (repo) =>
+          calls.filter(
+            (args) => args[0] === "api" && args[1]?.toLowerCase() === `repos/${repo.toLowerCase()}`,
+          ).length,
+        checkoutProbes: () =>
+          calls.filter((args) => args[0] === "repo" && args[1] === "view").length,
+        client: createGitHubResearchClient("t", "public", run as never),
+      };
+    };
+    const readPr = (client: GitHubResearchClient, repo = "org/repo") => {
+      const [owner, name] = repo.split("/");
+      return client.read({ kind: "pull_request", owner, repo: name, number: 1 });
+    };
+
+    // The probe-count rules, as one table: each case names the operations and
+    // the probes they must produce.
+    let failedProbe = false;
+    const cases: Array<{
+      label: string;
+      respond: (args: string[]) => { stdout: string };
+      run: (client: GitHubResearchClient) => Promise<unknown>;
+      keyed: Record<string, number>;
+      checkout?: number;
+      /** The error every operation in the case rejects with, when it must. */
+      throws?: string;
+    }> = [
+      {
+        label: "two reads of one repository probe it once",
+        respond: (args) => (args[0] === "api" ? publicRepo : pullRequest),
+        run: async (client) => {
+          await readPr(client);
+          await readPr(client);
+        },
+        keyed: { "org/repo": 1 },
+      },
+      {
+        label: "a search and a later read share the probe",
+        respond: (args) =>
+          args[0] === "search"
+            ? { stdout: JSON.stringify([{ fullName: "org/repo", description: "d" }]) }
+            : args[0] === "api"
+              ? publicRepo
+              : pullRequest,
+        run: async (client) => {
+          await client.search("repositories", "q", 5);
+          await readPr(client);
+        },
+        keyed: { "org/repo": 1 },
+      },
+      {
+        label: "search rows that share a repository probe it once",
+        respond: (args) =>
+          args[0] === "search"
+            ? {
+                stdout: JSON.stringify([
+                  { fullName: "org/repo", description: "d" },
+                  { fullName: "org/repo", description: "d2" },
+                ]),
+              }
+            : args[0] === "api"
+              ? publicRepo
+              : pullRequest,
+        run: async (client) => {
+          await client.search("repositories", "q", 5);
+        },
+        keyed: { "org/repo": 1 },
+      },
+      {
+        label: "repeated private rows are probed once",
+        respond: (args) =>
+          args[0] === "search"
+            ? {
+                stdout: JSON.stringify([
+                  { fullName: "org/secret", description: "d" },
+                  { fullName: "org/secret", description: "d2" },
+                ]),
+              }
+            : args[0] === "api"
+              ? privateRepo
+              : pullRequest,
+        run: async (client) => {
+          await client.search("repositories", "q", 5);
+        },
+        keyed: { "org/secret": 1 },
+      },
+      {
+        label: "different repositories are probed separately",
+        respond: (args) => (args[0] === "api" ? publicRepo : pullRequest),
+        run: async (client) => {
+          await readPr(client, "org/one");
+          await readPr(client, "org/two");
+        },
+        keyed: { "org/one": 1, "org/two": 1 },
+      },
+      {
+        label: "cache keys are case-normalized",
+        respond: (args) => (args[0] === "api" ? publicRepo : pullRequest),
+        run: async (client) => {
+          await client.read({ kind: "pull_request", owner: "Org", repo: "Repo", number: 1 });
+          await readPr(client);
+        },
+        keyed: { "org/repo": 1 },
+      },
+      {
+        label: "a failed probe is not retained and is retried",
+        respond: (args) => {
+          if (args[0] !== "api") return pullRequest;
+          if (failedProbe) return publicRepo;
+          failedProbe = true;
+          throw new Error("network down");
+        },
+        run: async (client) => {
+          await readPr(client).catch(() => undefined);
+          await readPr(client);
+        },
+        keyed: { "org/repo": 2 },
+      },
+      {
+        label: "two local searches probe the checkout once",
+        respond: (args) => (args[0] === "repo" ? checkout("github.com") : { stdout: "[]" }),
+        run: async (client) => {
+          await client.search("runs", "build", 5);
+          await client.search("runs", "build", 5);
+        },
+        keyed: {},
+        checkout: 1,
+      },
+      {
+        label: "a private checkout is not retained",
+        respond: (args) =>
+          args[0] === "repo"
+            ? {
+                stdout: JSON.stringify({
+                  isPrivate: true,
+                  nameWithOwner: "org/repo",
+                  url: "https://github.com/org/repo",
+                }),
+              }
+            : { stdout: "[]" },
+        run: async (client) => {
+          await client.search("runs", "build", 5).catch(() => undefined);
+          await client.search("runs", "build", 5).catch(() => undefined);
+        },
+        keyed: {},
+        checkout: 2,
+      },
+      {
+        label: "a row whose repository cannot be resolved is admitted without a probe",
+        respond: (args) =>
+          args[0] === "search"
+            ? { stdout: JSON.stringify([{ visibility: "PUBLIC", description: "d" }]) }
+            : { stdout: "[]" },
+        run: async (client) => {
+          await client.search("repositories", "q", 5);
+        },
+        keyed: {},
+      },
+    ];
+    for (const testCase of cases) {
+      it(testCase.label, async () => {
+        const { client, keyed, checkoutProbes } = fixture(testCase.respond);
+        if (testCase.throws) await expect(testCase.run(client)).rejects.toThrow(testCase.throws);
+        else await testCase.run(client);
+        for (const [repo, count] of Object.entries(testCase.keyed))
+          expect(keyed(repo), `keyed probes for ${repo}`).toBe(count);
+        if (testCase.checkout !== undefined)
+          expect(checkoutProbes(), "checkout probes").toBe(testCase.checkout);
+      });
+    }
+    it("shares one checkout probe between concurrent local searches", async () => {
+      const { client, checkoutProbes } = fixture((args) =>
+        args[0] === "repo" ? checkout("github.com") : { stdout: "[]" },
+      );
+      await Promise.all([client.search("runs", "build", 5), client.search("runs", "build", 5)]);
+      expect(checkoutProbes()).toBe(1);
+    });
+    it("probes a negative verdict once across concurrent searches", async () => {
+      const { client, keyed } = fixture((args) =>
+        args[0] === "search"
+          ? {
+              stdout: JSON.stringify([
+                { fullName: "org/secret", description: "d" },
+                { fullName: "org/secret", description: "d2" },
+              ]),
+            }
+          : args[0] === "api"
+            ? privateRepo
+            : pullRequest,
+      );
+      await Promise.all([
+        client.search("repositories", "q", 5),
+        client.search("repositories", "q", 5),
+      ]);
+      expect(keyed("org/secret")).toBe(1);
+    });
+    it("shares one probe between concurrent lookups of a repository", async () => {
+      const { client, keyed } = fixture((args) => (args[0] === "api" ? publicRepo : pullRequest));
+      await Promise.all([readPr(client), readPr(client)]);
+      expect(keyed("org/repo")).toBe(1);
+    });
+    it("does not share a cache between clients", async () => {
+      const { client, keyed } = fixture((args) => (args[0] === "api" ? publicRepo : pullRequest));
+      await readPr(client);
+      const second = fixture((args) => (args[0] === "api" ? publicRepo : pullRequest));
+      await readPr(second.client);
+      expect(keyed("org/repo")).toBe(1);
+      expect(second.keyed("org/repo")).toBe(1);
+    });
+    it("denies a read and excludes a row when the repository is private", async () => {
+      const { client, calls, keyed } = fixture((args) =>
+        args[0] === "search"
+          ? { stdout: JSON.stringify([{ fullName: "org/secret", description: "d" }]) }
+          : args[0] === "api"
+            ? privateRepo
+            : pullRequest,
+      );
+      await expect(readPr(client, "org/secret")).rejects.toThrow(
+        "Private repositories are unavailable in public scope",
+      );
+      expect(calls.filter((args) => args[0] === "pr")).toHaveLength(0);
+      const result = await client.search("repositories", "q", 5);
+      expect(result.results).toEqual([]);
+      expect(keyed("org/secret")).toBe(2);
+    });
+    it("does not retain a malformed verdict", async () => {
+      const { client, keyed } = fixture((args) =>
+        args[0] === "api" ? { stdout: "maybe" } : pullRequest,
+      );
+      await expect(readPr(client)).rejects.toThrow(
+        "Private repositories are unavailable in public scope",
+      );
+      await expect(readPr(client)).rejects.toThrow(
+        "Private repositories are unavailable in public scope",
+      );
+      expect(keyed("org/repo")).toBe(2);
+    });
+    it("seeds the keyed cache from the checkout when the host matches", async () => {
+      const { client, keyed, checkoutProbes } = fixture((args) =>
+        args[0] === "repo"
+          ? checkout("github.com")
+          : args[0] === "api"
+            ? publicRepo
+            : { stdout: "[]" },
+      );
+      await client.search("runs", "build", 5);
+      await readPr(client);
+      expect(keyed("org/repo")).toBe(0);
+      expect(checkoutProbes()).toBe(1);
+    });
+    it("keeps the caches separate when the checkout host differs", async () => {
+      const { client, keyed, checkoutProbes } = fixture((args) =>
+        args[0] === "repo"
+          ? checkout("ghe.example.com")
+          : args[0] === "api"
+            ? publicRepo
+            : { stdout: "[]" },
+      );
+      await client.search("runs", "build", 5);
+      await readPr(client);
+      expect(keyed("org/repo")).toBe(1);
+      expect(checkoutProbes()).toBe(1);
+    });
+  });
+
+  it("keeps the read schema aligned with the read contract", () => {
+    const schema = githubReadSchema as unknown as {
+      properties: Record<string, unknown>;
+      additionalProperties?: boolean;
+    };
+    // An argument the schema no longer lists is rejected by the harness
+    // before execute runs, so the obsolete ones are gone from the schema too.
+    expect(Object.keys(schema.properties)).not.toContain("branch");
+    expect(schema.additionalProperties).toBe(false);
+    const kind = schema.properties.kind as { enum?: readonly string[] };
+    expect(kind.enum).toContain("checks");
+    expect(kind.enum).not.toContain("status");
+  });
+
+  it("reads a file at a commit SHA", async () => {
+    const run = vi.fn().mockResolvedValue({
+      stdout: JSON.stringify({
+        path: "a.md",
+        url: "u",
+        content: Buffer.from("hi").toString("base64"),
+      }),
+    });
+    const result = await createGitHubResearchClient("t", "token-accessible", run as never).read({
+      kind: "file",
+      owner: "o",
+      repo: "r",
+      path: "a.md",
+      ref: "a40e42aa59dcfea801b7d9f70a64e53de4ee7ab1",
+    });
+    expect(run.mock.calls[0]![1]).toEqual([
+      "api",
+      "repos/o/r/contents/a.md?ref=a40e42aa59dcfea801b7d9f70a64e53de4ee7ab1",
+      "--jq",
+      "{path:.path,url:.html_url,content:.content}",
+    ]);
+    expect((result as { content: string }).content).toBe("hi");
+  });
+
+  describe("read contract", () => {
+    interface ToolResult {
+      content: Array<{ text: string }>;
+      isError?: boolean;
+    }
+    const stubClient = () => {
+      const read = vi.fn().mockResolvedValue({});
+      const search = vi.fn().mockResolvedValue({});
+      return { read, search, client: { read, search } as unknown as GitHubResearchClient };
+    };
+    const reject = async (args: Record<string, unknown>) => {
+      const { read, client } = stubClient();
+      const tools = createGitHubResearchTools({ scope: "token-accessible", token: "t" }, client);
+      const response = (await tools[1]!.execute("id", args as never)) as ToolResult;
+      return { response, read };
+    };
+    it("rejects a number on a kind that does not take one", async () => {
+      const { response, read } = await reject({
+        kind: "file",
+        owner: "o",
+        repo: "r",
+        path: "a.md",
+        number: 1,
+      });
+      expect(response.content[0]!.text).toContain("A number is not valid for the file kind");
+      expect(response.isError).toBe(true);
+      expect(read).not.toHaveBeenCalled();
+    });
+    it("rejects path and ref on a kind that is not a file", async () => {
+      const { response, read } = await reject({
+        kind: "pull_request",
+        owner: "o",
+        repo: "r",
+        number: 1,
+        ref: "main",
+      });
+      expect(response.content[0]!.text).toContain("ref is only valid for file reads");
+      expect(response.isError).toBe(true);
+      expect(read).not.toHaveBeenCalled();
+    });
+    it("rejects a kind-specific option on the wrong kind", async () => {
+      const { response, read } = await reject({
+        kind: "pull_request",
+        owner: "o",
+        repo: "r",
+        number: 1,
+        name_only: true,
+      });
+      expect(response.content[0]!.text).toContain("The name_only option is only valid for: diff");
+      expect(response.isError).toBe(true);
+      expect(read).not.toHaveBeenCalled();
+    });
+    it("rejects a line range on a kind that is not a file", async () => {
+      const { response, read } = await reject({
+        kind: "issue",
+        owner: "o",
+        repo: "r",
+        number: 1,
+        offset: 1,
+      });
+      expect(response.content[0]!.text).toContain("The offset option is only valid for: file");
+      expect(response.isError).toBe(true);
+      expect(read).not.toHaveBeenCalled();
+    });
+    it("rejects a missing required number", async () => {
+      const { response, read } = await reject({ kind: "pull_request", owner: "o", repo: "r" });
+      expect(response.content[0]!.text).toContain("A number is required for the pull_request kind");
+      expect(response.isError).toBe(true);
+      expect(read).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("failure reporting", () => {
+    interface ToolResult {
+      content: Array<{ text: string }>;
+      isError?: boolean;
+    }
+    const failingClient = () =>
+      createGitHubResearchClient(
+        "t",
+        "token-accessible",
+        vi.fn().mockRejectedValue(new Error("gh exploded")) as never,
+      );
+    it("marks a failed search as an error result", async () => {
+      const tools = createGitHubResearchTools(
+        { scope: "token-accessible", token: "t" },
+        failingClient(),
+      );
+      const response = (await tools[0]!.execute("id", {
+        kind: "repositories",
+        query: "x",
+      } as never)) as ToolResult;
+      expect(response.content[0]!.text).toContain("GitHub search unavailable");
+      expect(response.isError).toBe(true);
+    });
+    it("marks a failed read as an error result", async () => {
+      const tools = createGitHubResearchTools(
+        { scope: "token-accessible", token: "t" },
+        failingClient(),
+      );
+      const response = (await tools[1]!.execute("id", {
+        kind: "pull_request",
+        owner: "o",
+        repo: "r",
+        number: 1,
+      } as never)) as ToolResult;
+      expect(response.content[0]!.text).toContain("GitHub read unavailable");
+      expect(response.isError).toBe(true);
+    });
+    it("marks a failed grep as an error result", async () => {
+      const dir = await mkdtemp(path.join(tmpdir(), "pi-reviewer-grep-error-test-"));
+      const tools = createGitHubResearchTools(
+        { scope: "token-accessible", token: "t" },
+        failingClient(),
+        { cacheDir: dir },
+      );
+      const response = (await tools[2]!.execute("id", { pattern: "a" } as never)) as ToolResult;
+      expect(response.content[0]!.text).toContain("GitHub grep unavailable");
+      expect(response.isError).toBe(true);
+      await rm(dir, { recursive: true, force: true });
+    });
+    it("marks usage errors as error results", async () => {
+      const read = vi.fn().mockResolvedValue({});
+      const tools = createGitHubResearchTools({ scope: "token-accessible", token: "t" }, {
+        read,
+        search: vi.fn(),
+      } as unknown as GitHubResearchClient);
+      const wrongKind = (await tools[1]!.execute("id", {
+        kind: "status",
+        owner: "o",
+        repo: "r",
+      } as never)) as ToolResult;
+      expect(wrongKind.content[0]!.text).toContain("Read kind must be one of: file");
+      expect(wrongKind.isError).toBe(true);
+      expect(read).not.toHaveBeenCalled();
+      const wrongRef = (await tools[1]!.execute("id", {
+        kind: "repository",
+        owner: "o",
+        repo: "r",
+        ref: "main",
+      } as never)) as ToolResult;
+      expect(wrongRef.content[0]!.text).toContain(
+        "ref is only valid for file reads; use kind=file with ref",
+      );
+      expect(wrongRef.isError).toBe(true);
+      const obsoleteOption = (await tools[1]!.execute("id", {
+        kind: "file",
+        owner: "o",
+        repo: "r",
+        path: "a.md",
+        branch: "main",
+      } as never)) as ToolResult;
+      expect(obsoleteOption.content[0]!.text).toContain("Unknown read option: branch");
+      expect(obsoleteOption.isError).toBe(true);
+    });
+    it("does not mark a successful read as an error", async () => {
+      const run = vi.fn().mockResolvedValue({ stdout: JSON.stringify({ number: 1, title: "t" }) });
+      const tools = createGitHubResearchTools(
+        { scope: "token-accessible", token: "t" },
+        createGitHubResearchClient("t", "token-accessible", run as never),
+      );
+      const response = (await tools[1]!.execute("id", {
+        kind: "pull_request",
+        owner: "o",
+        repo: "r",
+        number: 1,
+      } as never)) as ToolResult;
+      expect(response.isError).toBeFalsy();
+    });
   });
 
   it("preserves byte-identical legacy search argv when all optional filters are absent", async () => {
@@ -185,7 +842,7 @@ describe("gh-backed GitHub research", () => {
     ] as const;
     for (const [kind, oldArgv] of cases) {
       const run = vi.fn().mockResolvedValue({ stdout: "[]" });
-      await createGitHubResearchClient("t", "token-accessible", Date.now, run as never).search(
+      await createGitHubResearchClient("t", "token-accessible", run as never).search(
         kind,
         "q",
         5,
@@ -196,7 +853,7 @@ describe("gh-backed GitHub research", () => {
   });
   it("maps typed filters to exact argv and rejects invalid values", async () => {
     const run = vi.fn().mockResolvedValue({ stdout: "[]" });
-    await createGitHubResearchClient("t", "token-accessible", Date.now, run as never).search(
+    await createGitHubResearchClient("t", "token-accessible", run as never).search(
       "pull_requests",
       "q",
       5,
@@ -253,7 +910,7 @@ describe("gh-backed GitHub research", () => {
   });
   it("maps repository and code search filters with exact flag and JSON argv", async () => {
     const repoRun = vi.fn().mockResolvedValue({ stdout: "[]" });
-    await createGitHubResearchClient("t", "token-accessible", Date.now, repoRun as never).search(
+    await createGitHubResearchClient("t", "token-accessible", repoRun as never).search(
       "repositories",
       "q",
       5,
@@ -279,7 +936,7 @@ describe("gh-backed GitHub research", () => {
       "desc",
     ]);
     const codeRun = vi.fn().mockResolvedValue({ stdout: "[]" });
-    await createGitHubResearchClient("t", "token-accessible", Date.now, codeRun as never).search(
+    await createGitHubResearchClient("t", "token-accessible", codeRun as never).search(
       "code",
       "q",
       5,
@@ -333,7 +990,7 @@ describe("gh-backed GitHub research", () => {
     ] as const;
     for (const [kind, options, suffix] of cases) {
       const run = vi.fn().mockResolvedValue({ stdout: "[]" });
-      await createGitHubResearchClient("t", "token-accessible", Date.now, run as never).search(
+      await createGitHubResearchClient("t", "token-accessible", run as never).search(
         kind,
         "q",
         5,
@@ -367,6 +1024,10 @@ describe("gh-backed GitHub research", () => {
       ).rejects.toBeInstanceOf(Error);
     }
   });
+  // Defensive compatibility coverage: the transport accepts a nonzero exit
+  // that still carries stdout, so a run that reports its outcome that way is
+  // read rather than lost. The captured CLI exits 0 for the JSON form and
+  // nonzero for the log form; both are covered by the contract fixtures.
   it("parses failed run JSON when only exit-status is requested", async () => {
     const run = vi.fn().mockRejectedValue(
       Object.assign(new Error("run failed"), {
@@ -374,12 +1035,7 @@ describe("gh-backed GitHub research", () => {
         stdout: JSON.stringify({ databaseId: 12, conclusion: "failure", status: "completed" }),
       }),
     );
-    const result = await createGitHubResearchClient(
-      "t",
-      "token-accessible",
-      Date.now,
-      run as never,
-    ).read({
+    const result = await createGitHubResearchClient("t", "token-accessible", run as never).read({
       kind: "run",
       owner: "o",
       repo: "r",
@@ -410,7 +1066,6 @@ describe("gh-backed GitHub research", () => {
     const stringResult = await createGitHubResearchClient(
       "t",
       "token-accessible",
-      Date.now,
       stringRun as never,
     ).read({ kind: "pull_request", owner: "o", repo: "r", number: 8, comments: true });
     expect(stringRun.mock.calls[0]![1]).toEqual([
@@ -426,7 +1081,6 @@ describe("gh-backed GitHub research", () => {
     const arrayResult = await createGitHubResearchClient(
       "t",
       "token-accessible",
-      Date.now,
       forPr([{ body: "c".repeat(5 * 1024) }]) as never,
     ).read({ kind: "pull_request", owner: "o", repo: "r", number: 8, comments: true });
     expect((arrayResult.pull_request as { comments: string }).comments).toContain("[truncated]");
@@ -435,12 +1089,7 @@ describe("gh-backed GitHub research", () => {
       .mockRejectedValue(
         Object.assign(new Error("failed"), { code: 1, stdout: "x".repeat(5 * 1024) }),
       );
-    const log = await createGitHubResearchClient(
-      "t",
-      "token-accessible",
-      Date.now,
-      run as never,
-    ).read({
+    const log = await createGitHubResearchClient("t", "token-accessible", run as never).read({
       kind: "run",
       owner: "o",
       repo: "r",
@@ -462,7 +1111,7 @@ describe("gh-backed GitHub research", () => {
     ]);
     expect(log.result).toContain("[truncated]");
     const nameOnly = vi.fn().mockResolvedValue({ stdout: "src/a.ts\n" });
-    await createGitHubResearchClient("t", "token-accessible", Date.now, nameOnly as never).read({
+    await createGitHubResearchClient("t", "token-accessible", nameOnly as never).read({
       kind: "diff",
       owner: "o",
       repo: "r",
@@ -470,19 +1119,16 @@ describe("gh-backed GitHub research", () => {
       name_only: true,
     });
     expect(nameOnly.mock.calls[0]![1]).toEqual(["pr", "diff", "3", "--repo", "o/r", "--name-only"]);
-    const branch = vi.fn().mockResolvedValue({ stdout: "{}" });
-    await createGitHubResearchClient("t", "token-accessible", Date.now, branch as never).read({
+    const repository = vi.fn().mockResolvedValue({ stdout: "{}" });
+    await createGitHubResearchClient("t", "token-accessible", repository as never).read({
       kind: "repository",
       owner: "o",
       repo: "r",
-      branch: "feature/test",
     });
-    expect(branch.mock.calls[0]![1]).toEqual([
+    expect(repository.mock.calls[0]![1]).toEqual([
       "repo",
       "view",
       "o/r",
-      "--branch",
-      "feature/test",
       "--json",
       "name,nameWithOwner,description,url,visibility,defaultBranchRef",
     ]);
@@ -505,7 +1151,7 @@ describe("gh-backed GitHub research", () => {
       })
       .mockResolvedValueOnce({ stdout: "false" })
       .mockResolvedValueOnce({ stdout: "true" });
-    const result = await createGitHubResearchClient("t", "public", Date.now, run as never).search(
+    const result = await createGitHubResearchClient("t", "public", run as never).search(
       "repositories",
       "repo",
       5,
@@ -516,22 +1162,31 @@ describe("gh-backed GitHub research", () => {
     const run = vi
       .fn()
       .mockResolvedValueOnce({
-        stdout: JSON.stringify({ isPrivate: false, nameWithOwner: "org/repo" }),
+        stdout: JSON.stringify({
+          isPrivate: false,
+          nameWithOwner: "org/repo",
+          url: "https://github.com/org/repo",
+        }),
       })
       .mockResolvedValueOnce({ stdout: JSON.stringify([{ name: "Build nightly" }]) });
-    const result = await createGitHubResearchClient("t", "public", Date.now, run as never).search(
+    const result = await createGitHubResearchClient("t", "public", run as never).search(
       "runs",
       "build",
       5,
     );
     expect(result.results).toEqual([{ name: "Build nightly" }]);
     expect(run).toHaveBeenCalledTimes(2);
-    expect(run.mock.calls[0]![1]).toEqual(["repo", "view", "--json", "isPrivate,nameWithOwner"]);
+    expect(run.mock.calls[0]![1]).toEqual([
+      "repo",
+      "view",
+      "--json",
+      "isPrivate,nameWithOwner,url",
+    ]);
     expect(run.mock.calls[1]![1]).not.toContain("--repo");
   });
   it("does not add a repo privacy request for token-accessible local searches", async () => {
     const run = vi.fn().mockResolvedValue({ stdout: JSON.stringify([{ name: "Build nightly" }]) });
-    await createGitHubResearchClient("t", "token-accessible", Date.now, run as never).search(
+    await createGitHubResearchClient("t", "token-accessible", run as never).search(
       "runs",
       "build",
       5,
@@ -541,7 +1196,7 @@ describe("gh-backed GitHub research", () => {
   });
   it("uses only valid gh search code JSON fields", async () => {
     const run = vi.fn().mockResolvedValue({ stdout: JSON.stringify([{ path: "src/a.ts" }]) });
-    await createGitHubResearchClient("t", "token-accessible", Date.now, run as never).search(
+    await createGitHubResearchClient("t", "token-accessible", run as never).search(
       "code",
       "needle",
       5,
@@ -561,11 +1216,7 @@ describe("gh-backed GitHub research", () => {
   it("fails loudly when public-scope current repository visibility is unavailable", async () => {
     const run = vi.fn().mockRejectedValue(new Error("gh repo view failed"));
     await expect(
-      createGitHubResearchClient("t", "public", Date.now, run as never).search(
-        "workflows",
-        "deploy",
-        5,
-      ),
+      createGitHubResearchClient("t", "public", run as never).search("workflows", "deploy", 5),
     ).rejects.toThrow("gh repo view failed");
     expect(run).toHaveBeenCalledTimes(1);
   });
@@ -598,12 +1249,11 @@ describe("gh-backed GitHub research", () => {
     "matches all whitespace-tokenized query terms for %s",
     async (kind, items, query, expected) => {
       const run = vi.fn().mockResolvedValue({ stdout: JSON.stringify(items) });
-      const result = await createGitHubResearchClient(
-        "t",
-        "token-accessible",
-        Date.now,
-        run as never,
-      ).search(kind, query, 5);
+      const result = await createGitHubResearchClient("t", "token-accessible", run as never).search(
+        kind,
+        query,
+        5,
+      );
       expect(result.results).toEqual(expected);
     },
   );
@@ -665,17 +1315,6 @@ describe("gh-backed GitHub research", () => {
         ["pr", "checks", "15", "--repo", "o/r", "--json", "name,state,workflow"],
       ],
       [
-        { kind: "status", owner: "o", repo: "r" },
-        [
-          "pr",
-          "status",
-          "--repo",
-          "o/r",
-          "--json",
-          "createdAt,headRefName,isDraft,number,state,statusCheckRollup,title,url",
-        ],
-      ],
-      [
         { kind: "discussion", owner: "o", repo: "r", number: 16 },
         [
           "api",
@@ -703,12 +1342,9 @@ describe("gh-backed GitHub research", () => {
       const run = vi
         .fn()
         .mockResolvedValue({ stdout: params.kind === "diff" ? "diff" : JSON.stringify(value) });
-      const result = await createGitHubResearchClient(
-        "t",
-        "token-accessible",
-        Date.now,
-        run as never,
-      ).read(params as never);
+      const result = await createGitHubResearchClient("t", "token-accessible", run as never).read(
+        params as never,
+      );
       expect(run).toHaveBeenCalledWith("gh", expected, expect.any(Object));
       if (params.kind === "repository")
         expect(result.result).toMatchObject({
@@ -727,12 +1363,13 @@ describe("gh-backed GitHub research", () => {
         content,
       }),
     });
-    const result = await createGitHubResearchClient(
-      "t",
-      "token-accessible",
-      Date.now,
-      run as never,
-    ).read({ kind: "file", owner: "o", repo: "r", path: "src/answer.ts", ref: "main" });
+    const result = await createGitHubResearchClient("t", "token-accessible", run as never).read({
+      kind: "file",
+      owner: "o",
+      repo: "r",
+      path: "src/answer.ts",
+      ref: "main",
+    });
     const argv = run.mock.calls[0]![1] as string[];
     expect(argv).toEqual([
       "api",
@@ -757,12 +1394,12 @@ describe("gh-backed GitHub research", () => {
         publishedAt: null,
       }),
     });
-    const result = await createGitHubResearchClient(
-      "t",
-      "token-accessible",
-      Date.now,
-      run as never,
-    ).read({ kind: "release", owner: "o", repo: "r", number: 1 });
+    const result = await createGitHubResearchClient("t", "token-accessible", run as never).read({
+      kind: "release",
+      owner: "o",
+      repo: "r",
+      number: 1,
+    });
     expect(run.mock.calls[0]![1]).toEqual([
       "api",
       "repos/o/r/releases/1",
@@ -788,12 +1425,12 @@ describe("github file cache, ranges, and grep", () => {
     try {
       const text = `${"alpha\n".repeat(100)}needle here\n${"beta\n".repeat(1000)}`;
       const run = vi.fn().mockResolvedValue({ stdout: filePayload(text) });
-      const result = await createGitHubResearchClient(
-        "t",
-        "token-accessible",
-        Date.now,
-        run as never,
-      ).read({ kind: "file", owner: "o", repo: "r", path: "docs/notes.md" });
+      const result = await createGitHubResearchClient("t", "token-accessible", run as never).read({
+        kind: "file",
+        owner: "o",
+        repo: "r",
+        path: "docs/notes.md",
+      });
       expect(result).toMatchObject({ size: Buffer.byteLength(text), truncated: true });
       expect(result.content as string).toContain("[truncated]");
       // Full text is recoverable from the cache without another gh call.
@@ -820,7 +1457,7 @@ describe("github file cache, ranges, and grep", () => {
       "one\ntwo\nthree\nfour\n",
     );
     const run = vi.fn().mockRejectedValue(new Error("must not fetch"));
-    const client = createGitHubResearchClient("t", "token-accessible", Date.now, run as never);
+    const client = createGitHubResearchClient("t", "token-accessible", run as never);
     const tools = createGitHubResearchTools({ scope: "token-accessible", token: "t" }, client, {
       cacheDir: dir,
     });
@@ -842,14 +1479,14 @@ describe("github file cache, ranges, and grep", () => {
     await rm(dir, { recursive: true, force: true });
   });
 
-  it("rejects ranges for non-file kinds and out-of-range limits", async () => {
+  it("rejects out-of-range limits and attempt numbers", async () => {
     const client = createGitHubResearchClient("t", "token-accessible");
     await expect(
-      client.read({ kind: "repository", owner: "o", repo: "r", offset: 1 } as never),
-    ).rejects.toThrow("only valid for file reads");
-    await expect(
-      client.read({ kind: "file", owner: "o", repo: "r", path: "a.md", limit: 201 } as never),
+      client.read({ kind: "file", owner: "o", repo: "r", path: "a.md", limit: 201 }),
     ).rejects.toThrow("range is invalid");
+    await expect(
+      client.read({ kind: "run", owner: "o", repo: "r", number: 1, attempt: 0 }),
+    ).rejects.toThrow("attempt is invalid");
   });
 
   it("greps cached downloads with logical keys and scope filters", async () => {
@@ -936,7 +1573,7 @@ describe("github file cache, ranges, and grep", () => {
       `x${"y".repeat(900 * 1024)}`,
     );
     const run = vi.fn().mockRejectedValue(new Error("must not fetch"));
-    const client = createGitHubResearchClient("t", "token-accessible", Date.now, run as never);
+    const client = createGitHubResearchClient("t", "token-accessible", run as never);
     const tools = createGitHubResearchTools({ scope: "token-accessible", token: "t" }, client, {
       cacheDir: dir,
     });
@@ -960,7 +1597,7 @@ describe("github file cache, ranges, and grep", () => {
     // budget; the fetch path rejects the same file, so the re-read must too.
     await saveCachedFile(dir, { owner: "o", repo: "r", path: "quotes.md" }, `"`.repeat(4096));
     const run = vi.fn().mockRejectedValue(new Error("must not fetch"));
-    const client = createGitHubResearchClient("t", "token-accessible", Date.now, run as never);
+    const client = createGitHubResearchClient("t", "token-accessible", run as never);
     const tools = createGitHubResearchTools({ scope: "token-accessible", token: "t" }, client, {
       cacheDir: dir,
     });

@@ -207,6 +207,10 @@ const createReviewToolMock = vi.mocked(createReviewTool);
 const createReplyToolMock = vi.mocked(createReplyTool);
 
 let fakeAgentEvents: unknown[] = [];
+// Tool calls the fake agent really performs: the registered tool is looked up
+// and executed, and the end event carries the result's own isError, so the
+// trace is driven by the tool rather than by a scripted event.
+let fakeToolExecutions: Array<{ toolName: string; toolCallId: string; args: unknown }> = [];
 let fakeMcpSession: ReturnType<typeof makeFakeMcpSession>;
 
 interface FakeAgent {
@@ -231,6 +235,18 @@ function makeFakeAgent(text = "LGTM"): FakeAgent {
     prompt: vi.fn(async () => {
       agent.streamFunction({} as never, {} as never, {} as never);
       for (const event of fakeAgentEvents) listener?.(event);
+      for (const call of fakeToolExecutions) {
+        const registered = AgentMock.mock.calls.at(-1)?.[0]?.initialState?.tools;
+        const tool = registered?.find((candidate) => candidate.name === call.toolName);
+        const result = tool ? await tool.execute(call.toolCallId, call.args) : undefined;
+        listener?.({
+          type: "tool_execution_end",
+          toolName: call.toolName,
+          toolCallId: call.toolCallId,
+          result,
+          isError: result?.isError === true,
+        });
+      }
       listener?.({
         type: "agent_end",
         messages: [{ role: "assistant", content: [{ type: "text", text }] }],
@@ -286,6 +302,7 @@ describe("review", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     fakeAgentEvents = [];
+    fakeToolExecutions = [];
     fakeMcpSession = makeFakeMcpSession();
 
     resolveRawDiffMock.mockResolvedValue({
@@ -738,6 +755,38 @@ describe("review", () => {
       expect.objectContaining({
         initialState: expect.objectContaining({ thinkingLevel: "high" }),
       }),
+    );
+  });
+
+  it("traces a tool that reports a failure as an error result", async () => {
+    const execute = vi.fn(async () => ({
+      content: [{ type: "text", text: "boom" }],
+      details: {},
+      isError: true,
+    }));
+    createReadOnlyToolsMock.mockReturnValue([
+      {
+        name: "read_file",
+        label: "read_file",
+        description: "test",
+        parameters: {},
+        execute,
+      },
+    ] as never);
+    fakeToolExecutions = [{ toolName: "read_file", toolCallId: "call-1", args: {} }];
+    const { sink, records } = createMemorySink();
+
+    await review({ cwd: "/repo", debug: true, logger: createLogger({ sink }) });
+
+    // The tool ran for real, and the trace follows the result's own flag.
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(records).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          event: "review.tool.result",
+          fields: expect.objectContaining({ tool: "read_file", status: "error" }),
+        }),
+      ]),
     );
   });
 

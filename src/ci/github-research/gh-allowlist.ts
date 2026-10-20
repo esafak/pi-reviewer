@@ -1,5 +1,7 @@
-const allowed: Record<string, readonly string[]> = {
-  pr: ["view", "list", "diff", "status", "checks"],
+/** Command groups the transport may invoke. */
+type GhGroup = "pr" | "issue" | "repo" | "run" | "workflow" | "release" | "search" | "api";
+const allowed: Record<GhGroup, readonly string[]> = {
+  pr: ["view", "list", "diff", "checks"],
   issue: ["view", "list", "status"],
   repo: ["view"],
   run: ["view", "list"],
@@ -8,11 +10,66 @@ const allowed: Record<string, readonly string[]> = {
   search: ["repos", "code", "prs", "issues"],
   api: [],
 };
+/** The exact group and command pairs the transport may invoke. */
+type GhCommand =
+  | "search repos"
+  | "search code"
+  | "search prs"
+  | "search issues"
+  | "run list"
+  | "workflow list"
+  | "release list"
+  | "repo view"
+  | "pr view"
+  | "issue view"
+  | "pr diff"
+  | "pr checks"
+  | "run view";
+/** The flags the transport knows. */
+type GhFlag =
+  | "--all"
+  | "--assignee"
+  | "--attempt"
+  | "--author"
+  | "--branch"
+  | "--draft"
+  | "--event"
+  | "--exclude-drafts"
+  | "--exclude-pre-releases"
+  | "--exit-status"
+  | "--jq"
+  | "--json"
+  | "--label"
+  | "--language"
+  | "--limit"
+  | "--log"
+  | "--match"
+  | "--merged"
+  | "--milestone"
+  | "--name-only"
+  | "--order"
+  | "--project"
+  | "--repo"
+  | "--sort"
+  | "--state"
+  | "--status"
+  | "--workflow";
+interface GhCommandProfile {
+  /** Flags this command accepts, and whether each takes a value. */
+  flags: Readonly<Partial<Record<GhFlag, "value" | "boolean">>>;
+  /** The exact `--json` field lists this command accepts. */
+  json?: readonly string[];
+}
+/** The spec for a flag the command accepts, or undefined when it does not. */
+function flagSpec(
+  profile: GhCommandProfile | undefined,
+  flag: string,
+): "value" | "boolean" | undefined {
+  if (!profile || !Object.hasOwn(profile.flags, flag)) return undefined;
+  return profile.flags[flag as GhFlag];
+}
 // Typed inputs are converted to fixed argv by the client; this layer verifies command, flag, and value combinations.
-const commands: Record<
-  string,
-  { flags: Record<string, "value" | "boolean">; json?: readonly string[] }
-> = {
+const commands: Record<GhCommand, GhCommandProfile> = {
   "search repos": {
     flags: {
       "--limit": "value",
@@ -101,11 +158,11 @@ const commands: Record<
     json: ["tagName,name,isDraft,isLatest,publishedAt"],
   },
   "repo view": {
-    flags: { "--json": "value", "--branch": "value" },
+    flags: { "--json": "value" },
     json: [
       "name,nameWithOwner,description,url,visibility,defaultBranchRef",
       // Emitted by the CWD-repo visibility probe for repo-local searches (client.ts); not dead.
-      "isPrivate,nameWithOwner",
+      "isPrivate,nameWithOwner,url",
     ],
   },
   "pr view": {
@@ -124,10 +181,6 @@ const commands: Record<
   },
   "pr diff": { flags: { "--repo": "value", "--name-only": "boolean" } },
   "pr checks": { flags: { "--repo": "value", "--json": "value" }, json: ["name,state,workflow"] },
-  "pr status": {
-    flags: { "--repo": "value", "--json": "value" },
-    json: ["createdAt,headRefName,isDraft,number,state,statusCheckRollup,title,url"],
-  },
   "run view": {
     flags: {
       "--repo": "value",
@@ -176,6 +229,20 @@ const jqExpressions = new Set([
   "{number,title,body,html_url,created_at,updated_at,category:.category.name,user:.user.login}",
 ]);
 
+/** The subcommands a group accepts, or undefined when the group is not allowed. */
+function subcommandsFor(group: string): readonly string[] | undefined {
+  return Object.hasOwn(allowed, group) ? allowed[group as GhGroup] : undefined;
+}
+
+/** The profile for a group and command pair, or undefined when the pair is not allowed. */
+function profileFor(group: string, command: string): GhCommandProfile | undefined {
+  const key = `${group} ${command}`;
+  return Object.hasOwn(commands, key) ? commands[key as GhCommand] : undefined;
+}
+
+/** The flags whose values are drawn from a fixed set. */
+type GhEnumFlag = "--state" | "--match" | "--order" | "--status" | "--sort";
+
 export function validateGhArgs(args: string[]): string | undefined {
   if (
     !Array.isArray(args) ||
@@ -185,13 +252,14 @@ export function validateGhArgs(args: string[]): string | undefined {
   )
     return "Invalid gh arguments";
   const [group, command] = args;
-  if (!Object.hasOwn(allowed, group!) || (group !== "api" && !allowed[group!]?.includes(command!)))
+  const subcommands = subcommandsFor(group!);
+  if (!subcommands || (group !== "api" && !subcommands.includes(command!)))
     return "gh command is not allowed";
   if (group === "api" && command!.startsWith("-")) return "gh api endpoint is required";
   if (args.some((a) => /[;&|`$<>]/.test(a))) return "Mutation or shell syntax is not allowed";
   let method = "GET";
   const profile =
-    group === "api" ? { flags: { "--jq": "value" as const } } : commands[`${group} ${command}`];
+    group === "api" ? { flags: { "--jq": "value" as const } } : profileFor(group!, command!);
   if (!profile && group !== "api") return "gh command profile is not allowed";
   for (let i = 2; i < args.length; i++) {
     const arg = args[i]!;
@@ -213,7 +281,7 @@ export function validateGhArgs(args: string[]): string | undefined {
     )
       return "Only read-only GET API calls are allowed";
     if (arg.startsWith("-")) {
-      const spec = profile?.flags[flag];
+      const spec = flagSpec(profile, flag);
       if (!spec) return `Flag ${flag} is not allowed for this command`;
       if (spec === "boolean" && arg.includes("=")) return `Unexpected value for ${flag}`;
       const value = arg.includes("=")
@@ -224,7 +292,7 @@ export function validateGhArgs(args: string[]): string | undefined {
       if (spec === "value" && (!value || value.startsWith("-"))) return `Missing value for ${flag}`;
       if (flag === "--repo" && !/^[A-Za-z0-9-]+\/[A-Za-z0-9_.-]+$/.test(value!))
         return "Repository argument is invalid";
-      const enumValues: Record<string, readonly string[]> = {
+      const enumValues: Record<GhEnumFlag, readonly string[]> = {
         "--state": ["open", "closed"],
         "--match":
           group === "search" && command === "repos"
@@ -255,8 +323,10 @@ export function validateGhArgs(args: string[]): string | undefined {
             ? ["forks", "help-wanted-issues", "stars", "updated"]
             : ["comments", "created", "interactions", "reactions", "updated"],
       };
-      if (enumValues[flag] && !enumValues[flag]!.includes(value!))
-        return `Invalid value for ${flag}`;
+      // The flag is a runtime string; only the flags in the table have a
+      // fixed set of values.
+      const allowedValues = enumValues[flag as GhEnumFlag];
+      if (allowedValues && !allowedValues.includes(value!)) return `Invalid value for ${flag}`;
       if (flag === "--attempt" && (!/^[1-9][0-9]{0,3}$/.test(value!) || Number(value) > 1000))
         return "Run attempt is invalid";
       if (

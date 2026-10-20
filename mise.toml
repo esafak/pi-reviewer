@@ -19,6 +19,10 @@ run = "renovate-config-validator --strict"
 description = "Run the test suite with Vite+"
 run = "vpr test"
 
+[tasks."typecheck:types"]
+description = "Typecheck the compile-time contract tests"
+run = "vpr typecheck:types"
+
 [tasks.fmt]
 description = "Format the project with Vite+"
 run = "vp fmt"

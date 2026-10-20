@@ -1,13 +1,16 @@
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { stat } from "node:fs/promises";
-import { Type, type Static } from "@earendil-works/pi-ai";
+import { Type, type Static, type TSchema } from "@earendil-works/pi-ai";
 import { isRecord } from "../registry/helpers.js";
 import {
   createGitHubResearchClient,
   enrichmentsByKind,
+  numberlessKinds,
+  type GitHubReadKind,
   type GitHubResearchClient,
   type GitHubSearchKind,
-  type ReadParams,
+  type ReadOption,
+  type ReadRequest,
   type SearchOptions,
 } from "./client.js";
 import type { GitHubResearchConfig } from "./config.js";
@@ -24,7 +27,7 @@ import {
   type CachedFileKey,
   type GrepHit,
 } from "./cache.js";
-import { MAX_GITHUB_RESULT_BYTES } from "./client.js";
+import { MAX_GITHUB_REQUESTS, MAX_GITHUB_RESULT_BYTES } from "./client.js";
 import { log } from "../log.js";
 import {
   GITHUB_GREP_TOOL_NAME,
@@ -52,7 +55,6 @@ const readKinds = [
   "repository",
   "diff",
   "checks",
-  "status",
 ] as const;
 const searchSchema = Type.Object(
   {
@@ -176,14 +178,11 @@ const readSchema = Type.Object(
       Type.Integer({
         minimum: 1,
         maximum: 2_147_483_647,
-        description: "Required for every kind except file, repository, and status",
+        description: "Required for every kind except file and repository",
       }),
     ),
     comments: Type.Optional(Type.Boolean({ description: "pull_request and issue only" })),
     name_only: Type.Optional(Type.Boolean({ description: "diff only" })),
-    branch: Type.Optional(
-      Type.String({ minLength: 1, maxLength: 256, description: "repository only" }),
-    ),
     log: Type.Optional(Type.Boolean({ description: "run only" })),
     exit_status: Type.Optional(Type.Boolean({ description: "run only" })),
     attempt: Type.Optional(Type.Integer({ minimum: 1, maximum: 1000, description: "run only" })),
@@ -204,9 +203,10 @@ const readSchema = Type.Object(
   { additionalProperties: false },
 );
 type SearchParams = Static<typeof searchSchema> & { kind: GitHubSearchKind };
-// ReadParams (client domain contract) is the single params type; the wire
-// contract is readSchema above and the two are kept in sync by the
-// exact-argv tests.
+// ReadRequest (the client domain contract) is the single params type; the
+// wire contract is readSchema above, parseReadRequest narrows one into the
+// other, and the compile-time assertions in tests/types keep the read union
+// aligned with enrichmentsByKind.
 
 const grepSchema = Type.Object(
   {
@@ -232,6 +232,11 @@ const grepSchema = Type.Object(
   { additionalProperties: false },
 );
 type GrepParams = Static<typeof grepSchema>;
+/**
+ * What the read tool reports back: the parsed request on success, or the
+ * raw arguments with the failure reason.
+ */
+type ReadToolDetails = ReadRequest | (Record<string, unknown> & { error: string });
 
 function safeFailure(error: unknown): string {
   const value = error instanceof Error ? error.message : "GitHub research failed";
@@ -241,6 +246,165 @@ function safeFailure(error: unknown): string {
   })
     .join("")
     .slice(0, 240);
+}
+
+/**
+ * The arguments do not fit the read contract. Distinct from a transport
+ * failure: this one is the caller's mistake, and it names the alternative.
+ */
+export class ReadUsageError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ReadUsageError";
+  }
+}
+
+const readKindNames = Object.keys(enrichmentsByKind) as GitHubReadKind[];
+const readOptionNames: readonly ReadOption[] = [
+  "comments",
+  "name_only",
+  "log",
+  "exit_status",
+  "attempt",
+  "offset",
+  "limit",
+];
+const readFieldNames: readonly string[] = [
+  "kind",
+  "owner",
+  "repo",
+  "number",
+  "path",
+  "ref",
+  ...readOptionNames,
+];
+
+function requireString(value: unknown, name: string): string {
+  if (typeof value !== "string" || value.length === 0)
+    throw new ReadUsageError(`${name} must be a non-empty string`);
+  return value;
+}
+function requireInteger(value: unknown, name: string): number {
+  if (!Number.isInteger(value) || (value as number) < 1)
+    throw new ReadUsageError(`${name} must be a positive integer`);
+  return value as number;
+}
+function optionalBoolean(args: Record<string, unknown>, name: string): boolean | undefined {
+  const value = args[name];
+  if (value === undefined) return undefined;
+  if (typeof value !== "boolean") throw new ReadUsageError(`${name} must be a boolean`);
+  return value;
+}
+function optionalInteger(args: Record<string, unknown>, name: string): number | undefined {
+  const value = args[name];
+  if (value === undefined) return undefined;
+  return requireInteger(value, name);
+}
+/**
+ * Narrows the flat wire arguments into the read contract.
+ *
+ * The wire schema cannot say "this option belongs to that kind", so the
+ * compatibility rules live here: one parser, one set of rules, and the
+ * client reads a union that cannot carry an invalid combination.
+ */
+function parseReadRequest(args: unknown): ReadRequest {
+  if (!isRecord(args)) throw new ReadUsageError("Read arguments must be an object");
+  const unknownFields = Object.keys(args).filter((key) => !readFieldNames.includes(key));
+  if (unknownFields.length > 0)
+    throw new ReadUsageError(`Unknown read option: ${unknownFields.join(", ")}`);
+  const kind = args.kind;
+  if (typeof kind !== "string" || !Object.hasOwn(enrichmentsByKind, kind))
+    throw new ReadUsageError(`Read kind must be one of: ${readKindNames.join(", ")}`);
+  const readKind = kind as GitHubReadKind;
+  const owner = requireString(args.owner, "owner");
+  const repo = requireString(args.repo, "repo");
+  const numberless = (numberlessKinds as readonly GitHubReadKind[]).includes(readKind);
+  let itemNumber = 0;
+  if (numberless) {
+    if (args.number !== undefined)
+      throw new ReadUsageError(`A number is not valid for the ${readKind} kind`);
+  } else {
+    if (args.number === undefined)
+      throw new ReadUsageError(`A number is required for the ${readKind} kind`);
+    itemNumber = requireInteger(args.number, "number");
+  }
+  if (readKind !== "file") {
+    if (args.path !== undefined) throw new ReadUsageError("path is only valid for file reads");
+    if (args.ref !== undefined)
+      throw new ReadUsageError(
+        "ref is only valid for file reads; use kind=file with ref to read a file at a revision",
+      );
+  }
+  const allowed = enrichmentsByKind[readKind] as readonly ReadOption[];
+  for (const option of readOptionNames) {
+    if (args[option] === undefined) continue;
+    if (!allowed.includes(option)) {
+      const owners = readKindNames.filter((name) =>
+        (enrichmentsByKind[name] as readonly ReadOption[]).includes(option),
+      );
+      throw new ReadUsageError(`The ${option} option is only valid for: ${owners.join(", ")}`);
+    }
+  }
+  const base = { owner, repo };
+  if (readKind === "file") {
+    const path = requireString(args.path, "path");
+    const ref = args.ref === undefined ? undefined : requireString(args.ref, "ref");
+    const offset = optionalInteger(args, "offset");
+    const limit = optionalInteger(args, "limit");
+    return {
+      kind: "file",
+      ...base,
+      path,
+      ...(ref !== undefined ? { ref } : {}),
+      ...(offset !== undefined ? { offset } : {}),
+      ...(limit !== undefined ? { limit } : {}),
+    };
+  }
+  if (readKind === "pull_request") {
+    const comments = optionalBoolean(args, "comments");
+    return {
+      kind: "pull_request",
+      ...base,
+      number: itemNumber,
+      ...(comments !== undefined ? { comments } : {}),
+    };
+  }
+  if (readKind === "issue") {
+    const comments = optionalBoolean(args, "comments");
+    return {
+      kind: "issue",
+      ...base,
+      number: itemNumber,
+      ...(comments !== undefined ? { comments } : {}),
+    };
+  }
+  if (readKind === "discussion") return { kind: "discussion", ...base, number: itemNumber };
+  if (readKind === "run") {
+    const log = optionalBoolean(args, "log");
+    const exitStatus = optionalBoolean(args, "exit_status");
+    const attempt = optionalInteger(args, "attempt");
+    return {
+      kind: "run",
+      ...base,
+      number: itemNumber,
+      ...(log !== undefined ? { log } : {}),
+      ...(exitStatus !== undefined ? { exit_status: exitStatus } : {}),
+      ...(attempt !== undefined ? { attempt } : {}),
+    };
+  }
+  if (readKind === "workflow") return { kind: "workflow", ...base, number: itemNumber };
+  if (readKind === "release") return { kind: "release", ...base, number: itemNumber };
+  if (readKind === "repository") return { kind: "repository", ...base };
+  if (readKind === "diff") {
+    const nameOnly = optionalBoolean(args, "name_only");
+    return {
+      kind: "diff",
+      ...base,
+      number: itemNumber,
+      ...(nameOnly !== undefined ? { name_only: nameOnly } : {}),
+    };
+  }
+  return { kind: "checks", ...base, number: itemNumber };
 }
 
 // Narrow bridge over the workspace grep definition: the search runs against
@@ -317,7 +481,7 @@ export function createGitHubResearchTools(
     cacheDir?: string;
     executeGrep?: (id: string, input: Record<string, unknown>) => Promise<InnerGrepResult>;
   } = {},
-): AgentTool<any, any>[] {
+): AgentTool<TSchema, unknown>[] {
   const cacheDir = options.cacheDir ?? defaultCacheDir();
   // Resolved on first grep so merely registering the research tools never
   // touches the grep definition (and its ripgrep resolution).
@@ -346,42 +510,22 @@ export function createGitHubResearchTools(
             { type: "text", text: `GitHub search unavailable: ${message}. Continue without it.` },
           ],
           details: { ...(args as SearchParams), error: message },
+          isError: true,
         };
       }
     },
   };
-  const read: AgentTool<typeof readSchema, ReadParams> = {
+  const read: AgentTool<typeof readSchema, ReadToolDetails> = {
     name: GITHUB_READ_TOOL_NAME,
     label: GITHUB_READ_TOOL_NAME,
-    description:
-      "Read a GitHub resource by kind. file requires path (repo-relative, no leading slash) with optional ref (branch, tag, or SHA); repository takes optional branch and neither number nor path/ref; status takes neither number nor path/ref; every other kind requires number. Enrichments by kind: pull_request/issue accept comments, diff accepts name_only, run accepts log/exit_status/attempt, file accepts offset/limit line ranges. File reads return a 4 KiB preview with size/totalLines/truncated so large files stay cheap; the full download (up to 1 MB) is cached for github_grep and ranged re-reads.",
+    description: `Read a GitHub resource by kind. file requires path (repo-relative, no leading slash) with optional ref (branch, tag, or commit SHA) and accepts offset/limit line ranges; repository returns repository metadata and takes neither a number nor a path or ref — to read a file at a specific commit use kind=file with ref. Every other kind requires number, which identifies the pull request, issue, discussion, run, workflow, release, diff, or check set to read. checks returns the CI checks of that pull request and is the kind that answers whether its CI passed. Kind-specific options: pull_request and issue accept comments, diff accepts name_only, run accepts log, exit_status, and attempt. File reads return a 4 KiB preview with size, totalLines, and truncated so large files stay cheap; the full download (up to 1 MB) is cached for github_grep and ranged re-reads. A diff and a run log are truncated to the same bound. The review has a shared allowance of ${MAX_GITHUB_REQUESTS} GitHub subprocess attempts, including visibility probes and failed attempts, so stop asking once it is spent.`,
     parameters: readSchema,
     async execute(_id, args) {
       try {
-        const params = args as ReadParams;
-        if (["file", "repository", "status"].includes(params.kind) && params.number !== undefined)
-          throw new Error("This read kind does not accept a number");
-        if (params.kind !== "file" && (params.path !== undefined || params.ref !== undefined))
-          throw new Error("Path and ref are only valid for file reads");
-        if (!["file", "repository", "status"].includes(params.kind) && params.number === undefined)
-          throw new Error("An item number is required for this read");
-        if (
-          Object.keys(params).some(
-            (k) =>
-              ["comments", "name_only", "branch", "log", "exit_status", "attempt"].includes(k) &&
-              !enrichmentsByKind[params.kind].includes(k),
-          )
-        )
-          throw new Error("Read option is invalid for this kind");
-        if ((params.offset !== undefined || params.limit !== undefined) && params.kind !== "file")
-          throw new Error("Offset and limit are only valid for file reads");
+        const params = parseReadRequest(args);
         // Ranged re-reads are served from the download cache with no gh call.
         // A miss falls through to the fetch below, which caches on success.
-        if (
-          params.kind === "file" &&
-          (params.offset !== undefined || params.limit !== undefined) &&
-          params.path !== undefined
-        ) {
+        if (params.kind === "file" && (params.offset !== undefined || params.limit !== undefined)) {
           const key: CachedFileKey = {
             owner: params.owner,
             repo: params.repo,
@@ -415,7 +559,8 @@ export function createGitHubResearchTools(
           content: [
             { type: "text", text: `GitHub read unavailable: ${message}. Continue without it.` },
           ],
-          details: { ...(args as ReadParams), error: message },
+          details: { ...(args as Record<string, unknown>), error: message },
+          isError: true,
         };
       }
     },
@@ -536,6 +681,7 @@ export function createGitHubResearchTools(
             { type: "text", text: `GitHub grep unavailable: ${message}. Continue without it.` },
           ],
           details: { ...(args as GrepParams), error: message },
+          isError: true,
         };
       }
     },

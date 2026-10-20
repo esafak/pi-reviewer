@@ -1,0 +1,6 @@
+.github/mcp.json
+CI.md
+src/ci/mcp-config.ts
+src/ci/review.ts
+tests/ci/mcp-config.test.ts
+tests/ci/review.test.ts
