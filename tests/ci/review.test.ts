@@ -102,6 +102,7 @@ import {
   buildReplyPrompt,
   defuseReplyMetadata,
   extractMcpErrorSignal,
+  extractMcpRepositoryIds,
   extractMcpToolIdentity,
   FORCED_SUBMIT_TOOL,
   generateReplyResponse,
@@ -1137,6 +1138,53 @@ describe("review", () => {
       expect(extractMcpErrorSignal(undefined)).toBeUndefined();
     });
 
+    it("reports the harness rejection reason when no adapter code is present", () => {
+      // A thrown tool, a schema validation error, or a blocked call never
+      // reaches a server: pi renders the reason as the result text and
+      // leaves the details empty.
+      expect(
+        extractMcpErrorSignal({
+          details: {},
+          content: [{ type: "text", text: "Gateway params were nested inside `args`." }],
+        }),
+      ).toEqual({ errorClass: "unknown", detail: "Gateway params were nested inside `args`." });
+      expect(extractMcpErrorSignal({ details: {} })).toEqual({ errorClass: "unknown" });
+    });
+
+    it("keeps server text out of the signal", () => {
+      // A tool_error carries the server's words in the content; only the
+      // adapter's own message is a safe detail source.
+      expect(
+        extractMcpErrorSignal({
+          details: { mode: "call", error: "tool_error", server: "docs" },
+          content: [{ type: "text", text: "server said no" }],
+        }),
+      ).toEqual({ errorClass: "tool" });
+      // A code the adapter does not own keeps its own content unread.
+      expect(
+        extractMcpErrorSignal({
+          details: { mode: "call", error: "server_unavailable", server: "docs" },
+          content: [{ type: "text", text: "server said no" }],
+        }),
+      ).toEqual({ errorClass: "unknown" });
+    });
+
+    it("never reads the content of a script-mode failure", () => {
+      // A script result carries no top-level error code, yet a nested call
+      // that needs UI fails the whole call. Its output can hold server text,
+      // so it must stay unread.
+      expect(
+        extractMcpErrorSignal({
+          details: {
+            mode: "script",
+            timeoutMs: 1000,
+            calls: [{ operation: "call", error: "input_required_needs_ui" }],
+          },
+          content: [{ type: "text", text: "server said no" }],
+        }),
+      ).toEqual({ errorClass: "unknown" });
+    });
+
     it("sanitizes, truncates, and never leaks bearer-like values", () => {
       const secret = "bearer abcdefghij1234567890";
       const signal = extractMcpErrorSignal({
@@ -1152,6 +1200,67 @@ describe("review", () => {
     });
   });
 
+  describe("extractMcpRepositoryIds", () => {
+    it("emits only the declared fields", () => {
+      expect(
+        extractMcpRepositoryIds(
+          { server: "deepwiki", tool: "read_wiki_structure", args: { repoName: "owner/repo" } },
+          ["repoName"],
+        ),
+      ).toEqual(["owner/repo"]);
+      // An undeclared field's value is never disclosed, whatever it holds.
+      expect(
+        extractMcpRepositoryIds({ args: { password: "private/secret", repoName: "owner/repo" } }, [
+          "repoName",
+        ]),
+      ).toEqual(["owner/repo"]);
+    });
+    it("reads a declared field at any depth", () => {
+      expect(
+        extractMcpRepositoryIds({ args: { args: [{ repoName: "owner/repo" }] } }, ["repoName"]),
+      ).toEqual(["owner/repo"]);
+    });
+    it("drops values that are not repository identifiers", () => {
+      expect(
+        extractMcpRepositoryIds({ args: { repoName: "ghp_secret/token", other: "owner/repo" } }, [
+          "repoName",
+          "other",
+        ]),
+      ).toEqual(["owner/repo"]);
+    });
+    it("discloses a private repository name", () => {
+      // The declaration authorizes disclosure of private repository names.
+      expect(
+        extractMcpRepositoryIds({ args: { repoName: "acme/internal-project" } }, ["repoName"]),
+      ).toEqual(["acme/internal-project"]);
+    });
+    it("discloses a declared value no forge could vouch for", () => {
+      // The declaration authorizes the disclosure; the shape only says the
+      // value is identifier-shaped. Declaring the field is the decision.
+      expect(
+        extractMcpRepositoryIds({ args: { repoName: "admin/SuperSecret123" } }, ["repoName"]),
+      ).toEqual(["admin/SuperSecret123"]);
+    });
+    it("emits nothing when no field is declared", () => {
+      expect(extractMcpRepositoryIds({ args: { repoName: "owner/repo" } }, [])).toEqual([]);
+    });
+    it("bounds what a declared field can contribute", () => {
+      const ids = extractMcpRepositoryIds(
+        { args: { repoName: Array.from({ length: 500 }, (_, index) => `owner/repo-${index}`) } },
+        ["repoName"],
+      );
+      expect(ids.length).toBeLessThanOrEqual(5);
+    });
+    it("bounds a declared field of non-strings", () => {
+      expect(
+        extractMcpRepositoryIds(
+          { args: { repoName: Array.from({ length: 500 }, (_, index) => ({ index })) } },
+          ["repoName"],
+        ),
+      ).toEqual([]);
+    });
+  });
+
   describe("extractMcpToolIdentity", () => {
     const known = new Set(["docs"]);
     it("splits proxy server/tool without duplication", () => {
@@ -1164,17 +1273,77 @@ describe("review", () => {
         ),
       ).toEqual({ server: "docs", tool: "search_docs" });
     });
-    it("handles search/connect/action pseudos with no server", () => {
+    it("handles search/connect/action pseudos", () => {
       const registered = new Set(["mcp"]);
       expect(extractMcpToolIdentity("mcp", { search: "x" }, registered, known)).toEqual({
+        server: "docs",
         tool: "search",
       });
-      expect(
-        extractMcpToolIdentity("mcp", { connect: "docs" }, registered, known)?.server,
-      ).toBeUndefined();
+      // An action runs inside the adapter unless it names a server.
       expect(extractMcpToolIdentity("mcp", { action: "list" }, registered, known)).toEqual({
+        server: undefined,
         tool: "list",
       });
+    });
+    it("names the server for every gateway shape that carries one", () => {
+      const registered = new Set(["mcp"]);
+      expect(extractMcpToolIdentity("mcp", { connect: "docs" }, registered, known)).toEqual({
+        server: "docs",
+        tool: "connect",
+      });
+      expect(extractMcpToolIdentity("mcp", { instructions: "docs" }, registered, known)).toEqual({
+        server: "docs",
+        tool: "instructions",
+      });
+      expect(extractMcpToolIdentity("mcp", { server: "docs" }, registered, known)).toEqual({
+        server: "docs",
+        tool: "list",
+      });
+      expect(
+        extractMcpToolIdentity("mcp", { search: "x", server: "docs" }, registered, known),
+      ).toEqual({ server: "docs", tool: "search" });
+      expect(
+        extractMcpToolIdentity(
+          "mcp",
+          { describe: "search_docs", server: "docs" },
+          registered,
+          known,
+        ),
+      ).toEqual({ server: "docs", tool: "describe:search_docs" });
+    });
+    it("names the only server for a call that addresses one", () => {
+      const registered = new Set(["mcp"]);
+      expect(extractMcpToolIdentity("mcp", { tool: "search_docs" }, registered, known)).toEqual({
+        server: "docs",
+        tool: "search_docs",
+      });
+      expect(extractMcpToolIdentity("mcp", { search: "x" }, registered, known)).toEqual({
+        server: "docs",
+        tool: "search",
+      });
+      // With several servers the call's own server is unknown.
+      expect(
+        extractMcpToolIdentity(
+          "mcp",
+          { tool: "search_docs" },
+          registered,
+          new Set(["docs", "other"]),
+        ),
+      ).toEqual({ server: undefined, tool: "search_docs" });
+    });
+    it("leaves an adapter-local call server-less", () => {
+      const registered = new Set(["mcp"]);
+      // The status listing and an install run inside the adapter: they never
+      // reached a server, so none is named.
+      expect(extractMcpToolIdentity("mcp", {}, registered, known)).toEqual({ tool: "mcp" });
+      expect(extractMcpToolIdentity("mcp", { action: "ui-messages" }, registered, known)).toEqual({
+        server: undefined,
+        tool: "ui-messages",
+      });
+      // A payload the gateway rejects before it resolves a server names none.
+      expect(
+        extractMcpToolIdentity("mcp", { args: { tool: "search_docs" } }, registered, known),
+      ).toEqual({ tool: "mcp" });
     });
     it("splits namespace-proxy and direct prefixed names", () => {
       expect(
@@ -1225,7 +1394,154 @@ describe("review", () => {
     expect(JSON.stringify(failed?.fields)).not.toContain("fetch failed");
   });
 
-  it("keeps server/tool pairing with unknown for server-less failures", async () => {
+  it("reports the repository a failed call named", async () => {
+    fakeAgentEvents = [
+      {
+        type: "tool_execution_start",
+        toolName: "mcp",
+        toolCallId: "mcp-repo-call",
+        args: { server: "deepwiki", tool: "read_wiki_structure", args: { repoName: "owner/repo" } },
+      },
+      {
+        type: "tool_execution_end",
+        toolName: "mcp",
+        toolCallId: "mcp-repo-call",
+        isError: true,
+        result: {
+          details: { mode: "call", error: "tool_error", server: "deepwiki" },
+          content: [{ type: "text", text: "Error fetching wiki for owner/repo: not found." }],
+        },
+      },
+    ];
+    const { sink, records } = createMemorySink();
+    const mcpConfig: CiMcpConfig = {
+      mcpServers: {
+        deepwiki: { url: "https://mcp.example/mcp", loggableArgs: ["repoName"] },
+      },
+    };
+
+    await expect(
+      review({
+        cwd: "/repo",
+        output: "comment",
+        mcpConfig,
+        debug: true,
+        logger: createLogger({ sink }),
+      }),
+    ).rejects.toThrow("A configured MCP tool call failed; refusing to post the review");
+
+    const failed = records.find(({ event }) => event === "review.mcp.failed");
+    expect(failed?.fields).toEqual({
+      servers: ["deepwiki"],
+      tools: ["read_wiki_structure"],
+      errorClasses: ["tool"],
+      repos: ["owner/repo"],
+      additionalTools: "",
+    });
+  });
+
+  it("keeps a repository out of the log when no field is declared loggable", async () => {
+    fakeAgentEvents = [
+      {
+        type: "tool_execution_start",
+        toolName: "mcp",
+        toolCallId: "mcp-unnamed-repo-call",
+        args: { server: "deepwiki", tool: "read_wiki_structure", args: { repoName: "owner/repo" } },
+      },
+      {
+        type: "tool_execution_end",
+        toolName: "mcp",
+        toolCallId: "mcp-unnamed-repo-call",
+        isError: true,
+        result: {
+          details: { mode: "call", error: "tool_error", server: "deepwiki" },
+          content: [{ type: "text", text: "Repository not found." }],
+        },
+      },
+    ];
+    const { sink, records } = createMemorySink();
+    const mcpConfig: CiMcpConfig = { mcpServers: { deepwiki: { url: "https://mcp.example/mcp" } } };
+
+    await review({
+      cwd: "/repo",
+      output: "comment",
+      mcpConfig,
+      debug: true,
+      logger: createLogger({ sink }),
+    });
+
+    const failed = records.find(({ event }) => event === "review.mcp.failed");
+    expect(failed?.fields).toEqual({
+      servers: ["deepwiki"],
+      tools: ["read_wiki_structure"],
+      errorClasses: ["tool"],
+      additionalTools: "",
+    });
+  });
+
+  it("reports the harness rejection reason for a gateway call the harness refused", async () => {
+    // A payload the gateway rejects before it reaches a server: the harness
+    // owns the failure, so the reason has to be diagnosable from the logs.
+    fakeAgentEvents = [
+      {
+        type: "tool_execution_start",
+        toolName: "mcp",
+        toolCallId: "mcp-nested-call",
+        args: { args: { tool: "read_wiki_structure", args: { repoName: "owner/repo" } } },
+      },
+      {
+        type: "tool_execution_end",
+        toolName: "mcp",
+        toolCallId: "mcp-nested-call",
+        isError: true,
+        result: {
+          details: {},
+          content: [
+            {
+              type: "text",
+              text: "Gateway params were nested inside `args`; pass them top-level.",
+            },
+          ],
+        },
+      },
+    ];
+    const { sink, records } = createMemorySink();
+    const mcpConfig: CiMcpConfig = { mcpServers: { docs: { url: "https://mcp.example/mcp" } } };
+
+    await expect(
+      review({
+        cwd: "/repo",
+        output: "comment",
+        mcpConfig,
+        debug: true,
+        logger: createLogger({ sink }),
+      }),
+    ).rejects.toThrow("A configured MCP tool call failed; refusing to post the review");
+    expect(records).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          event: "review.mcp.tool_result",
+          fields: expect.objectContaining({
+            tool: "mcp",
+            status: "error",
+            errorClass: "unknown",
+            detail: "Gateway params were nested inside `args`; pass them top-level.",
+          }),
+        }),
+      ]),
+    );
+    // The summary names the failure without quoting it.
+    const failed = records.find(({ event }) => event === "review.mcp.failed");
+    expect(failed?.fields).toEqual({
+      servers: ["unknown"],
+      tools: ["mcp"],
+      errorClasses: ["unknown"],
+      additionalTools: "",
+    });
+    expect(JSON.stringify(failed?.fields)).not.toContain("nested inside");
+  });
+
+  it("keeps server/tool pairing for server-less failures", async () => {
     fakeAgentEvents = [
       {
         type: "tool_execution_start",
@@ -1249,7 +1565,7 @@ describe("review", () => {
     ).rejects.toThrow("A configured MCP tool call failed; refusing to post the review");
     const failed = records.find(({ event }) => event === "review.mcp.failed");
     expect(failed?.fields).toEqual({
-      servers: ["unknown"],
+      servers: ["docs"],
       tools: ["search"],
       errorClasses: ["tool"],
       additionalTools: "",
@@ -1465,7 +1781,7 @@ describe("review", () => {
     const failed = records.find(({ event }) => event === "review.mcp.failed");
     expect(failed?.level).toBe("warn");
     expect(failed?.fields).toEqual({
-      servers: ["unknown"],
+      servers: ["deepwiki"],
       tools: ["deepwiki_ask_wiki_question"],
       errorClasses: ["tool"],
       additionalTools: "",
@@ -1539,7 +1855,7 @@ describe("review", () => {
     const failed = records.find(({ event }) => event === "review.mcp.failed");
     expect(failed?.level).toBe("warn");
     expect(failed?.fields).toEqual({
-      servers: ["unknown"],
+      servers: ["deepwiki"],
       tools: ["read_wiki_structure"],
       errorClasses: ["tool"],
       additionalTools: "",

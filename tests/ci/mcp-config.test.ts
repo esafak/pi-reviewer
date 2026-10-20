@@ -210,6 +210,16 @@ describe("MCP CI config", () => {
     ).toThrow("MCP config bearerTokenEnv must be an environment variable name");
     expect(() =>
       validateMcpConfig({
+        mcpServers: { docs: { url: "https://mcp.example/mcp", loggableArgs: "repoName" } },
+      }),
+    ).toThrow('MCP config server "docs" loggableArgs must be an array');
+    expect(() =>
+      validateMcpConfig({
+        mcpServers: { docs: { url: "https://mcp.example/mcp", loggableArgs: ["repo name"] } },
+      }),
+    ).toThrow('MCP config server "docs" loggableArgs entries must be argument names');
+    expect(() =>
+      validateMcpConfig({
         mcpServers: {
           local: { command: "node", env: { API_TOKEN: "literal-secret" } },
         },

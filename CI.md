@@ -139,13 +139,16 @@ One review per eligible event, covering everything since the last marker. Marker
   "mcpServers": {
     "deepwiki": {
       "url": "https://mcp.deepwiki.com/mcp",
-      "auth": false
+      "auth": false,
+      "loggableArgs": ["repoName"]
     }
   }
 }
 ```
 
 Authenticated servers use `auth: bearer` with a `bearerTokenEnv` variable mapped from secrets. If a server the reviewer actually calls fails, the review is vetoed rather than posting a potentially incomplete result — except DeepWiki reporting a repo isn't indexed (normal for private repos), which posts with a warning.
+
+`loggableArgs` names the arguments whose values may appear in the logs — the argument that carries a repository identifier, for instance. The declaration is the authorization: the values it covers are disclosed as-is once they are shaped like an identifier (`owner/name`), private repository names included. Declare only arguments whose values are safe to see in a log, and keep secrets out of them.
 
 **LSP.** Seven preset servers cover Python (`ty`), Markdown (`markdown-oxide`), Rust (`rust-analyzer`), TOML (`taplo`), Go (`gopls`), TypeScript (`tsc-rs`), and Kotlin (`kotlin-lsp`). The selection is correctness-oriented (type errors, broken references) — diagnostics are breakage signal, not style findings. Custom servers or preset overrides go in a pi-lsp `{ version: 1, servers: [...] }` JSON file set via `lsp-config-file`, also read from the default branch. Both inputs apply to CI comment reviews only.
 

@@ -312,11 +312,92 @@ export interface McpToolIdentity {
 export interface McpFailureEntry {
   identity: McpToolIdentity;
   signal: McpErrorSignal;
+  /** Repository identifiers the call named. */
+  repoIds?: string[];
   /** Bounded result-text excerpt, matched in memory only — never logged. */
   contentExcerpt?: string;
 }
 
 const MAX_MCP_CONTENT_EXCERPT_LENGTH = 1000;
+
+/**
+ * A repository identifier: an owner and a name, each in the character set a
+ * forge allows for that segment.
+ *
+ * This is a syntax filter, not repository validation or credential
+ * redaction: matching paths and secrets can pass it. The declaration is
+ * what authorizes disclosing a value.
+ */
+const MCP_REPOSITORY_ID_PATTERN = /^[A-Za-z0-9-]+\/[A-Za-z0-9_.-]+$/;
+const MAX_MCP_REPOSITORY_ID_LENGTH = 100;
+const MAX_MCP_ARGUMENT_DEPTH = 6;
+const MAX_MCP_ARGUMENT_NODES = 200;
+const MAX_MCP_REPOSITORY_IDS = 5;
+
+/**
+ * Repository identifiers a call named, taken from the arguments a server
+ * owner declared loggable.
+ *
+ * The declaration is the authorization: it says the values of that field
+ * may be disclosed. The values are model-supplied, and a repository name is
+ * not a credential — operators authorize logging them, private repository
+ * names included.
+ */
+export function extractMcpRepositoryIds(args: unknown, loggableArgs: readonly string[]): string[] {
+  if (loggableArgs.length === 0) return [];
+  const found = new Set<string>();
+  let inspected = 0;
+  const exhausted = () => inspected > MAX_MCP_ARGUMENT_NODES;
+  const addId = (value: string): void => {
+    if (found.size >= MAX_MCP_REPOSITORY_IDS) return;
+    const trimmed = value.trim();
+    if (trimmed.length <= MAX_MCP_REPOSITORY_ID_LENGTH && MCP_REPOSITORY_ID_PATTERN.test(trimmed))
+      found.add(trimmed);
+  };
+  const collect = (value: unknown): void => {
+    // A declared field holds a string, or a list of strings. Every element
+    // inspected charges the budget, string or not.
+    if (typeof value === "string") {
+      addId(value);
+      return;
+    }
+    if (!Array.isArray(value)) return;
+    for (const item of value) {
+      inspected++;
+      if (exhausted()) return;
+      if (typeof item === "string") addId(item);
+    }
+  };
+  const visit = (value: unknown, depth: number): void => {
+    // Every value visited charges the budget, including the ones the depth
+    // limit turns away: a wide container must not cost more than the
+    // budget allows.
+    inspected++;
+    if (depth > MAX_MCP_ARGUMENT_DEPTH || exhausted()) return;
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        if (exhausted()) return;
+        visit(item, depth + 1);
+      }
+      return;
+    }
+    if (!isRecord(value)) return;
+    // Own keys only, read one at a time: a wide object must not be
+    // materialized before the budget is checked.
+    for (const key in value) {
+      if (exhausted()) return;
+      if (!Object.prototype.hasOwnProperty.call(value, key)) continue;
+      const item = value[key];
+      // Only a declared field's value is disclosed. The structure around it
+      // is walked either way, so a declared field can sit inside the call's
+      // own arguments.
+      if (loggableArgs.includes(key)) collect(item);
+      visit(item, depth + 1);
+    }
+  };
+  visit(args, 0);
+  return [...found];
+}
 
 /** Plain-text excerpt of a tool result's content blocks for matching, never logged. */
 function extractMcpContentExcerpt(result: unknown): string | undefined {
@@ -336,20 +417,46 @@ function extractMcpContentExcerpt(result: unknown): string | undefined {
 // fail closed, so classification reads that code only, never message text.
 const MAX_MCP_ERROR_DETAIL_LENGTH = 500;
 
+/**
+ * First text block of a failed tool result.
+ *
+ * The harness renders its own failures — a thrown tool, a schema validation
+ * error, a blocked or aborted call — as a single text block carrying the
+ * reason, with no details of its own.
+ */
+function extractMcpFailureText(result: unknown): string | undefined {
+  if (!isRecord(result) || !Array.isArray(result.content)) return undefined;
+  for (const block of result.content) {
+    if (!isRecord(block) || block.type !== "text" || typeof block.text !== "string") continue;
+    const trimmed = block.text.trim();
+    if (trimmed) return trimmed;
+  }
+  return undefined;
+}
+
 export function extractMcpErrorSignal(result: unknown): McpErrorSignal | undefined {
   if (!isRecord(result) || !isRecord(result.details)) return undefined;
-  const error = result.details.error;
+  const details = result.details;
+  const error = details.error;
   let errorClass: McpErrorClass;
   if (error === "tool_error") errorClass = "tool";
   else if (error === "call_failed") errorClass = "call_failed";
   else if (error === "input_required_needs_ui") errorClass = "input_required";
   else errorClass = "unknown";
-  const message = result.details.message;
-  if (typeof message !== "string" || !message.trim()) return { errorClass };
-  // Server error text for tool_error lives in result.content (tool output,
-  // never logged); only details.message (call-level exceptions and
-  // UI-gated input requests) is a safe detail source.
-  return { errorClass, detail: sanitizeMcpDebugText(message, MAX_MCP_ERROR_DETAIL_LENGTH) };
+  const message = details.message;
+  if (typeof message === "string" && message.trim())
+    return { errorClass, detail: sanitizeMcpDebugText(message, MAX_MCP_ERROR_DETAIL_LENGTH) };
+  // An empty details object is the harness's own error envelope: the call
+  // never reached a server, so the result text is harness-generated and safe
+  // to log. Every adapter result carries fields of its own (mode, server,
+  // error), so a script-mode result — whose content can hold server text —
+  // never reaches this path.
+  if (Object.keys(details).length === 0) {
+    const reason = extractMcpFailureText(result);
+    if (reason !== undefined)
+      return { errorClass, detail: sanitizeMcpDebugText(reason, MAX_MCP_ERROR_DETAIL_LENGTH) };
+  }
+  return { errorClass };
 }
 
 function matchKnownServerPrefix(
@@ -398,17 +505,35 @@ export function extractMcpToolIdentity(
   if (toolName !== MCP_TOOL_NAME && !registeredMcpTools.has(toolName)) return undefined;
   if (toolName === MCP_TOOL_NAME) {
     if (!isRecord(args)) return { tool: MCP_TOOL_NAME };
+    // The gateway names its server in a top-level `server` argument for every
+    // shape that has one. Reading it once, before the shape dispatch, keeps
+    // the server out of "unknown" for the non-call shapes (search, describe,
+    // list) that never carry a `tool` argument to read it alongside.
+    const named = typeof args.server === "string" ? sanitizeMcpDebugName(args.server) : undefined;
+    // A call that addresses a server without naming one can only have
+    // involved the server that exists. The shapes that run inside the adapter
+    // — the status listing, an install — are left server-less: they never
+    // reached a server at all.
+    const sole = knownServers.size === 1 ? sanitizeMcpDebugName([...knownServers][0]!) : undefined;
     if (typeof args.tool === "string") {
       // Bare tool name stays in `tool`; the owning server (when present)
       // goes in `server` so structured consumers never split strings.
-      const server =
-        typeof args.server === "string" ? sanitizeMcpDebugName(args.server) : undefined;
-      return { server, tool: sanitizeMcpDebugName(args.tool) };
+      return { server: named ?? sole, tool: sanitizeMcpDebugName(args.tool) };
     }
-    if (typeof args.search === "string") return { tool: "search" };
+    if (typeof args.search === "string") return { server: named ?? sole, tool: "search" };
     if (typeof args.connect === "string")
-      return { tool: sanitizeMcpDebugName(`connect:${args.connect}`) };
-    if (typeof args.action === "string") return { tool: sanitizeMcpDebugName(args.action) };
+      // `connect` names the server as its own argument.
+      return { server: sanitizeMcpDebugName(args.connect), tool: "connect" };
+    if (typeof args.describe === "string")
+      // `describe` names a tool, not a server; the server stays optional.
+      return { server: named ?? sole, tool: sanitizeMcpDebugName(`describe:${args.describe}`) };
+    if (typeof args.instructions === "string")
+      // `instructions` names the server as its own argument.
+      return { server: sanitizeMcpDebugName(args.instructions), tool: "instructions" };
+    if (typeof args.action === "string")
+      return { server: named, tool: sanitizeMcpDebugName(args.action) };
+    // A bare `server` argument lists that server's tools.
+    if (named !== undefined) return { server: named, tool: "list" };
     return { tool: MCP_TOOL_NAME };
   }
   if (toolName.startsWith("mcp__")) {
@@ -916,10 +1041,46 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
   const registeredMcpTools = new Set<string>();
   const registeredLspTools = new Set<string>();
   const mcpToolCalls = new Map<string, McpToolIdentity>();
+  const mcpToolCallArgs = new Map<string, unknown>();
   const mcpOutputArtifacts = new Set<string>();
   let restoreExtensionEnvironment = () => {};
   const failedMcpCalls = new Map<string, McpFailureEntry>();
   const knownMcpServers = new Set<string>(mcpConfig ? Object.keys(mcpConfig.mcpServers) : []);
+  // Which arguments a server owner declared to carry a repository
+  // identifier, per server. A name two servers share — they differ only in
+  // what the log can see — is ambiguous, and an ambiguous name carries no
+  // declaration rather than an arbitrary one. Every configured server
+  // counts towards the ambiguity, declared or not.
+  const mcpServerNameCounts = new Map<string, number>();
+  for (const name of knownMcpServers) {
+    const key = sanitizeMcpDebugName(name);
+    mcpServerNameCounts.set(key, (mcpServerNameCounts.get(key) ?? 0) + 1);
+  }
+  const ambiguousMcpServers = new Set(
+    [...mcpServerNameCounts].filter(([, count]) => count > 1).map(([key]) => key),
+  );
+  const mcpLoggableArgs = new Map<string, string[]>();
+  for (const [name, definition] of Object.entries(mcpConfig?.mcpServers ?? {})) {
+    const declared = definition.loggableArgs;
+    const names = Array.isArray(declared)
+      ? declared.filter((entry): entry is string => typeof entry === "string")
+      : [];
+    if (names.length === 0) continue;
+    const key = sanitizeMcpDebugName(name);
+    if (ambiguousMcpServers.has(key)) continue;
+    mcpLoggableArgs.set(key, names);
+  }
+  // The declaration authorizes disclosure for the server the call used. A
+  // call that names no server could only have involved the one there is, so
+  // its declaration still applies — that is authorization, not attribution.
+  const soleMcpServer = knownMcpServers.size === 1 ? [...knownMcpServers][0] : undefined;
+  const loggableArgsFor = (server: string | undefined): readonly string[] => {
+    const name = server ?? soleMcpServer;
+    if (name === undefined) return [];
+    const key = sanitizeMcpDebugName(name);
+    if (ambiguousMcpServers.has(key)) return [];
+    return mcpLoggableArgs.get(key) ?? [];
+  };
   // The extension session path serves both MCP and LSP. It exists whenever
   // either is configured; otherwise the agent runs without extensions.
   const needsExtensionSession = Boolean(mcpConfig) || lspEntries.length > 0;
@@ -972,8 +1133,9 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
                     (definition.bearerToken !== undefined || definition.bearerTokenEnv !== undefined
                       ? "bearer"
                       : false);
+                  const { loggableArgs: _loggableArgs, ...server } = definition;
                   if (typeof definition.command !== "string")
-                    return [name, { ...definition, auth, debug: false }];
+                    return [name, { ...server, auth, debug: false }];
                   if (!options.mcpServerCwd)
                     throw new Error(
                       "Stdio MCP servers require a working directory from the trusted default branch",
@@ -981,7 +1143,7 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
                   return [
                     name,
                     {
-                      ...definition,
+                      ...server,
                       auth,
                       cwd: options.mcpServerCwd,
                       debug: false,
@@ -1251,6 +1413,10 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
                 knownMcpServers,
               );
         const mcpKey = mcpIdentity ? `${mcpIdentity.server ?? ""}\0${mcpIdentity.tool}` : undefined;
+        const contentExcerpt =
+          eventType === "tool_execution_end" && mcpIdentity
+            ? extractMcpContentExcerpt(toolEvent.result)
+            : undefined;
         if (traceEnabled) {
           // Error signal is failure-only: successful adapter results also
           // carry details, which must not surface as errorClass.
@@ -1291,7 +1457,12 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
         }
         if (eventType === "tool_execution_start") {
           if (mcpIdentity) {
-            if (rawCallId) mcpToolCalls.set(rawCallId, mcpIdentity);
+            if (rawCallId) {
+              mcpToolCalls.set(rawCallId, mcpIdentity);
+              // The arguments are kept per call so the end event can read the
+              // declared fields from them; they are never logged whole.
+              mcpToolCallArgs.set(rawCallId, toolEvent.args);
+            }
             if (options.debug)
               logger.debug("review.mcp.tool_call", "MCP tool call", {
                 ...(mcpIdentity.server !== undefined ? { server: mcpIdentity.server } : {}),
@@ -1307,6 +1478,14 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
             });
           }
         } else {
+          // The repositories the call named, from the fields the server
+          // owner declared loggable.
+          const repoIds = mcpIdentity
+            ? extractMcpRepositoryIds(
+                (rawCallId ? mcpToolCallArgs.get(rawCallId) : undefined) ?? toolEvent.args,
+                loggableArgsFor(mcpIdentity.server),
+              )
+            : [];
           if (mcpIdentity && mcpKey && toolEvent.isError === true) {
             const signal = extractMcpErrorSignal(toolEvent.result) ?? {
               errorClass: "unknown" as const,
@@ -1314,7 +1493,8 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
             failedMcpCalls.set(mcpKey, {
               identity: mcpIdentity,
               signal,
-              contentExcerpt: extractMcpContentExcerpt(toolEvent.result),
+              ...(repoIds.length > 0 ? { repoIds } : {}),
+              contentExcerpt,
             });
           } else if (mcpIdentity && mcpKey) failedMcpCalls.delete(mcpKey);
           const outputArtifact = mcpIdentity
@@ -1347,7 +1527,10 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
                   : {}),
               },
             );
-          if (rawCallId) mcpToolCalls.delete(rawCallId);
+          if (rawCallId) {
+            mcpToolCalls.delete(rawCallId);
+            mcpToolCallArgs.delete(rawCallId);
+          }
         }
       }
       if (eventType !== "agent_end") return;
@@ -1499,8 +1682,12 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
       const tools = entries.map((entry) => entry.identity.tool);
       // Classes cover only the capped entries so every class has a visible tool.
       const errorClasses = [...new Set(entries.map((entry) => entry.signal.errorClass))];
+      // The repositories the failed calls named.
+      const repos = [...new Set(entries.flatMap((entry) => entry.repoIds ?? []))];
       const additional = failedMcpCalls.size > entries.length ? " and other MCP tools" : "";
       const onlyUnindexedRejections = [...failedMcpCalls.values()].every(isUnindexedRejection);
+      // The summary stays message-free: a failure reason can quote a URL or a
+      // server's words, so it belongs in the debug log and the trace only.
       if (onlyUnindexedRejections) {
         logger.warn(
           "review.mcp.failed",
@@ -1509,6 +1696,7 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
             servers,
             tools,
             errorClasses,
+            ...(repos.length > 0 ? { repos } : {}),
             additionalTools: additional,
           },
         );
@@ -1520,6 +1708,7 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
             servers,
             tools,
             errorClasses,
+            ...(repos.length > 0 ? { repos } : {}),
             additionalTools: additional,
           },
         );
