@@ -93,10 +93,72 @@ export const githubPaths = {
     githubPath("repos", repo, "issues", number, "reactions", reaction),
 } as const satisfies GitHubPathRegistry;
 
-function normalizeThreadComment(comment: any): ReviewThreadComment {
+/**
+ * The GraphQL response types, as the schema allows them.
+ *
+ * The schema makes most of this nullable — a repository, a pull request, a
+ * node, a `fullDatabaseId` — and a selection set only guarantees the fields
+ * it asks for. The types say so, and the reads below narrow before they
+ * consume, rather than assuming a shape the API never promised.
+ */
+/** A GraphQL page cursor. */
+interface GraphQLPageInfo {
+  hasNextPage: boolean;
+  endCursor: string | null;
+}
+/**
+ * A review-thread comment. The document aliases `fullDatabaseId` over `id`,
+ * so the numeric database id arrives under `id`; the field is nullable
+ * because `fullDatabaseId` is.
+ */
+interface GraphQLThreadComment {
+  id: number | string | null;
+}
+interface GraphQLCommentConnection {
+  nodes: (GraphQLThreadComment | null)[] | null;
+  pageInfo: GraphQLPageInfo;
+}
+interface GraphQLReviewThread {
+  id: string;
+  isResolved: boolean;
+  comments: GraphQLCommentConnection;
+}
+interface GraphQLReviewThreadConnection {
+  nodes: (GraphQLReviewThread | null)[] | null;
+  pageInfo: GraphQLPageInfo;
+}
+interface GraphQLPullRequest {
+  reviewThreads: GraphQLReviewThreadConnection;
+}
+interface GraphQLRepository {
+  pullRequest: GraphQLPullRequest | null;
+}
+interface ListThreadsResponse {
+  repository: GraphQLRepository | null;
+}
+/**
+ * The node a comment page is read from. `comments` is selected inside an
+ * inline fragment on `PullRequestReviewThread`, so a node of another type
+ * does not carry the field at all.
+ */
+interface GraphQLReviewThreadNode {
+  comments?: GraphQLCommentConnection;
+}
+interface ListThreadCommentsResponse {
+  node: GraphQLReviewThreadNode | null;
+}
+/** Narrows a nullable GraphQL value, or explains what was missing. */
+function requireGraphQL<T>(value: T | null | undefined, what: string): T {
+  if (value === null || value === undefined) throw new Error(`GitHub returned no ${what}`);
+  return value;
+}
+function normalizeThreadComment(comment: GraphQLThreadComment): ReviewThreadComment {
   // `nodes { id: fullDatabaseId }` aliases the numeric database id to `id`, so the
   // REST-facing id is already under `comment.id`; no `fullDatabaseId` key is returned.
-  return { id: Number(comment.id) };
+  const id = Number(comment.id);
+  if (!Number.isSafeInteger(id) || id <= 0)
+    throw new Error("GitHub returned a review-thread comment without a usable id");
+  return { id };
 }
 
 export const githubGraphqlDocuments = {
@@ -315,26 +377,38 @@ export class GitHubClient {
     const all: ReviewThread[] = [];
     let cursor: string | undefined;
     do {
-      const page = await this.graphql<any>(githubGraphqlDocuments.listThreads, {
+      const page = await this.graphql<ListThreadsResponse>(githubGraphqlDocuments.listThreads, {
         owner,
         name,
         number,
         cursor,
       });
-      const connection = page.repository.pullRequest.reviewThreads;
-      for (const t of connection.nodes) {
-        const nodes = t.comments.nodes.map(normalizeThreadComment);
+      const connection = requireGraphQL(
+        requireGraphQL(page.repository, "repository").pullRequest?.reviewThreads,
+        "review threads for the pull request",
+      );
+      for (const thread of requireGraphQL(connection.nodes, "review threads")) {
+        const t = requireGraphQL(thread, "review thread");
+        const nodes = requireGraphQL(t.comments.nodes, "review thread comments").map((comment) =>
+          normalizeThreadComment(requireGraphQL(comment, "review thread comment")),
+        );
         let commentCursor = t.comments.pageInfo.hasNextPage
-          ? t.comments.pageInfo.endCursor
+          ? (t.comments.pageInfo.endCursor ?? undefined)
           : undefined;
         while (commentCursor) {
-          const next = await this.graphql<any>(githubGraphqlDocuments.listThreadComments, {
-            id: t.id,
-            cursor: commentCursor,
-          });
-          const comments = next.node.comments;
-          nodes.push(...comments.nodes.map(normalizeThreadComment));
-          commentCursor = comments.pageInfo.hasNextPage ? comments.pageInfo.endCursor : undefined;
+          const next = await this.graphql<ListThreadCommentsResponse>(
+            githubGraphqlDocuments.listThreadComments,
+            { id: t.id, cursor: commentCursor },
+          );
+          const comments = requireGraphQL(next.node?.comments, "comments for the review thread");
+          nodes.push(
+            ...requireGraphQL(comments.nodes, "review thread comments").map((comment) =>
+              normalizeThreadComment(requireGraphQL(comment, "review thread comment")),
+            ),
+          );
+          commentCursor = comments.pageInfo.hasNextPage
+            ? (comments.pageInfo.endCursor ?? undefined)
+            : undefined;
         }
         all.push({
           id: t.id,
@@ -342,7 +416,9 @@ export class GitHubClient {
           comments: { nodes, pageInfo: { hasNextPage: false } },
         });
       }
-      cursor = connection.pageInfo.hasNextPage ? connection.pageInfo.endCursor : undefined;
+      cursor = connection.pageInfo.hasNextPage
+        ? (connection.pageInfo.endCursor ?? undefined)
+        : undefined;
     } while (cursor);
     return all;
   }

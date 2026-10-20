@@ -1,5 +1,5 @@
 import type { AgentTool } from "@earendil-works/pi-agent-core";
-import { Type, type Static } from "@earendil-works/pi-ai";
+import { Type, type Static, type TSchema } from "@earendil-works/pi-ai";
 import type { SearchCitation } from "./types.js";
 import type { SearchClient } from "./client.js";
 import { log } from "../log.js";
@@ -44,10 +44,16 @@ function logSearchFailure(kind: "web search" | "AI search", error: unknown): voi
   });
 }
 
+/** Which search tools to register. */
+export interface SearchToolOptions {
+  regular: boolean;
+  ai: boolean;
+}
+
 export function createSearchTools(
   client: SearchClient,
-  options: { regular: boolean; ai: boolean },
-): AgentTool<any, any>[] {
+  options: SearchToolOptions,
+): AgentTool<TSchema, unknown>[] {
   const search: AgentTool<typeof searchSchema, SearchParams> = {
     name: WEB_SEARCH_TOOL_NAME,
     label: WEB_SEARCH_TOOL_NAME,

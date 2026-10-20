@@ -62,7 +62,7 @@ interface PiLspResolver {
       config?: string;
       timeoutMs?: number;
     },
-    options: { workspace: string; root: string; file: string },
+    options: ResolveCommandOptions,
   ): { bin: string };
 }
 
@@ -74,9 +74,22 @@ interface PiLspResolver {
  * against the checkout dir. Missing binaries warn-and-skip at review time;
  * nothing here installs or fails the run.
  */
+/** The place a command is resolved for: a workspace, a root, and a file. */
+interface ResolveCommandOptions {
+  workspace: string;
+  root: string;
+  file: string;
+}
+/** The checkout, the roots, and the path the server is resolved for. */
+interface ProbeServerOptions {
+  cwd: string;
+  roots: readonly LspServerRoot[];
+  pathValue?: string;
+}
+
 export async function probeServerBinaries(
   entries: readonly LspFileServer[],
-  options: { cwd: string; roots: readonly LspServerRoot[]; pathValue?: string },
+  options: ProbeServerOptions,
 ): Promise<LspBinaryProbe[]> {
   const { resolveCommand } = (await loadPiLspModule("extensions/_shared/paths.ts")) as unknown as {
     resolveCommand: PiLspResolver["resolveCommand"];

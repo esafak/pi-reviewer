@@ -4,6 +4,7 @@ import path from "node:path";
 import { parseDiffPositions, partitionComments } from "./diff-positions.js";
 import { escapeHtmlCommentText } from "./html-comment.js";
 import { PR_DIAGRAM_MAX_LENGTH, PR_SUMMARY_MAX_LENGTH } from "./prompts.js";
+import { SEVERITY_EMOJI, SEVERITY_RANK, type Severity } from "./severity.js";
 import { GitHubClient } from "../ci/github.js";
 import {
   bodyFindingId,
@@ -26,10 +27,7 @@ import {
 import type { SearchCitation } from "../ci/search/types.js";
 
 export type OutputTarget = "terminal" | "comment" | "file";
-export type Severity = "CRITICAL" | "WARN" | "INFO";
-
-const SEVERITY_RANK: Record<Severity, number> = { INFO: 0, WARN: 1, CRITICAL: 2 };
-const SEVERITY_EMOJI: Record<Severity, string> = { CRITICAL: "🔴", WARN: "🟡", INFO: "🔵" };
+export type { Severity } from "./severity.js";
 
 export interface ReviewComment {
   file: string;

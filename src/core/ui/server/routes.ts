@@ -126,6 +126,16 @@ export type PathMatch =
   | { readonly decodeError: true }
   | undefined;
 
+/** The parameters a matched path captured. */
+interface PathParams {
+  params: Readonly<Record<string, string>>;
+}
+/** A route whose path matched, with the parameters the path captured. */
+interface PathRouteMatch {
+  route: CompiledRoute;
+  params: PathParams;
+}
+
 export function matchPath(route: CompiledRoute, pathname: string): PathMatch {
   const requestSegments = splitPath(pathname);
   if (requestSegments.length !== route.segments.length) return undefined;
@@ -164,9 +174,7 @@ function findRoute(
     return { status: 400 };
   const pathMatches = pathResults
     .filter(
-      (
-        result,
-      ): result is { route: CompiledRoute; params: { params: Readonly<Record<string, string>> } } =>
+      (result): result is PathRouteMatch =>
         result.params !== undefined && "params" in result.params,
     )
     .map((result) => ({ route: result.route, params: result.params.params }));

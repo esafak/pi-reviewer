@@ -67,6 +67,11 @@ import { loadPiLspExtension, partitionExtensionTools } from "../core/lsp/extensi
 import { probeServerBinaries } from "../core/lsp/probe.js";
 import { resolveLspRoots } from "../core/lsp/roots.js";
 import type { CiMcpConfig } from "./mcp-config.js";
+
+/** The options the MCP adapter is created with. */
+interface McpAdapterOptions {
+  config: CiMcpConfig;
+}
 import { formatServerNamespace, getServerPrefix } from "pi-mcp-adapter/types";
 import { log } from "./log.js";
 import type { Logger } from "../logging/index.js";
@@ -643,14 +648,19 @@ export function truncateReplyInput(value: string, limit: number): string {
 
 export { ALLOWED_REACTIONS, type ReplyAction } from "../core/reply-tool.js";
 
-const PROVIDER_API_KEY_ENV: Record<string, string> = {
+/** The providers that read their API key from a dedicated environment variable. */
+type ProviderKeyEnv = "anthropic" | "openai" | "zai";
+const PROVIDER_API_KEY_ENV: Record<ProviderKeyEnv, string> = {
   anthropic: "ANTHROPIC_API_KEY",
   openai: "OPENAI_API_KEY",
   zai: "ZAI_API_KEY",
 };
 
 export function resolveProviderApiKey(provider: string, explicitKey?: string): string | undefined {
-  return explicitKey || process.env[PROVIDER_API_KEY_ENV[provider]] || process.env.PI_API_KEY;
+  const env = Object.hasOwn(PROVIDER_API_KEY_ENV, provider)
+    ? PROVIDER_API_KEY_ENV[provider as ProviderKeyEnv]
+    : undefined;
+  return explicitKey || (env ? process.env[env] : undefined) || process.env.PI_API_KEY;
 }
 
 export function buildReplyPrompt(
@@ -1114,7 +1124,7 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
         // dynamic and untyped: it is loaded only for opted-in CI reviews.
         const adapterPackage = "pi-mcp-adapter";
         const { createMcpAdapter } = (await import(adapterPackage)) as {
-          createMcpAdapter(options: { config: CiMcpConfig }): unknown;
+          createMcpAdapter(options: McpAdapterOptions): unknown;
         };
         extensionFactories.push(
           createMcpAdapter({
