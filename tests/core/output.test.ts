@@ -4085,8 +4085,14 @@ describe("sendOutput skipped-diff notice", () => {
   });
 
   it("posts the notice instead of a thumbs-up when the model chooses none", async () => {
+    const marker =
+      '<!-- pi-reviewer:batch:v1 {"version":1,"fromSha":"a","toSha":"b","kind":"opened","actor":"bot","reviewId":0} -->';
     const fetchMock = vi
       .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        text: vi.fn().mockResolvedValue(JSON.stringify({ id: 9 })),
+      })
       .mockResolvedValueOnce({
         ok: true,
         text: vi.fn().mockResolvedValue(JSON.stringify({ id: 9 })),
@@ -4104,6 +4110,9 @@ describe("sendOutput skipped-diff notice", () => {
       prNumber: 42,
       repo: "owner/repo",
       commitId: "head",
+      batchMarker: marker,
+      // Open findings stay open: no reaction, notice posted, range recorded.
+      existingFindings: [{ commentId: 7 }],
       skippedDiff: { files: ["backend/app.kt"], cap: 100_000, shortfall: 5_432 },
     });
 
@@ -4114,6 +4123,16 @@ describe("sendOutput skipped-diff notice", () => {
     const body = JSON.parse((reviewCall![1] as { body: string }).body).body as string;
     expect(body).toContain("> [!WARNING]");
     expect(body).toContain("- `backend/app.kt`");
+    // The marker's reviewId placeholder is finalized with the posted review.
+    const updateCall = fetchMock.mock.calls.find(
+      ([url, init]) =>
+        String(url).endsWith("/pulls/42/reviews/9") &&
+        (init as { method?: string }).method === "PUT",
+    );
+    expect(updateCall).toBeDefined();
+    const updated = JSON.parse((updateCall![1] as { body: string }).body).body as string;
+    expect(updated).toContain('"reviewId":9');
+    expect(updated).toContain("> [!WARNING]");
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/reactions"))).toBe(false);
   });
 

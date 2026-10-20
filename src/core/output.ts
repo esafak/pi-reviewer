@@ -1616,13 +1616,27 @@ export async function sendOutput(options: OutputOptions): Promise<OutputMetadata
           .filter(Boolean)
           .join("\n\n");
         if (options.commitId) {
-          await new GitHubClient(options.githubToken).createReview(
+          const client = new GitHubClient(options.githubToken);
+          const posted = await client.createReview(
             repo,
             prNumber,
             noticeBody,
             options.commitId,
             [],
           );
+          // Finalize the marker with the real review id, like every other
+          // posting path: an unfinalized "reviewId":0 would break later
+          // batch-range matching against this review.
+          if (posted?.id && options.batchMarker) {
+            const finalized = options.batchMarker.replace(/("reviewId"\s*:\s*)0/, `$1${posted.id}`);
+            if (finalized !== options.batchMarker)
+              await client.updateReview(
+                repo,
+                prNumber,
+                posted.id,
+                [finalized, noticeBody].join("\n\n"),
+              );
+          }
         } else {
           await (
             await fetch(`https://api.github.com/repos/${repo}/issues/${prNumber}/comments`, {
