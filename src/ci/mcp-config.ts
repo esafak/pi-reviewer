@@ -15,6 +15,34 @@ export const GIT_LOCATION_ENV_VARS = [
   "GIT_COMMON_DIR",
 ] as const;
 
+/**
+ * Argument names whose values may be disclosed in the review logs, such as
+ * the argument that names a repository. The declaration is per server: what
+ * one server's arguments carry is that server owner's call, not the
+ * harness's.
+ */
+export const MAX_MCP_LOGGABLE_ARGS = 20;
+const LOGGABLE_ARG_NAME_PATTERN = /^[A-Za-z0-9_.-]{1,64}$/;
+
+export function parseLoggableArgs(value: unknown, serverName: string): string[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value))
+    throw new Error(`MCP config server "${serverName}" loggableArgs must be an array`);
+  if (value.length > MAX_MCP_LOGGABLE_ARGS)
+    throw new Error(
+      `MCP config server "${serverName}" loggableArgs must list at most ${MAX_MCP_LOGGABLE_ARGS} arguments`,
+    );
+  const names: string[] = [];
+  for (const entry of value) {
+    if (typeof entry !== "string" || !LOGGABLE_ARG_NAME_PATTERN.test(entry))
+      throw new Error(
+        `MCP config server "${serverName}" loggableArgs entries must be argument names`,
+      );
+    if (!names.includes(entry)) names.push(entry);
+  }
+  return names;
+}
+
 function gitEnv(): NodeJS.ProcessEnv {
   const env = { ...process.env };
   for (const key of GIT_LOCATION_ENV_VARS) delete env[key];
@@ -100,6 +128,8 @@ export function validateMcpConfig(value: unknown, label = "MCP config"): CiMcpCo
     if (isRecord(definition.env)) validateCredentialReferences(definition.env, label, "env value");
     if (definition.auth !== undefined && definition.auth !== false && definition.auth !== "bearer")
       throw new Error(`${label} contains an unsupported MCP authentication mode`);
+    // Validated here so an invalid declaration fails the run loudly.
+    parseLoggableArgs(definition.loggableArgs, name);
   }
   if (value.settings !== undefined && !isRecord(value.settings))
     throw new Error(`${label} settings must be an object`);
