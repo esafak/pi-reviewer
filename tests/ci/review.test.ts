@@ -1943,6 +1943,25 @@ describe("review", () => {
     );
   });
 
+  it("passes the skipped-diff notice to sendOutput when the cap drops files", async () => {
+    const keep = `diff --git a/keep.ts b/keep.ts\n--- a/keep.ts\n+++ b/keep.ts\n@@ -1 +1 @@\n+x\n`;
+    const drop = `diff --git a/drop.ts b/drop.ts\n--- a/drop.ts\n+++ b/drop.ts\n@@ -1 +1 @@\n+y\n`;
+    const raw = keep + drop;
+    resolveRawDiffMock.mockResolvedValue({ raw, source: "s", changedFiles: [] });
+    await review({ cwd: "/repo", maxDiffChars: keep.length + 1 });
+
+    expect(sendOutputMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        diff: keep,
+        skippedDiff: {
+          files: ["drop.ts"],
+          cap: keep.length + 1,
+          shortfall: raw.length - (keep.length + 1),
+        },
+      }),
+    );
+  });
+
   it("reviews an explicit multi-commit range as one batch", async () => {
     sendOutputMock.mockClear();
     await review({
