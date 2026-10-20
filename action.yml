@@ -23,7 +23,7 @@ inputs:
     required: false
 
   model:
-    description: "Model to use in provider/modelId format (e.g. openrouter/openai/gpt-5.4-mini)"
+    description: "Model to use in provider/modelId format (e.g. openai/gpt-6-luna)"
     required: true
 
   thinking:
