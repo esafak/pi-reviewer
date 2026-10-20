@@ -1,7 +1,13 @@
 import path from "node:path";
 
 import { collectProviderContext, loadContext } from "../../../src/core/context.js";
-import { resolveDiff, extractDiffFiles } from "../../../src/core/diff-resolver.js";
+import { resolveRawDiff, extractDiffFiles } from "../../../src/core/diff-resolver.js";
+import {
+  filterDiff,
+  resolveExplicitMaxDiffChars,
+  resolveMaxDiffChars,
+  stripNoiseFiles,
+} from "../../../src/core/diff-filter.js";
 import { loadSkillContext, resolveSkillDirs } from "../../../src/core/skill-context.js";
 import {
   buildJSONSystemPrompt,
@@ -19,7 +25,7 @@ export interface HandleDryRunOptions extends CommonHandlerOptions {
 }
 
 export async function handleDryRun(opts: HandleDryRunOptions): Promise<void> {
-  const { parsed, cwd, pi, minSeverity, notify } = opts;
+  const { parsed, cwd, pi, minSeverity, notify, currentModelId } = opts;
 
   if (parsed.ssh) {
     const drySSHContextFiles = (await collectProviderContext(pi.events, cwd, [])).flatMap(
@@ -32,14 +38,17 @@ export async function handleDryRun(opts: HandleDryRunOptions): Promise<void> {
     return;
   }
 
-  const { diff, source, skippedFiles, changedFiles } = await resolveDiff({
+  const { raw, source, changedFiles } = await resolveRawDiff({
     cwd,
     diff: parsed.diff,
     branch: parsed.branch ?? readDefaultBranch(),
     pr: parsed.pr,
     dir: parsed.dir,
   });
-  const dryDiffFiles = extractDiffFiles(diff);
+  // Context covers the noise-stripped candidate set — every file the final
+  // size filter could keep (size selection skips rather than prefixing).
+  const explicitMaxDiffChars = resolveExplicitMaxDiffChars(parsed.maxDiffChars);
+  const dryDiffFiles = extractDiffFiles(stripNoiseFiles(raw).kept.join(""));
   const context = await loadContext({
     cwd: parsed.dir ? path.resolve(cwd, parsed.dir) : cwd,
     gitRoot: parsed.dir ? cwd : undefined,
@@ -72,6 +81,15 @@ export async function handleDryRun(opts: HandleDryRunOptions): Promise<void> {
     undefined,
     undefined,
     drySkillContext ? { skills: drySkillContext } : undefined,
+  );
+  // The cap follows the same rule as a real review; an unset model falls back.
+  const { diff, skippedFiles } = filterDiff(
+    raw,
+    resolveMaxDiffChars({
+      explicit: explicitMaxDiffChars,
+      model: currentModelId,
+      nonDiffChars: systemPrompt.length,
+    }),
   );
   notify(`System prompt:\n\n${systemPrompt}`);
   notify(`User prompt:\n\n${buildUserPrompt(diff, skippedFiles)}`);

@@ -15,6 +15,14 @@ export interface DiffOptions {
   fromSha?: string;
   toSha?: string;
   allowEmpty?: boolean;
+  /** Explicit diff cap in chars; filterDiff falls back to DEFAULT_MAX_CHARS. */
+  maxDiffChars?: number;
+}
+
+export interface RawDiffResult {
+  raw: string;
+  source: string;
+  changedFiles: string[];
 }
 
 export interface DiffResult {
@@ -118,6 +126,19 @@ export function extractDiffFiles(diff: string): string[] {
 }
 
 export async function resolveDiff(options: DiffOptions): Promise<DiffResult> {
+  const { raw, source, changedFiles } = await resolveRawDiff(options);
+  const { diff, warning, skippedFiles } = filterDiff(raw, options.maxDiffChars);
+  return { diff, source, warning, skippedFiles, changedFiles };
+}
+
+/**
+ * Resolves the raw diff without size filtering. Review paths that derive the
+ * cap from the assembled system prompt use this, then call filterDiff() with
+ * the measured budget so context selection and the final filter agree.
+ */
+export async function resolveRawDiff(
+  options: Omit<DiffOptions, "maxDiffChars">,
+): Promise<RawDiffResult> {
   let cwd = options.cwd ?? process.cwd();
 
   if (options.dir) {
@@ -178,6 +199,5 @@ export async function resolveDiff(options: DiffOptions): Promise<DiffResult> {
 
   if (!options.allowEmpty) ensureNonEmptyDiff(raw);
   const changedFiles = extractDiffFiles(raw);
-  const { diff, warning, skippedFiles } = filterDiff(raw);
-  return { diff, source, warning, skippedFiles, changedFiles };
+  return { raw, source, changedFiles };
 }

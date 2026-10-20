@@ -18,7 +18,7 @@ vi.mock("node:fs/promises", async (importActual) => {
 
 vi.mock("../../../src/core/diff-resolver.js", async (importActual) => {
   const actual = await importActual<typeof import("../../../src/core/diff-resolver.js")>();
-  return { ...actual, resolveDiff: vi.fn() };
+  return { ...actual, resolveRawDiff: vi.fn() };
 });
 
 vi.mock("../../../src/core/context.js", async (importActual) => {
@@ -45,7 +45,7 @@ vi.mock("../../../extensions/pi-reviewer/handlers/context.js", () => ({
 
 import { spawn } from "node:child_process";
 import { writeFile } from "node:fs/promises";
-import { resolveDiff } from "../../../src/core/diff-resolver.js";
+import { resolveRawDiff } from "../../../src/core/diff-resolver.js";
 import { loadContext } from "../../../src/core/context.js";
 import { setReviewFooter } from "../../../extensions/pi-reviewer/footer.js";
 import { handleUIReview } from "../../../extensions/pi-reviewer/handlers/ui.js";
@@ -123,8 +123,8 @@ function makeOpts(parsedOverrides: Partial<ReviewCommandArgs> = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(resolveDiff).mockResolvedValue({
-    diff: "diff --git a/foo.ts\n",
+  vi.mocked(resolveRawDiff).mockResolvedValue({
+    raw: "diff --git a/foo.ts b/foo.ts\n--- a/foo.ts\n+++ b/foo.ts\n@@ -1 +1 @@\n-old\n+new\n",
     source: "feature vs main",
     changedFiles: ["foo.ts"],
   });
@@ -208,7 +208,7 @@ describe("handleLocalReview — --ui path", () => {
     await handleLocalReview(opts);
     expect(handleUIReview).toHaveBeenCalledWith(
       expect.objectContaining({
-        diff: "diff --git a/foo.ts\n",
+        diff: "diff --git a/foo.ts b/foo.ts\n--- a/foo.ts\n+++ b/foo.ts\n@@ -1 +1 @@\n-old\n+new\n",
         source: "feature vs main",
       }),
     );
@@ -232,16 +232,10 @@ describe("handleLocalReview — --ui path", () => {
 });
 
 describe("handleLocalReview — diff warning", () => {
-  it("notifies warning when resolveDiff returns one", async () => {
-    vi.mocked(resolveDiff).mockResolvedValue({
-      diff: "diff --git a/foo.ts\n",
-      source: "feature vs main",
-      warning: "Diff truncated to 100k chars",
-      changedFiles: ["foo.ts"],
-    });
-    const opts = makeOpts();
+  it("notifies warning when the final filter skips files", async () => {
+    const opts = makeOpts({ maxDiffChars: 10 });
     await handleLocalReview(opts);
-    expect(opts.notify).toHaveBeenCalledWith("Diff truncated to 100k chars", "warning");
+    expect(opts.notify).toHaveBeenCalledWith(expect.stringContaining("skipped"), "warning");
   });
 });
 

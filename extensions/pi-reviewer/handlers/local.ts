@@ -11,7 +11,13 @@ import {
   type ReviewResult,
 } from "../../../src/core/output.js";
 import { loadContext } from "../../../src/core/context.js";
-import { resolveDiff, extractDiffFiles } from "../../../src/core/diff-resolver.js";
+import { resolveRawDiff, extractDiffFiles } from "../../../src/core/diff-resolver.js";
+import {
+  filterDiff,
+  resolveExplicitMaxDiffChars,
+  resolveMaxDiffChars,
+  stripNoiseFiles,
+} from "../../../src/core/diff-filter.js";
 import { loadSkillContext, resolveSkillDirs } from "../../../src/core/skill-context.js";
 import {
   buildJSONSystemPrompt,
@@ -192,17 +198,20 @@ export async function handleLocalReview(opts: HandleLocalReviewOptions): Promise
   } = opts;
 
   notify("Fetching diff…");
-  const { diff, source, warning, skippedFiles, changedFiles } = await resolveDiff({
+  const { raw, source, changedFiles } = await resolveRawDiff({
     cwd: ctx.cwd,
     diff: parsed.diff,
     branch: parsed.branch ?? readDefaultBranch(),
     pr: parsed.pr,
     dir: parsed.dir,
   });
-  if (warning) notify(warning, "warning");
+  // Context covers the noise-stripped candidate set — every file the final
+  // size filter could keep. Size selection is skip-and-continue, not a
+  // prefix, so context must never come from an intermediate capped pass.
+  const explicitMaxDiffChars = resolveExplicitMaxDiffChars(parsed.maxDiffChars);
+  const diffFiles = extractDiffFiles(stripNoiseFiles(raw).kept.join(""));
 
   notify("Loading context…");
-  const diffFiles = extractDiffFiles(diff);
   const context = await loadContext({
     cwd: parsed.dir ? path.resolve(ctx.cwd, parsed.dir) : ctx.cwd,
     gitRoot: parsed.dir ? ctx.cwd : undefined,
@@ -251,6 +260,15 @@ export async function handleLocalReview(opts: HandleLocalReviewOptions): Promise
     undefined,
     skillContext ? { skills: skillContext } : undefined,
   );
+  // The cap is derived from the execution model minus the prompt assembled
+  // above, so large-context models review more of large diffs.
+  const maxDiffChars = resolveMaxDiffChars({
+    explicit: explicitMaxDiffChars,
+    model: currentModelId,
+    nonDiffChars: systemPrompt.length,
+  });
+  const { diff, warning, skippedFiles } = filterDiff(raw, maxDiffChars);
+  if (warning) notify(warning, "warning");
   const userPrompt = buildUserPrompt(diff, skippedFiles);
 
   loaderState.stop = setReviewFooter(ctx, source, { model: currentModelId, thinking });

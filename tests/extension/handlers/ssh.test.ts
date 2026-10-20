@@ -218,4 +218,12 @@ describe("handleSSHReview — touched context (sshState set)", () => {
       "packages/api/foo.ts",
     ]);
   });
+
+  it("honors an explicit --max-diff-chars flag on the SSH path", async () => {
+    const opts = makeOpts({ maxDiffChars: 10 });
+    await handleSSHReview(opts);
+    const sent = vi.mocked(opts.pi.sendUserMessage).mock.calls[0][0] as string;
+    expect(sent).toContain("skipped_files");
+    expect(sent).toContain("packages/api/foo.ts");
+  });
 });

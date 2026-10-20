@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 vi.mock("../../../src/core/diff-resolver.js", async (importActual) => {
   const actual = await importActual<typeof import("../../../src/core/diff-resolver.js")>();
-  return { ...actual, resolveDiff: vi.fn() };
+  return { ...actual, resolveRawDiff: vi.fn() };
 });
 
 vi.mock("../../../src/core/context.js", async (importActual) => {
@@ -14,7 +14,7 @@ vi.mock("../../../src/core/ui/server/index.js", () => ({
   readDefaultBranch: vi.fn().mockReturnValue(undefined),
 }));
 
-import { resolveDiff } from "../../../src/core/diff-resolver.js";
+import { resolveRawDiff } from "../../../src/core/diff-resolver.js";
 import { loadContext, collectProviderContext } from "../../../src/core/context.js";
 import { handleDryRun } from "../../../extensions/pi-reviewer/handlers/dry-run.js";
 import type { ReviewCommandArgs } from "../../../extensions/pi-reviewer/args.js";
@@ -68,8 +68,8 @@ function makeOpts(parsedOverrides: Partial<ReviewCommandArgs> = {}) {
 }
 
 beforeEach(() => {
-  vi.mocked(resolveDiff).mockResolvedValue({
-    diff: "diff --git a/foo.ts\n",
+  vi.mocked(resolveRawDiff).mockResolvedValue({
+    raw: "diff --git a/foo.ts b/foo.ts\n--- a/foo.ts\n+++ b/foo.ts\n@@ -1 +1 @@\n-old\n+new\n",
     source: "feature vs main",
     changedFiles: ["foo.ts"],
   });
@@ -96,19 +96,19 @@ describe("handleDryRun — SSH path", () => {
     expect(userPromptCall).toBeDefined();
   });
 
-  it("does not call resolveDiff or loadContext", async () => {
+  it("does not call resolveRawDiff or loadContext", async () => {
     const opts = makeOpts({ ssh: true });
     await handleDryRun(opts);
-    expect(resolveDiff).not.toHaveBeenCalled();
+    expect(resolveRawDiff).not.toHaveBeenCalled();
     expect(loadContext).not.toHaveBeenCalled();
   });
 });
 
 describe("handleDryRun — local path", () => {
-  it("calls resolveDiff with parsed options", async () => {
+  it("calls resolveRawDiff with parsed options", async () => {
     const opts = makeOpts({ branch: "dev" });
     await handleDryRun(opts);
-    expect(resolveDiff).toHaveBeenCalledWith(
+    expect(resolveRawDiff).toHaveBeenCalledWith(
       expect.objectContaining({ cwd: "/project", branch: "dev" }),
     );
   });
@@ -145,5 +145,12 @@ describe("handleDryRun — local path", () => {
     await handleDryRun(opts);
     const call = opts.notify.mock.calls.find((args) => String(args[0]).includes("System prompt:"));
     expect(call![0]).toContain("PROVIDER CONTENT");
+  });
+
+  it("honors an explicit --max-diff-chars flag", async () => {
+    const opts = makeOpts({ maxDiffChars: 10 });
+    await handleDryRun(opts);
+    const call = opts.notify.mock.calls.find((args) => String(args[0]).includes("User prompt:"));
+    expect(call![0]).toContain("skipped_files");
   });
 });

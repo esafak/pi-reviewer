@@ -10,7 +10,7 @@ vi.mock("node:fs/promises", async (importActual) => {
 });
 
 vi.mock("../../src/core/diff-resolver.js", () => ({
-  resolveDiff: vi.fn(),
+  resolveRawDiff: vi.fn(),
   extractDiffFiles: vi.fn(() => []),
 }));
 
@@ -89,7 +89,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { createMcpAdapter } from "pi-mcp-adapter";
 import { loadContext } from "../../src/core/context.js";
-import { extractDiffFiles, resolveDiff } from "../../src/core/diff-resolver.js";
+import { extractDiffFiles, resolveRawDiff } from "../../src/core/diff-resolver.js";
 import { loadDocContext } from "../../src/core/doc-context.js";
 import { loadSkillContext, resolveSkillDirs } from "../../src/core/skill-context.js";
 import { sendOutput } from "../../src/core/output.js";
@@ -192,7 +192,7 @@ describe("reply prompt limits", () => {
   });
 });
 
-const resolveDiffMock = vi.mocked(resolveDiff);
+const resolveRawDiffMock = vi.mocked(resolveRawDiff);
 const extractDiffFilesMock = vi.mocked(extractDiffFiles);
 const loadContextMock = vi.mocked(loadContext);
 const loadDocContextMock = vi.mocked(loadDocContext);
@@ -287,8 +287,8 @@ describe("review", () => {
     fakeAgentEvents = [];
     fakeMcpSession = makeFakeMcpSession();
 
-    resolveDiffMock.mockResolvedValue({
-      diff: "diff --git a/a.ts b/a.ts",
+    resolveRawDiffMock.mockResolvedValue({
+      raw: "diff --git a/a.ts b/a.ts",
       source: "git diff origin/main...HEAD",
     });
     loadContextMock.mockResolvedValue({
@@ -400,10 +400,30 @@ describe("review", () => {
     expect(sendOutputMock).not.toHaveBeenCalled();
   });
 
+  it("honors an explicit maxDiffChars option in dry-run", async () => {
+    const { sink, records } = createMemorySink();
+    const keep = `diff --git a/keep.ts b/keep.ts\n--- a/keep.ts\n+++ b/keep.ts\n@@ -1 +1 @@\n+x\n`;
+    const drop = `diff --git a/drop.ts b/drop.ts\n--- a/drop.ts\n+++ b/drop.ts\n@@ -1 +1 @@\n+y\n`;
+    resolveRawDiffMock.mockResolvedValue({ raw: keep + drop, source: "s", changedFiles: [] });
+    await review({
+      cwd: "/repo",
+      dryRun: true,
+      maxDiffChars: keep.length + 1,
+      logger: createLogger({ sink }),
+    });
+
+    const prompt = records.find(({ event }) => event === "review.dry_run.user_prompt")?.fields
+      .prompt as string;
+    expect(prompt).toContain(keep);
+    expect(prompt).not.toContain(drop);
+    expect(prompt).toContain("<skipped_files>");
+    expect(prompt).toContain("drop.ts");
+  });
+
   it("loads default skills into the dry-run system prompt", async () => {
     const { sink, records } = createMemorySink();
-    resolveDiffMock.mockResolvedValue({
-      diff: "diff --git a/a.ts b/a.ts",
+    resolveRawDiffMock.mockResolvedValue({
+      raw: "diff --git a/a.ts b/a.ts",
       source: "git diff origin/main...HEAD",
       changedFiles: ["a.ts", "skills/deploy/SKILL.md"],
     });
@@ -1912,7 +1932,7 @@ describe("review", () => {
   it("passes the resolved diff to sendOutput for position validation", async () => {
     const diff =
       "diff --git a/src/a.ts b/src/a.ts\n--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1,3 +1,3 @@\n";
-    resolveDiffMock.mockResolvedValue({ diff, source: "git diff origin/main...HEAD" });
+    resolveRawDiffMock.mockResolvedValue({ raw: diff, source: "git diff origin/main...HEAD" });
 
     await review({ cwd: "/repo" });
 
@@ -1934,7 +1954,7 @@ describe("review", () => {
       githubToken: "token",
       repo: "owner/repo",
     });
-    expect(resolveDiffMock).toHaveBeenCalledWith(
+    expect(resolveRawDiffMock).toHaveBeenCalledWith(
       expect.objectContaining({ fromSha: "base-sha", toSha: "head-sha" }),
     );
     expect(sendOutputMock).toHaveBeenCalledWith(

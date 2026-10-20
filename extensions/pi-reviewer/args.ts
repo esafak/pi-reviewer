@@ -33,6 +33,7 @@ export interface ReviewCommandArgs {
   minSeverity?: MinSeverity;
   model?: string;
   thinking?: string;
+  maxDiffChars?: number;
 }
 
 export function parseArgs(rawArgs: string): ReviewCommandArgs {
@@ -122,6 +123,19 @@ export function parseArgs(rawArgs: string): ReviewCommandArgs {
       const value = tokens[i + 1];
       if (!value) throw new Error("Missing value for --dir");
       parsed.dir = value;
+      i += 1;
+      continue;
+    }
+
+    if (token === "--max-diff-chars") {
+      const value = tokens[i + 1];
+      if (!value) throw new Error("Missing value for --max-diff-chars");
+      if (!/^\d+$/.test(value.trim()))
+        throw new Error(`Invalid max diff chars: ${value}. Expected a positive integer`);
+      const parsedValue = Number.parseInt(value, 10);
+      if (!Number.isSafeInteger(parsedValue) || parsedValue <= 0)
+        throw new Error(`Invalid max diff chars: ${value}. Expected a positive integer`);
+      parsed.maxDiffChars = parsedValue;
       i += 1;
       continue;
     }

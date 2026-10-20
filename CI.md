@@ -414,6 +414,7 @@ To refresh the summary after the PR evolves, comment `/pi-summary` in the PR con
 | `thinking` | no | Thinking budget: `off`, `minimal`, `low`, `medium`, `high`, or `xhigh` (default: `off`) |
 | `debug` | no | Log tool calls and upload available model thinking as a one-day artifact (default: `false`). Thinking may contain sensitive context. |
 | `min-severity` | no | Minimum severity: `info`, `warn`, or `critical` (default: `info`) |
+| `max-diff-chars` | no | Explicit diff cap in chars (default: derived from the model's context window, 100k floor). Precedence: this input > `PI_REVIEWER_MAX_DIFF_CHARS` env > config-file `maxDiffChars`. |
 | `summary` | no | Post a collapsed PR summary (What/Why/Risk with an optional Mermaid diagram) on the PR's first review (default: `true`). Set to `'false'` to opt out. CI comment reviews only. |
 | `doc-dirs` | no | Comma-separated dirs to scan for docs to inject into the review (default: empty — inject nothing) |
 | `extra-instructions` | no | Additional maintainer-authored instructions appended to the CI prompt as trusted `<custom_instructions>` (default: empty — inject nothing) |

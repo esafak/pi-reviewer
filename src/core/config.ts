@@ -14,6 +14,8 @@ export interface PiReviewerConfig {
   thinking?: ThinkingLevel;
   autoCollapseViewed?: boolean;
   branch?: string;
+  /** Explicit diff cap in chars; overrides the model-derived default. */
+  maxDiffChars?: number;
 }
 
 export const CONFIG_DIR = join(homedir(), ".pi", "pi-reviewer");
@@ -53,6 +55,14 @@ export function applyConfigPatch(patch: Partial<PiReviewerConfig>): void {
         (next as Record<string, unknown>)[key] = value;
     } else if (key === "branch") {
       if (typeof value === "string") next.branch = value || undefined;
+    } else if (key === "maxDiffChars") {
+      // Numeric settings validate here so a bad write never persists a cap
+      // that would silently narrow or explode a later review.
+      if (typeof value === "number" && Number.isSafeInteger(value) && value > 0) {
+        next.maxDiffChars = value;
+      } else if (value === undefined) {
+        next.maxDiffChars = undefined;
+      }
     } else if (typeof value === "string" || typeof value === "boolean") {
       (next as Record<string, unknown>)[key] = value;
     }
@@ -83,4 +93,9 @@ export function readAutoCollapseViewed(): boolean {
 }
 export function readDefaultBranch(): string | undefined {
   return readConfig().branch;
+}
+
+export function readMaxDiffChars(): number | undefined {
+  const value = readConfig().maxDiffChars;
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : undefined;
 }

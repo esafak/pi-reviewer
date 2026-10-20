@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 vi.mock("../../src/core/diff-resolver.js", async (importActual) => {
   const actual = await importActual<typeof import("../../src/core/diff-resolver.js")>();
-  return { ...actual, resolveDiff: vi.fn() };
+  return { ...actual, resolveRawDiff: vi.fn() };
 });
 
 vi.mock("../../src/core/context.js", async (importActual) => {
@@ -47,7 +47,7 @@ vi.mock("../../extensions/pi-reviewer/handlers/ui.js", () => ({
 }));
 
 import { spawn } from "node:child_process";
-import { resolveDiff } from "../../src/core/diff-resolver.js";
+import { resolveRawDiff } from "../../src/core/diff-resolver.js";
 import { loadContext, CONTEXT_PROVIDER_EVENT } from "../../src/core/context.js";
 import type { ContextProviderEvent } from "../../src/core/context.js";
 import { readSshFlag } from "../../src/core/ssh.js";
@@ -91,8 +91,8 @@ describe("context provider integration", () => {
   let capturedHandler: ((args: string, ctx: unknown) => Promise<void>) | undefined;
 
   beforeEach(() => {
-    vi.mocked(resolveDiff).mockResolvedValue({
-      diff: "diff --git a/src/foo.ts b/src/foo.ts\n--- a/src/foo.ts\n+++ b/src/foo.ts\n@@ -1 +1 @@\n-old\n+new\n",
+    vi.mocked(resolveRawDiff).mockResolvedValue({
+      raw: "diff --git a/src/foo.ts b/src/foo.ts\n--- a/src/foo.ts\n+++ b/src/foo.ts\n@@ -1 +1 @@\n-old\n+new\n",
       source: "feature vs origin/main",
       changedFiles: ["src/foo.ts"],
     });
@@ -183,8 +183,8 @@ describe("command routing", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(resolveDiff).mockResolvedValue({
-      diff: "diff --git a/foo.ts\n",
+    vi.mocked(resolveRawDiff).mockResolvedValue({
+      raw: "diff --git a/foo.ts b/foo.ts\n--- a/foo.ts\n+++ b/foo.ts\n@@ -1 +1 @@\n-old\n+new\n",
       source: "feature vs main",
       changedFiles: ["foo.ts"],
     });
@@ -207,18 +207,18 @@ describe("command routing", () => {
     registerExtension(pi as any);
   });
 
-  it("local path: calls resolveDiff (not SSH)", async () => {
+  it("local path: calls resolveRawDiff (not SSH)", async () => {
     await capturedHandler!("", {
       cwd: "/project",
       ui: { notify: notifySpy },
       model: undefined,
       modelRegistry: { getAvailable: () => [] },
     });
-    expect(resolveDiff).toHaveBeenCalled();
+    expect(resolveRawDiff).toHaveBeenCalled();
     expect(readSshFlag).not.toHaveBeenCalled();
   });
 
-  it("--ssh flag: calls readSshFlag (not resolveDiff)", async () => {
+  it("--ssh flag: calls readSshFlag (not resolveRawDiff)", async () => {
     await capturedHandler!("--ssh", {
       cwd: "/project",
       ui: { notify: notifySpy },
@@ -226,7 +226,7 @@ describe("command routing", () => {
       modelRegistry: { getAvailable: () => [] },
     });
     expect(readSshFlag).toHaveBeenCalled();
-    expect(resolveDiff).not.toHaveBeenCalled();
+    expect(resolveRawDiff).not.toHaveBeenCalled();
   });
 });
 
@@ -255,7 +255,7 @@ describe("error handling", () => {
   });
 
   it("appends SSH hint when error is 'not a git repository' in local mode", async () => {
-    vi.mocked(resolveDiff).mockRejectedValue(new Error("not a git repository"));
+    vi.mocked(resolveRawDiff).mockRejectedValue(new Error("not a git repository"));
     await capturedHandler!("", {
       cwd: "/project",
       ui: { notify: notifySpy },
@@ -268,7 +268,7 @@ describe("error handling", () => {
   });
 
   it("no SSH hint when error is unrelated", async () => {
-    vi.mocked(resolveDiff).mockRejectedValue(new Error("network timeout"));
+    vi.mocked(resolveRawDiff).mockRejectedValue(new Error("network timeout"));
     await capturedHandler!("", {
       cwd: "/project",
       ui: { notify: notifySpy },
@@ -282,9 +282,9 @@ describe("error handling", () => {
   it("loaderState.stop is called on error after loader was set", async () => {
     const stopFn = vi.fn();
     vi.mocked(setReviewFooter).mockReturnValue(stopFn);
-    // resolveDiff resolves so we get past the loader setup, then spawn fails
-    vi.mocked(resolveDiff).mockResolvedValue({
-      diff: "diff --git\n",
+    // resolveRawDiff resolves so we get past the loader setup, then spawn fails
+    vi.mocked(resolveRawDiff).mockResolvedValue({
+      raw: "diff --git\n",
       source: "x",
       changedFiles: [],
     });
