@@ -140,8 +140,53 @@ export interface OutputOptions {
   summaryEnabled?: boolean;
   /** True when no prior authenticated review with a body exists (first review). */
   isFirstReview?: boolean;
+  /**
+   * Files dropped by the diff-size filter. Rendered as a harness-owned
+   * warning — never model prose — so skipped coverage is unmissable.
+   */
+  skippedDiff?: SkippedDiffNotice;
   /** Current-run, server-recorded external evidence; never model-authored. */
   evidence?: readonly SearchCitation[];
+}
+
+/**
+ * Deterministic record of diff-budget overflow for the posted review body.
+ * `shortfall` is raw-minus-cap chars: how much more budget the full diff
+ * needed. Positive whenever `files` is non-empty.
+ */
+export interface SkippedDiffNotice {
+  files: string[];
+  cap: number;
+  shortfall: number;
+}
+
+/** Max skipped paths listed before collapsing the remainder into a count. */
+export const MAX_LISTED_SKIPPED_FILES = 50;
+
+/**
+ * Harness-owned overflow notice: a GitHub WARNING callout with the shortfall,
+ * plus a collapsible path list. Rendered from server-measured values, so the
+ * model can neither omit nor understate it. Paths are untrusted diff data:
+ * code-spanned with backticks neutralized, inside the same details-tag
+ * neutralization as other visible text.
+ */
+export function renderSkippedDiffNotice(notice: SkippedDiffNotice): string {
+  const count = notice.files.length;
+  const shown = notice.files.slice(0, MAX_LISTED_SKIPPED_FILES);
+  const rest = count - shown.length;
+  const items = shown.map((file) => `- \`${sanitizeVisibleReviewText(file).replace(/`/g, "'")}\``);
+  if (rest > 0) items.push(`- …and ${rest} more`);
+  return [
+    "> [!WARNING]",
+    `> Diff budget exceeded — ${count} file${count === 1 ? " was" : "s were"} not reviewed (${notice.shortfall.toLocaleString()} chars over the ${notice.cap.toLocaleString()}-char cap).`,
+    "",
+    "<details>",
+    `<summary>Skipped files (${count})</summary>`,
+    "",
+    ...items,
+    "",
+    "</details>",
+  ].join("\n");
 }
 export interface ResolvedFinding {
   historicalFindingId: string;
@@ -1158,7 +1203,10 @@ export function parseAgentResponse(text: string, minSeverity: Severity = "INFO")
 function formatForGitHub(
   result: ReviewResult,
   provenance: ReRaiseProvenanceOptions &
-    Pick<OutputOptions, "repo" | "baseCommitId" | "evidence" | "summaryEnabled" | "isFirstReview">,
+    Pick<
+      OutputOptions,
+      "repo" | "baseCommitId" | "evidence" | "summaryEnabled" | "isFirstReview" | "skippedDiff"
+    >,
 ): string {
   const lines = ["## Pi Reviewer", ""];
   // Footer advertises regeneration, so it renders iff the block does (see buildReviewBody).
@@ -1173,6 +1221,11 @@ function formatForGitHub(
       "",
     );
   lines.push(sanitizeVisibleReviewText(result.summary));
+
+  // Harness-owned overflow notice lives in the findings summary (never the PR
+  // overview): skipped coverage must survive even a model that says nothing.
+  if (provenance.skippedDiff && provenance.skippedDiff.files.length > 0)
+    lines.push("", renderSkippedDiffNotice(provenance.skippedDiff));
 
   const actionable = result.comments.filter(
     (comment) => comment.severity === "WARN" || comment.severity === "CRITICAL",
@@ -1384,7 +1437,10 @@ function buildReviewBody(
   moved: ReviewComment[],
   allComments: ReviewComment[],
   provenance: ReRaiseProvenanceOptions &
-    Pick<OutputOptions, "repo" | "baseCommitId" | "evidence" | "summaryEnabled" | "isFirstReview">,
+    Pick<
+      OutputOptions,
+      "repo" | "baseCommitId" | "evidence" | "summaryEnabled" | "isFirstReview" | "skippedDiff"
+    >,
 ): string {
   const lines: string[] = [];
   // The footer advertises summary regeneration, so it renders if and only if
@@ -1400,6 +1456,8 @@ function buildReviewBody(
       "",
     );
   lines.push(sanitizeVisibleReviewText(result.summary));
+  if (provenance.skippedDiff && provenance.skippedDiff.files.length > 0)
+    lines.push("", renderSkippedDiffNotice(provenance.skippedDiff));
   const actionable = allComments.filter(
     (comment) => comment.severity === "WARN" || comment.severity === "CRITICAL",
   );
@@ -1624,7 +1682,9 @@ export async function sendOutput(options: OutputOptions): Promise<OutputMetadata
     // reaction is a function of state, not of which action the model declared,
     // so a model that writes a "nothing to flag" summary still gets one. The
     // emit-once overview is the one body a findings-free review still publishes,
-    // so the acknowledgement stands down for that run.
+    // so the acknowledgement stands down for that run. A body is still posted
+    // when files were skipped: a thumbs-up must never claim unreviewed files
+    // were covered.
     let outstandingFindings = new Set<number>(options.existingFindings?.map((f) => f.commentId));
     // Only reconcile when the model actually supplied updates: with none, the
     // outstanding set is unchanged and the call would be pure overhead.
@@ -1646,7 +1706,12 @@ export async function sendOutput(options: OutputOptions): Promise<OutputMetadata
     const postsSummaryBody = Boolean(
       options.summaryEnabled && options.isFirstReview && result.pr_summary?.trim(),
     );
-    if (result.comments.length === 0 && outstandingFindings.size === 0 && !postsSummaryBody) {
+    if (
+      result.comments.length === 0 &&
+      outstandingFindings.size === 0 &&
+      !postsSummaryBody &&
+      !(options.skippedDiff && options.skippedDiff.files.length > 0)
+    ) {
       await acknowledgeWithoutReview(options, true);
       return { commentIds: [], fallback: false };
     }

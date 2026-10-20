@@ -11,6 +11,7 @@ import {
   renderPrSummary,
   stripPrSummaryBlock,
   upsertPrSummaryBlock,
+  renderSkippedDiffNotice,
   sendOutput,
 } from "../../src/core/output.js";
 import { decodeBatchMarker } from "../../src/ci/batch.js";
@@ -3976,5 +3977,110 @@ describe("reconcileFindingUpdates", () => {
     });
     const fallback = JSON.parse((fetchMock.mock.calls[2][1] as { body: string }).body);
     expect(fallback.body).toContain(marker);
+  });
+});
+
+describe("renderSkippedDiffNotice", () => {
+  it("renders a WARNING callout with the shortfall and a collapsible file list", () => {
+    const body = renderSkippedDiffNotice({
+      files: ["backend/app.kt", "sql/mig.sql"],
+      cap: 100_000,
+      shortfall: 34_210,
+    });
+    expect(body).toContain("> [!WARNING]");
+    expect(body).toContain(
+      "Diff budget exceeded — 2 files were not reviewed (34,210 chars over the 100,000-char cap).",
+    );
+    expect(body).toContain("<details>");
+    expect(body).toContain("<summary>Skipped files (2)</summary>");
+    expect(body).toContain("- `backend/app.kt`");
+    expect(body).toContain("- `sql/mig.sql`");
+    // The callout stands alone: no nested details inside the quote.
+    expect(body).not.toContain("> <details>");
+  });
+
+  it("collapses the list past the display limit", () => {
+    const files = Array.from({ length: 55 }, (_, i) => `f${i}.ts`);
+    const body = renderSkippedDiffNotice({ files, cap: 100_000, shortfall: 1 });
+    expect(body).toContain("`f49.ts`");
+    expect(body).not.toContain("`f50.ts`");
+    expect(body).toContain("…and 5 more");
+  });
+
+  it("neutralizes backticks in untrusted paths", () => {
+    const body = renderSkippedDiffNotice({
+      files: ["a`.ts", "b.ts"],
+      cap: 100_000,
+      shortfall: 1,
+    });
+    expect(body).toContain("`a'.ts`");
+    expect(body).not.toContain("`a`.ts`");
+  });
+});
+
+describe("sendOutput skipped-diff notice", () => {
+  it("posts the formal notice in the review body when files were skipped", async () => {
+    const fetchMock = okFetch();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await sendOutput({
+      target: "comment",
+      structuredResult: {
+        summary: "LGTM",
+        comments: [
+          { file: "src/a.ts", line: 1, side: "RIGHT", severity: "WARN", body: "Handle it" },
+        ],
+      },
+      githubToken: "token123",
+      prNumber: 42,
+      repo: "owner/repo",
+      skippedDiff: { files: ["backend/app.kt"], cap: 100_000, shortfall: 5_432 },
+    });
+
+    const body = JSON.parse((fetchMock.mock.calls[0][1] as { body: string }).body).body as string;
+    expect(body).toContain("> [!WARNING]");
+    expect(body).toContain("5,432 chars over the 100,000-char cap");
+    expect(body).toContain("<summary>Skipped files (1)</summary>");
+    expect(body).toContain("- `backend/app.kt`");
+  });
+
+  it("posts a body instead of a thumbs-up when a clean review skipped files", async () => {
+    const fetchMock = okFetch();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await sendOutput({
+      target: "comment",
+      structuredResult: { summary: "Nothing to flag", comments: [] },
+      githubToken: "token123",
+      prNumber: 42,
+      repo: "owner/repo",
+      skippedDiff: { files: ["backend/app.kt"], cap: 100_000, shortfall: 5_432 },
+    });
+
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/issues/42/comments"))).toBe(
+      true,
+    );
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/reactions"))).toBe(false);
+    const body = JSON.parse((fetchMock.mock.calls[0][1] as { body: string }).body).body as string;
+    expect(body).toContain("> [!WARNING]");
+  });
+
+  it("renders the notice in the issue-comment fallback body", async () => {
+    const fetchMock = okFetch();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await sendOutput({
+      target: "comment",
+      structuredResult: { summary: "LGTM", comments: [] },
+      githubToken: "token123",
+      prNumber: 42,
+      repo: "owner/repo",
+      existingFindings: [{ commentId: 7 }],
+      skippedDiff: { files: ["sql/mig.sql"], cap: 100_000, shortfall: 99 },
+    });
+
+    const body = JSON.parse((fetchMock.mock.calls[0][1] as { body: string }).body).body as string;
+    expect(body).toContain("> [!WARNING]");
+    expect(body).toContain("- `sql/mig.sql`");
   });
 });

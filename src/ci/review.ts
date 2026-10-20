@@ -841,6 +841,21 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
     nonDiffChars: effectiveSystemPrompt.length,
   });
   const { diff, warning, skippedFiles } = filterDiff(rawDiff, maxDiffChars);
+  const skippedDiff =
+    skippedFiles && skippedFiles.length > 0
+      ? {
+          files: skippedFiles,
+          cap: maxDiffChars,
+          shortfall: Math.max(0, rawDiff.length - maxDiffChars),
+        }
+      : undefined;
+  logger.info("review.diff.budget", "Diff budget applied", {
+    cap: maxDiffChars,
+    reviewedChars: diff.length,
+    headroom: maxDiffChars - diff.length,
+    shortfall: skippedDiff?.shortfall ?? 0,
+    skipped: skippedFiles?.length ?? 0,
+  });
   if (warning) logger.warn("review.diff.warning", warning);
   const userPrompt = buildUserPrompt(diff, skippedFiles);
 
@@ -1545,6 +1560,7 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
       baseCommitId: options.fromSha,
       minSeverity: options.minSeverity as Severity | undefined,
       diff,
+      skippedDiff,
       batchMarker: options.batchMarker,
       existingFindings: options.activeFindings?.map((f) => ({
         commentId: f.commentId,
