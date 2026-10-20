@@ -106,6 +106,3 @@ pi install https://github.com/esafak/pi-reviewer
 
 Extension options, SSH mode, UI mode, diff-cap handling, and project-convention lookup are documented in [docs/local.md](./docs/local.md).
 
----
-
-See [TODO.md](./TODO.md) for the roadmap.

@@ -174,7 +174,3 @@ Any pi extension can inject additional context into the review prompt by listeni
 ### CI-only tools
 
 Web search, AI search, GitHub research, package lookup, and sandboxed code execution are CI-only — see [CI.md](../CI.md).
-
----
-
-See [TODO.md](../TODO.md) for the full roadmap.
