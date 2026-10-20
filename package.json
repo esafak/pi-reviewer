@@ -11,7 +11,8 @@
     "build:ui": "vp build --config ui/vite.config.ts",
     "dev:ui": "vp dev --config ui/vite.config.ts",
     "lint": "vp lint && tsx scripts/lint-graphql.ts",
-    "test": "vitest run"
+    "test": "vitest run",
+    "typecheck:types": "tsc --noEmit -p tsconfig.typecheck.json"
   },
   "dependencies": {
     "@earendil-works/pi-agent-core": "^1.0.0",

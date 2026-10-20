@@ -28,24 +28,44 @@ export type GitHubReadKind =
   | "release"
   | "repository"
   | "diff"
-  | "checks"
-  | "status";
-export interface ReadParams {
-  kind: GitHubReadKind;
+  | "checks";
+/** Options a read kind may accept beyond the common owner and repo fields. */
+export type ReadOption =
+  | "comments"
+  | "name_only"
+  | "log"
+  | "exit_status"
+  | "attempt"
+  | "offset"
+  | "limit";
+interface ReadBase {
   owner: string;
   repo: string;
-  path?: string;
-  ref?: string;
-  number?: number;
-  comments?: boolean;
-  name_only?: boolean;
-  branch?: string;
-  log?: boolean;
-  exit_status?: boolean;
-  attempt?: number;
-  offset?: number;
-  limit?: number;
 }
+/**
+ * The read contract, closed over the kind.
+ *
+ * The wire schema cannot express "this option belongs to that kind", so the
+ * contract is a union here: the parser narrows the flat arguments into it,
+ * and the client reads it without re-checking which fields belong where.
+ */
+export type ReadRequest =
+  | (ReadBase & { kind: "file"; path: string; ref?: string; offset?: number; limit?: number })
+  | (ReadBase & { kind: "pull_request"; number: number; comments?: boolean })
+  | (ReadBase & { kind: "issue"; number: number; comments?: boolean })
+  | (ReadBase & { kind: "discussion"; number: number })
+  | (ReadBase & {
+      kind: "run";
+      number: number;
+      log?: boolean;
+      exit_status?: boolean;
+      attempt?: number;
+    })
+  | (ReadBase & { kind: "workflow"; number: number })
+  | (ReadBase & { kind: "release"; number: number })
+  | (ReadBase & { kind: "repository" })
+  | (ReadBase & { kind: "diff"; number: number; name_only?: boolean })
+  | (ReadBase & { kind: "checks"; number: number });
 export interface GitHubResearchClient {
   search(
     kind: GitHubSearchKind,
@@ -53,7 +73,7 @@ export interface GitHubResearchClient {
     limit: number,
     options?: SearchOptions,
   ): Promise<Record<string, unknown>>;
-  read(params: ReadParams): Promise<Record<string, unknown>>;
+  read(params: ReadRequest): Promise<Record<string, unknown>>;
 }
 export interface SearchOptions {
   state?: "open" | "closed" | "merged" | "all";
@@ -78,7 +98,7 @@ export const MAX_GITHUB_RESULT_BYTES = MAX_GH_RESULT_BYTES,
   MAX_GITHUB_TOTAL_BYTES = MAX_GH_TOTAL_BYTES,
   MAX_GITHUB_REQUESTS = MAX_GH_REQUESTS,
   GITHUB_REQUEST_TIMEOUT_MS = GH_TIMEOUT_MS,
-  GITHUB_WALL_TIME_MS = GH_WALL_MS;
+  GITHUB_WAIT_TIME_MS = GH_WALL_MS;
 const listFields: Record<GitHubSearchKind, string> = {
   // Search JSON uses fullName/defaultBranch; repo view uses nameWithOwner/defaultBranchRef below.
   repositories: "name,fullName,description,url,visibility,defaultBranch",
@@ -213,10 +233,10 @@ function validateSearchOptions(kind: GitHubSearchKind, o: SearchOptions): void {
     if (o.order && !["asc", "desc"].includes(o.order)) fail();
   } else if (Object.keys(o).length) fail();
 }
-// Single source of truth for which read enrichments each kind accepts;
-// shared with tool.ts so the contract is defined once. Kinds without
-// enrichments map to [] so every GitHubReadKind stays compiler-checked.
-export const enrichmentsByKind: Record<GitHubReadKind, readonly string[]> = {
+// Single source of truth for which read options each kind accepts. The
+// literal types survive so the read union can be derived from this table and
+// checked against it at compile time.
+export const enrichmentsByKind = {
   file: ["offset", "limit"],
   pull_request: ["comments"],
   issue: ["comments"],
@@ -224,11 +244,12 @@ export const enrichmentsByKind: Record<GitHubReadKind, readonly string[]> = {
   run: ["log", "exit_status", "attempt"],
   workflow: [],
   release: [],
-  repository: ["branch"],
+  repository: [],
   diff: ["name_only"],
   checks: [],
-  status: [],
-};
+} as const satisfies Record<GitHubReadKind, readonly ReadOption[]>;
+// Kinds that identify their target without an item number.
+export const numberlessKinds = ["file", "repository"] as const satisfies readonly GitHubReadKind[];
 const searchCmd: Record<GitHubSearchKind, string> = {
   repositories: "repos",
   code: "code",
@@ -252,14 +273,41 @@ const record = (s: string): unknown => {
     throw new Error("gh returned invalid JSON");
   }
 };
+// The runner pins the child environment to GH_TOKEN and PATH, so the API
+// namespace the keyed probes use is always this host.
+const API_HOST = "github.com";
+interface CheckoutVisibility {
+  nameWithOwner: string;
+  url: string;
+  isPrivate: boolean;
+}
+const asCheckout = (value: unknown): CheckoutVisibility | undefined => {
+  if (!value || typeof value !== "object") return undefined;
+  const row = value as Record<string, unknown>;
+  if (
+    typeof row.isPrivate !== "boolean" ||
+    typeof row.nameWithOwner !== "string" ||
+    typeof row.url !== "string"
+  )
+    return undefined;
+  return { nameWithOwner: row.nameWithOwner, url: row.url, isPrivate: row.isPrivate };
+};
+const hostOf = (url: string): string | undefined => {
+  try {
+    return new URL(url).hostname.toLowerCase();
+  } catch {
+    return undefined;
+  }
+};
 
 export function createGitHubResearchClient(
   token: string,
   scope: GitHubResearchScope = "public",
-  _now: () => number = Date.now,
   exec?: Parameters<typeof createGhRunner>[1],
 ): GitHubResearchClient {
-  const gh = createGhRunner(token, exec);
+  // The checkout is pinned once: the list commands infer their repository from
+  // the working directory, so every subprocess must resolve the same one.
+  const gh = createGhRunner(token, exec, { cwd: process.cwd() });
   const call = async (args: string[]) => {
     try {
       return await gh(args);
@@ -273,6 +321,72 @@ export function createGitHubResearchClient(
     if (Buffer.byteLength(text) > MAX_GITHUB_RESULT_BYTES)
       throw new Error("GitHub research result exceeded the byte limit");
     return value;
+  };
+  // Visibility verdicts, keyed by lowercased owner/repo. Only a verified
+  // public verdict is retained: a private, malformed, or failed probe
+  // authorizes nothing and may be retried.
+  const publicVerdicts = new Map<string, true>();
+  const pendingProbes = new Map<string, Promise<boolean>>();
+  let checkout: CheckoutVisibility | undefined;
+  let pendingCheckout: Promise<CheckoutVisibility> | undefined;
+  const resolveCheckout = async (): Promise<CheckoutVisibility> => {
+    if (checkout) return checkout;
+    // Concurrent local searches join one resolution rather than each
+    // spending a request on the same checkout.
+    const pending = (pendingCheckout ??= (async () => {
+      const currentRepository = await bounded([
+        "repo",
+        "view",
+        "--json",
+        "isPrivate,nameWithOwner,url",
+      ]);
+      const resolved = asCheckout(currentRepository);
+      if (!resolved) throw new Error("Current repository visibility could not be verified");
+      if (resolved.isPrivate)
+        throw new Error("Private repositories are unavailable in public scope");
+      // The checkout's identity and its visibility come from one resolution,
+      // so they can never be paired across checkouts.
+      checkout = resolved;
+      // A verdict from another host says nothing about the API namespace the
+      // keyed probes use, so the caches stay separate.
+      if (hostOf(resolved.url) === API_HOST)
+        publicVerdicts.set(resolved.nameWithOwner.toLowerCase(), true);
+      return resolved;
+    })());
+    try {
+      return await pending;
+    } finally {
+      // A failed resolution is not retained, so the pending state clears and
+      // a later call retries it.
+      if (pendingCheckout === pending) pendingCheckout = undefined;
+    }
+  };
+  const probePublic = async (repo: string, memo?: Map<string, boolean>): Promise<boolean> => {
+    const key = repo.toLowerCase();
+    if (publicVerdicts.has(key)) return true;
+    const memoized = memo?.get(key);
+    if (memoized !== undefined) return memoized;
+    const pending = pendingProbes.get(key);
+    // A caller that joins a probe in flight takes its verdict, and records it
+    // in its own search memo so a later row does not probe again.
+    if (pending) {
+      const isPublic = await pending;
+      memo?.set(key, isPublic);
+      return isPublic;
+    }
+    const request = (async () => {
+      const privacy = String(await call(["api", `repos/${repo}`, "--jq", ".private"])).trim();
+      return privacy === "false";
+    })();
+    pendingProbes.set(key, request);
+    try {
+      const isPublic = await request;
+      if (isPublic) publicVerdicts.set(key, true);
+      memo?.set(key, isPublic);
+      return isPublic;
+    } finally {
+      pendingProbes.delete(key);
+    }
   };
   return {
     async search(kind, query, limit, options = {}) {
@@ -291,21 +405,7 @@ export function createGitHubResearchClient(
       const localKinds = kind === "runs" || kind === "workflows" || kind === "releases";
       if (localKinds && scope === "public") {
         // List commands infer their repository from cwd, so visibility must be resolved from that same checkout without -R.
-        const currentRepository = await bounded([
-          "repo",
-          "view",
-          "--json",
-          "isPrivate,nameWithOwner",
-        ]);
-        if (
-          !currentRepository ||
-          typeof currentRepository !== "object" ||
-          typeof (currentRepository as Record<string, unknown>).isPrivate !== "boolean" ||
-          typeof (currentRepository as Record<string, unknown>).nameWithOwner !== "string"
-        )
-          throw new Error("Current repository visibility could not be verified");
-        if ((currentRepository as { isPrivate: boolean }).isPrivate)
-          throw new Error("Private repositories are unavailable in public scope");
+        await resolveCheckout();
       }
       if (searchCmd[kind])
         args = [
@@ -396,6 +496,9 @@ export function createGitHubResearchClient(
         });
       } else if (scope === "public") {
         const visible = [];
+        // One probe per distinct repository per search, including for a
+        // negative verdict, which is not retained across operations.
+        const memo = new Map<string, boolean>();
         for (const item of items) {
           if (!item || typeof item !== "object") continue;
           const row = item as Record<string, unknown>;
@@ -418,8 +521,7 @@ export function createGitHubResearchClient(
               visible.push(item);
             continue;
           }
-          const privacy = String(await call(["api", `repos/${name}`, "--jq", ".private"])).trim();
-          if (privacy === "false") visible.push(item);
+          if (await probePublic(name, memo)) visible.push(item);
         }
         items = visible;
       }
@@ -431,35 +533,26 @@ export function createGitHubResearchClient(
     async read(p) {
       if (!/^[A-Za-z0-9-]{1,39}$/.test(p.owner) || !/^[A-Za-z0-9_.-]{1,100}$/.test(p.repo))
         throw new Error("GitHub repository identifier is invalid");
-      const repo = `${p.owner}/${p.repo}`,
-        num = p.number;
-      const enrichments = [
-        "comments",
-        "name_only",
-        "branch",
-        "log",
-        "exit_status",
-        "attempt",
-        "offset",
-        "limit",
-      ] as const;
-      if (p.branch !== undefined && !validRef(p.branch))
-        throw new Error("GitHub branch ref is invalid");
-      if (p.attempt !== undefined && (!Number.isInteger(p.attempt) || p.attempt < 1))
-        throw new Error("GitHub run attempt is invalid");
-      if ((p.offset !== undefined || p.limit !== undefined) && p.kind !== "file")
-        throw new Error("Offset and limit are only valid for file reads");
+      const repo = `${p.owner}/${p.repo}`;
+      // Value validation, not shape: which fields belong to which kind is
+      // settled by the parser before a request reaches the client.
+      if (p.kind === "file") {
+        if (p.ref !== undefined && !validRef(p.ref)) throw new Error("GitHub file ref is invalid");
+        if (
+          (p.offset !== undefined && (!Number.isInteger(p.offset) || p.offset < 1)) ||
+          (p.limit !== undefined &&
+            (!Number.isInteger(p.limit) || p.limit < 1 || p.limit > MAX_RANGE_LINES))
+        )
+          throw new Error("GitHub file range is invalid");
+      }
       if (
-        (p.offset !== undefined && (!Number.isInteger(p.offset) || p.offset < 1)) ||
-        (p.limit !== undefined &&
-          (!Number.isInteger(p.limit) || p.limit < 1 || p.limit > MAX_RANGE_LINES))
+        p.kind === "run" &&
+        p.attempt !== undefined &&
+        (!Number.isInteger(p.attempt) || p.attempt < 1)
       )
-        throw new Error("GitHub file range is invalid");
-      if (enrichments.some((k) => p[k] !== undefined && !enrichmentsByKind[p.kind].includes(k)))
-        throw new Error("GitHub read option is invalid for this kind");
+        throw new Error("GitHub run attempt is invalid");
       if (scope === "public") {
-        const privacy = String(await call(["api", `repos/${repo}`, "--jq", ".private"])).trim();
-        if (privacy !== "false")
+        if (!(await probePublic(repo)))
           throw new Error("Private repositories are unavailable in public scope");
       }
       let result: unknown;
@@ -468,16 +561,14 @@ export function createGitHubResearchClient(
           "repo",
           "view",
           repo,
-          ...(p.branch ? ["--branch", p.branch] : []),
           "--json",
           "name,nameWithOwner,description,url,visibility,defaultBranchRef",
         ]);
       else if (p.kind === "pull_request") {
-        if (!num) throw new Error("An issue number is required for this read");
         result = await bounded([
           "pr",
           "view",
-          String(num),
+          String(p.number),
           "--repo",
           repo,
           "--json",
@@ -486,11 +577,10 @@ export function createGitHubResearchClient(
             : "number,title,body,state,url,headRefName,baseRefName,updatedAt,isDraft",
         ]);
       } else if (p.kind === "issue") {
-        if (!num) throw new Error("An issue number is required for this read");
         result = await bounded([
           "issue",
           "view",
-          String(num),
+          String(p.number),
           "--repo",
           repo,
           "--json",
@@ -573,11 +663,10 @@ export function createGitHubResearchClient(
           };
         }
       } else if (p.kind === "diff") {
-        if (!num) throw new Error("A pull request number is required for this read");
         result = await call([
           "pr",
           "diff",
-          String(num),
+          String(p.number),
           "--repo",
           repo,
           ...(p.name_only ? ["--name-only"] : []),
@@ -586,26 +675,17 @@ export function createGitHubResearchClient(
         result = await bounded([
           "pr",
           "checks",
-          String(num),
+          String(p.number),
           "--repo",
           repo,
           "--json",
           "name,state,workflow",
         ]);
-      else if (p.kind === "status")
-        result = await bounded([
-          "pr",
-          "status",
-          "--repo",
-          repo,
-          "--json",
-          "createdAt,headRefName,isDraft,number,state,statusCheckRollup,title,url",
-        ]);
       else if (p.kind === "run") {
         const args = [
           "run",
           "view",
-          String(num),
+          String(p.number),
           "--repo",
           repo,
           ...(p.log ? ["--log"] : []),
@@ -617,28 +697,32 @@ export function createGitHubResearchClient(
       } else if (p.kind === "workflow")
         result = await bounded([
           "api",
-          `repos/${repo}/actions/workflows/${num}`,
+          `repos/${repo}/actions/workflows/${p.number}`,
           "--jq",
           "{id,name,state,path,url,html_url}",
         ]);
       else if (p.kind === "release")
         result = await bounded([
           "api",
-          `repos/${repo}/releases/${num}`,
+          `repos/${repo}/releases/${p.number}`,
           "--jq",
           // A single release payload has no reliable latest-release indicator, so omit isLatest.
           "{tagName:.tag_name,name,isDraft:.draft,url:.html_url,publishedAt:.published_at}",
         ]);
       else if (p.kind === "discussion") {
-        if (!num) throw new Error("A discussion number is required for this read");
         result = await bounded([
           "api",
-          `repos/${repo}/discussions/${num}`,
+          `repos/${repo}/discussions/${p.number}`,
           "--jq",
           "{number,title,body,html_url,created_at,updated_at,category:.category.name,user:.user.login}",
         ]);
       } else throw new Error("Unsupported GitHub read kind");
-      if (p.comments && result && typeof result === "object") {
+      if (
+        (p.kind === "pull_request" || p.kind === "issue") &&
+        p.comments &&
+        result &&
+        typeof result === "object"
+      ) {
         const row = result as Record<string, unknown>;
         if (typeof row.comments === "string")
           row.comments = truncateUtf8WithMarker(row.comments, 4 * 1024);

@@ -1,0 +1,241 @@
+{
+  "pr-view": {
+    "argv": [
+      "gh",
+      "pr",
+      "view",
+      "169",
+      "--repo",
+      "esafak/pi-reviewer",
+      "--json",
+      "number,title,body,state,url,headRefName,baseRefName,updatedAt,isDraft"
+    ],
+    "exitCode": 0,
+    "stdout": "pr-view",
+    "stderr": "",
+    "capturedAt": "2026-10-20T21:52:20Z"
+  },
+  "pr-view-comments": {
+    "argv": [
+      "gh",
+      "pr",
+      "view",
+      "169",
+      "--repo",
+      "esafak/pi-reviewer",
+      "--json",
+      "number,title,body,comments,state,url,headRefName,baseRefName,updatedAt,isDraft"
+    ],
+    "exitCode": 0,
+    "stdout": "pr-view-comments",
+    "stderr": "",
+    "capturedAt": "2026-10-20T21:52:20Z"
+  },
+  "issue-view": {
+    "argv": [
+      "gh",
+      "issue",
+      "view",
+      "4",
+      "--repo",
+      "esafak/pi-reviewer",
+      "--json",
+      "number,title,body,state,url,updatedAt"
+    ],
+    "exitCode": 0,
+    "stdout": "issue-view",
+    "stderr": "",
+    "capturedAt": "2026-10-20T21:52:20Z"
+  },
+  "issue-view-comments": {
+    "argv": [
+      "gh",
+      "issue",
+      "view",
+      "4",
+      "--repo",
+      "esafak/pi-reviewer",
+      "--json",
+      "number,title,body,comments,state,url,updatedAt"
+    ],
+    "exitCode": 0,
+    "stdout": "issue-view-comments",
+    "stderr": "",
+    "capturedAt": "2026-10-20T21:52:20Z"
+  },
+  "discussion": {
+    "argv": [
+      "gh",
+      "api",
+      "repos/cli/cli/discussions/2618",
+      "--jq",
+      "{number,title,body,html_url,created_at,updated_at,category:.category.name,user:.user.login}"
+    ],
+    "exitCode": 0,
+    "stdout": "discussion",
+    "stderr": "",
+    "capturedAt": "2026-10-20T21:52:20Z"
+  },
+  "run-view": {
+    "argv": [
+      "gh",
+      "run",
+      "view",
+      "39367612741",
+      "--repo",
+      "esafak/pi-reviewer",
+      "--json",
+      "databaseId,name,status,conclusion,url,headBranch,headSha"
+    ],
+    "exitCode": 0,
+    "stdout": "run-view",
+    "stderr": "",
+    "capturedAt": "2026-10-20T21:52:20Z"
+  },
+  "run-log": {
+    "argv": [
+      "gh",
+      "run",
+      "view",
+      "39367612741",
+      "--repo",
+      "esafak/pi-reviewer",
+      "--log"
+    ],
+    "exitCode": 0,
+    "stdout": "run-log",
+    "stderr": "",
+    "capturedAt": "2026-10-20T21:52:20Z"
+  },
+  "run-exit-status": {
+    "argv": [
+      "gh",
+      "run",
+      "view",
+      "39367612741",
+      "--repo",
+      "esafak/pi-reviewer",
+      "--exit-status",
+      "--json",
+      "databaseId,name,status,conclusion,url,headBranch,headSha"
+    ],
+    "exitCode": 0,
+    "stdout": "run-exit-status",
+    "stderr": "",
+    "capturedAt": "2026-10-20T21:52:20Z"
+  },
+  "run-log-exit-status": {
+    "argv": [
+      "gh",
+      "run",
+      "view",
+      "39367612741",
+      "--repo",
+      "esafak/pi-reviewer",
+      "--log",
+      "--exit-status"
+    ],
+    "exitCode": 1,
+    "stdout": "run-log",
+    "stderr": "",
+    "capturedAt": "2026-10-20T21:52:20Z"
+  },
+  "workflow": {
+    "argv": [
+      "gh",
+      "api",
+      "repos/esafak/pi-reviewer/actions/workflows/347788971",
+      "--jq",
+      "{id,name,state,path,url,html_url}"
+    ],
+    "exitCode": 0,
+    "stdout": "workflow",
+    "stderr": "",
+    "capturedAt": "2026-10-20T21:52:20Z"
+  },
+  "release": {
+    "argv": [
+      "gh",
+      "api",
+      "repos/esafak/pi-reviewer/releases/417991498",
+      "--jq",
+      "{tagName:.tag_name,name,isDraft:.draft,url:.html_url,publishedAt:.published_at}"
+    ],
+    "exitCode": 0,
+    "stdout": "release",
+    "stderr": "",
+    "capturedAt": "2026-10-20T21:52:20Z"
+  },
+  "repo-view": {
+    "argv": [
+      "gh",
+      "repo",
+      "view",
+      "esafak/pi-reviewer",
+      "--json",
+      "name,nameWithOwner,description,url,visibility,defaultBranchRef"
+    ],
+    "exitCode": 0,
+    "stdout": "repo-view",
+    "stderr": "",
+    "capturedAt": "2026-10-20T21:52:20Z"
+  },
+  "pr-diff": {
+    "argv": [
+      "gh",
+      "pr",
+      "diff",
+      "169",
+      "--repo",
+      "esafak/pi-reviewer"
+    ],
+    "exitCode": 0,
+    "stdout": "pr-diff",
+    "stderr": "",
+    "capturedAt": "2026-10-20T21:52:20Z"
+  },
+  "pr-diff-names": {
+    "argv": [
+      "gh",
+      "pr",
+      "diff",
+      "169",
+      "--repo",
+      "esafak/pi-reviewer",
+      "--name-only"
+    ],
+    "exitCode": 0,
+    "stdout": "pr-diff-names",
+    "stderr": "",
+    "capturedAt": "2026-10-20T21:52:20Z"
+  },
+  "pr-checks": {
+    "argv": [
+      "gh",
+      "pr",
+      "checks",
+      "169",
+      "--repo",
+      "esafak/pi-reviewer",
+      "--json",
+      "name,state,workflow"
+    ],
+    "exitCode": 0,
+    "stdout": "pr-checks",
+    "stderr": "",
+    "capturedAt": "2026-10-20T21:52:20Z"
+  },
+  "file-contents": {
+    "argv": [
+      "gh",
+      "api",
+      "repos/esafak/pi-reviewer/contents/package.json",
+      "--jq",
+      "{path:.path,url:.html_url,content:.content}"
+    ],
+    "exitCode": 0,
+    "stdout": "file-contents",
+    "stderr": "",
+    "capturedAt": "2026-10-20T21:52:20Z"
+  }
+}
