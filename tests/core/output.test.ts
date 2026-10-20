@@ -4083,4 +4083,58 @@ describe("sendOutput skipped-diff notice", () => {
     expect(body).toContain("> [!WARNING]");
     expect(body).toContain("- `sql/mig.sql`");
   });
+
+  it("posts the notice instead of a thumbs-up when the model chooses none", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        text: vi.fn().mockResolvedValue(JSON.stringify({ id: 9 })),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        text: vi.fn().mockResolvedValue(JSON.stringify({ head: { sha: "head" } })),
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await sendOutput({
+      target: "comment",
+      none: true,
+      githubToken: "token123",
+      prNumber: 42,
+      repo: "owner/repo",
+      commitId: "head",
+      skippedDiff: { files: ["backend/app.kt"], cap: 100_000, shortfall: 5_432 },
+    });
+
+    const reviewCall = fetchMock.mock.calls.find(([url]) =>
+      String(url).includes("/pulls/42/reviews"),
+    );
+    expect(reviewCall).toBeDefined();
+    const body = JSON.parse((reviewCall![1] as { body: string }).body).body as string;
+    expect(body).toContain("> [!WARNING]");
+    expect(body).toContain("- `backend/app.kt`");
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/reactions"))).toBe(false);
+  });
+
+  it("posts the notice as an issue comment when none has no commit", async () => {
+    const fetchMock = okFetch();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await sendOutput({
+      target: "comment",
+      none: true,
+      githubToken: "token123",
+      prNumber: 42,
+      repo: "owner/repo",
+      skippedDiff: { files: ["sql/mig.sql"], cap: 100_000, shortfall: 99 },
+    });
+
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/issues/42/comments"))).toBe(
+      true,
+    );
+    const body = JSON.parse((fetchMock.mock.calls[0][1] as { body: string }).body).body as string;
+    expect(body).toContain("> [!WARNING]");
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/reactions"))).toBe(false);
+  });
 });

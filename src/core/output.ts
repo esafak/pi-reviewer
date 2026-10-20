@@ -1606,7 +1606,39 @@ export async function sendOutput(options: OutputOptions): Promise<OutputMetadata
       if (typeof options.prNumber !== "number")
         throw new Error("PR number is required to post a comment");
       if (!options.repo) throw new Error("Repository (owner/repo) is required to post a comment");
-      await acknowledgeWithoutReview(options, (options.existingFindings?.length ?? 0) === 0);
+      if (options.skippedDiff && options.skippedDiff.files.length > 0) {
+        // The model saw a truncated diff, so its "nothing to report" is not
+        // an all-clear: post the harness-owned notice instead of silently
+        // reacting, and record the range without a thumbs-up.
+        const repo = options.repo;
+        const prNumber = options.prNumber;
+        const noticeBody = [options.batchMarker, renderSkippedDiffNotice(options.skippedDiff)]
+          .filter(Boolean)
+          .join("\n\n");
+        if (options.commitId) {
+          await new GitHubClient(options.githubToken).createReview(
+            repo,
+            prNumber,
+            noticeBody,
+            options.commitId,
+            [],
+          );
+        } else {
+          await (
+            await fetch(`https://api.github.com/repos/${repo}/issues/${prNumber}/comments`, {
+              method: "POST",
+              headers: {
+                Authorization: `Bearer ${options.githubToken}`,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({ body: noticeBody }),
+            })
+          ).text();
+        }
+        await acknowledgeWithoutReview({ ...options, batchMarker: undefined }, false);
+      } else {
+        await acknowledgeWithoutReview(options, (options.existingFindings?.length ?? 0) === 0);
+      }
     } else {
       console.log("[pi-reviewer] no findings to report");
     }
