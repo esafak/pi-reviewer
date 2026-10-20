@@ -1,5 +1,5 @@
 import type { AgentTool } from "@earendil-works/pi-agent-core";
-import { Type, type Static } from "@earendil-works/pi-ai";
+import { Type, type Static, type TSchema } from "@earendil-works/pi-ai";
 
 import {
   MAX_COMMAND_LENGTH,
@@ -55,7 +55,7 @@ export function createCodeExecTools(
     runner?: typeof runSandboxed;
     backend?: SandboxBackend;
   } = {},
-): AgentTool<any, any>[] {
+): AgentTool<TSchema, unknown>[] {
   if (!config.enabled) return [];
   const cwd = opts.cwd ?? process.cwd();
   const state = opts.state ?? { calls: 0, wallMs: 0 };
@@ -73,7 +73,7 @@ export function createCodeExecTools(
         }
       : resolveBackend());
 
-  const tool: AgentTool<any, any> = {
+  const tool: AgentTool<TSchema, unknown> = {
     name: CODE_EXEC_TOOL_NAME,
     label: CODE_EXEC_TOOL_NAME,
     description:

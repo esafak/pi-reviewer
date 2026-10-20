@@ -1,5 +1,5 @@
 import type { AgentTool } from "@earendil-works/pi-agent-core";
-import { Type, type Static } from "@earendil-works/pi-ai";
+import { Type, type Static, type TSchema } from "@earendil-works/pi-ai";
 import { createRegistryClient } from "./client.js";
 import { hasControlCharacters, MAX_TOOL_CONTENT_BYTES } from "./helpers.js";
 import type { RegistryClient, RegistryLookupParams } from "./types.js";
@@ -101,8 +101,8 @@ function safeFailure(error: unknown): string {
 
 export function createRegistryTools(
   client: RegistryClient = createRegistryClient(),
-): AgentTool<any, any>[] {
-  const tool: AgentTool<any, any> = {
+): AgentTool<TSchema, unknown>[] {
+  const tool: AgentTool<TSchema, unknown> = {
     name: PACKAGE_LOOKUP_TOOL_NAME,
     label: PACKAGE_LOOKUP_TOOL_NAME,
     description:

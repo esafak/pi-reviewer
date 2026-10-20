@@ -766,6 +766,41 @@ describe("event normalization", () => {
     expect(isEventRangeConsistent(event, "old", "new")).toBe(true);
     expect(isEventRangeConsistent(event, "wrong", "new")).toBe(false);
   });
+  it("ignores the fields of a malformed webhook payload it cannot use", () => {
+    // A webhook is a stranger: every field is checked rather than assumed.
+    // A "created" action whose comment is not an object is not a reply, and
+    // not a pull-request action either: it is an event this code cannot read.
+    expect(() =>
+      normalizeEvent({
+        action: "created",
+        comment: "not a comment",
+        pull_request: { number: 3, head: { sha: "h" } },
+        sender: { login: "x", type: "User" },
+      }),
+    ).toThrow("Unsupported pull_request action: created");
+    expect(
+      normalizeEvent({
+        action: "opened",
+        // A user that is not an object carries no login.
+        pull_request: { number: 3, head: { sha: "h", repo: { full_name: "o/f" } } },
+        sender: ["not", "an", "object"],
+      }),
+    ).toMatchObject({ kind: "opened", actor: { login: undefined, type: undefined } });
+    expect(
+      normalizeEvent({
+        action: "opened",
+        pull_request: { number: 3, head: { sha: "h", repo: { full_name: "o/f" } } },
+        sender: { login: 42, type: {} },
+      }),
+    ).toMatchObject({ kind: "opened", actor: { login: undefined, type: undefined } });
+    // A non-string target head is dropped rather than passed through.
+    expect(normalizeEvent({ inputs: { "pr-number": 7, "target-head": 42 } })).toMatchObject({
+      kind: "manual",
+      pr: 7,
+      targetHead: undefined,
+    });
+  });
+
   it("normalizes review-comment replies without treating them as reviews", () => {
     const reply = normalizeEvent({
       action: "created",

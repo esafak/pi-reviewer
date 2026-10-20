@@ -82,10 +82,16 @@ export async function resolveLspRoots(
  * Mirrors pi-lsp's own pre-root include check: the file or its basename must
  * match before root discovery runs.
  */
+/** The include and exclude globs a server matches files through. */
+interface RootEntry {
+  include?: string[];
+  exclude?: string[];
+}
+
 function couldMatchBeforeRoot(
   file: string,
   cwd: string,
-  entry: { include?: string[]; exclude?: string[] },
+  entry: RootEntry,
   glob: PiLspGlob,
 ): boolean {
   const relative = path.relative(cwd, file).split(path.sep).join("/") || ".";

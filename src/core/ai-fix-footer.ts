@@ -1,3 +1,5 @@
+import { SEVERITY_EMOJI, type Severity } from "./severity.js";
+
 export const AI_FIX_FOOTER =
   "For each issue above, determine whether it is valid. If so, fix it iteratively with one reviewer agent until convergence.";
 
@@ -5,10 +7,15 @@ export interface AiFixContext {
   file: string;
   line: number;
   side?: string;
-  severity?: string;
+  severity?: Severity;
   repository?: string;
   commitId?: string;
   baseCommitId?: string;
+}
+
+/** How much of a finding's location the summary shows. */
+export interface AiFixSummaryOptions {
+  includeLocation?: boolean;
 }
 
 export interface AiFixFinding {
@@ -27,8 +34,6 @@ const AI_FIX_CONTEXT = /^\*\*Context:\*\*[^\n]*\n\s*\n?/;
 export const MEANINGFUL_PROSE_PATTERN =
   "^(?![\\s😀🧪\\u200D\\u20E3\\uFE0F\\uD83C-\\uD83E\\uDC00-\\uDFFF\\u00A9\\u00AE\\u203C\\u2049\\u2122\\u2139\\u2190-\\u21FF\\u2300-\\u23FF\\u25A0-\\u27BF\\u2B00-\\u2BFF\\u3030\\u303D\\u3297\\u3299]+$)[\\s\\S]+$";
 const MEANINGFUL_PROSE = new RegExp(MEANINGFUL_PROSE_PATTERN);
-
-const SEVERITY_EMOJI: Record<string, string> = { CRITICAL: "🔴", WARN: "🟡", INFO: "🔵" };
 
 /** Repairs line-break escapes emitted by models that double-encode JSON text. */
 export function normalizeMarkdownText(text: string): string {
@@ -62,9 +67,9 @@ export function normalizeAiFixBody(body: string): string {
 export function renderFindingSummary(
   context: AiFixContext,
   body: string,
-  options: { includeLocation?: boolean } = {},
+  options: AiFixSummaryOptions = {},
 ): string {
-  const emoji = SEVERITY_EMOJI[context.severity ?? ""] ?? "";
+  const emoji = context.severity ? SEVERITY_EMOJI[context.severity] : "";
   const location = `${context.file}:${context.line}${context.side ? ` · ${context.side}` : ""}`;
   const revision =
     context.repository && context.commitId

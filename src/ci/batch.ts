@@ -346,6 +346,12 @@ function safeNumber(value: unknown): number | undefined {
     return undefined;
   }
 }
+/** The actor a webhook event is attributed to. */
+export interface EventActor {
+  login?: string;
+  association?: string;
+  type?: string;
+}
 export interface Event {
   kind: EventKind;
   pr?: number;
@@ -358,10 +364,132 @@ export interface Event {
   fork: boolean;
   commentId?: number;
   parentCommentId?: number;
-  actor?: { login?: string; association?: string; type?: string };
+  actor?: EventActor;
 }
+/** A webhook actor, as GitHub sends it. */
+interface WebhookUser {
+  login?: string;
+  type?: string;
+}
+/** The repository a webhook head or base points at. */
+interface WebhookRepository {
+  full_name?: string;
+}
+/** The head or base of a pull request in a webhook payload. */
+interface WebhookRef {
+  sha?: string;
+  repo?: WebhookRepository;
+}
+/** A comment in a webhook payload. */
+interface WebhookComment {
+  id?: number;
+  in_reply_to_id?: number;
+  body?: string;
+  author_association?: string;
+  user?: WebhookUser;
+}
+/** The pull request in a webhook payload. */
+interface WebhookPullRequest {
+  number?: number;
+  draft?: boolean;
+  head?: WebhookRef;
+  base?: WebhookRef;
+}
+/** The pull-request marker an issue carries when it is one. */
+interface WebhookIssuePullRequest {
+  url?: string;
+}
+/** The issue in a webhook payload. */
+interface WebhookIssue {
+  number?: number;
+  draft?: boolean;
+  pull_request?: WebhookIssuePullRequest;
+}
+/** The fields a webhook payload is read through. */
+interface WebhookPayload {
+  action?: string;
+  before?: string;
+  after?: string;
+  comment?: WebhookComment;
+  pull_request?: WebhookPullRequest;
+  issue?: WebhookIssue;
+  sender?: WebhookUser;
+  inputs?: Record<string, unknown>;
+}
+const asRecord = (value: unknown): Record<string, unknown> | undefined =>
+  value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+const asString = (value: unknown): string | undefined =>
+  typeof value === "string" ? value : undefined;
+const asNumber = (value: unknown): number | undefined =>
+  typeof value === "number" ? value : undefined;
+const asBoolean = (value: unknown): boolean | undefined =>
+  typeof value === "boolean" ? value : undefined;
+const asUser = (value: unknown): WebhookUser | undefined => {
+  const record = asRecord(value);
+  if (!record) return undefined;
+  return { login: asString(record.login), type: asString(record.type) };
+};
+/**
+ * Narrows a webhook payload to the fields the events are read through.
+ *
+ * The payload arrives untyped, so every field is checked rather than
+ * assumed: a webhook is a stranger, and the shape it claims is not a shape
+ * this code gets to rely on.
+ */
+const webhookPayload = (payload: unknown): WebhookPayload => {
+  const root = asRecord(payload);
+  if (!root) return {};
+  const comment = asRecord(root.comment);
+  const pullRequest = asRecord(root.pull_request);
+  const issue = asRecord(root.issue);
+  const head = asRecord(pullRequest?.head);
+  const base = asRecord(pullRequest?.base);
+  const headRepo = asRecord(head?.repo);
+  const baseRepo = asRecord(base?.repo);
+  const issuePullRequest = asRecord(issue?.pull_request);
+  return {
+    action: asString(root.action),
+    before: asString(root.before),
+    after: asString(root.after),
+    inputs: asRecord(root.inputs),
+    sender: asUser(root.sender),
+    comment: comment
+      ? {
+          id: asNumber(comment.id),
+          in_reply_to_id: asNumber(comment.in_reply_to_id),
+          body: asString(comment.body),
+          author_association: asString(comment.author_association),
+          user: asUser(comment.user),
+        }
+      : undefined,
+    pull_request: pullRequest
+      ? {
+          number: asNumber(pullRequest.number),
+          draft: asBoolean(pullRequest.draft),
+          head: head
+            ? {
+                sha: asString(head.sha),
+                repo: headRepo ? { full_name: asString(headRepo.full_name) } : undefined,
+              }
+            : undefined,
+          base: base
+            ? { repo: baseRepo ? { full_name: asString(baseRepo.full_name) } : undefined }
+            : undefined,
+        }
+      : undefined,
+    issue: issue
+      ? {
+          number: asNumber(issue.number),
+          draft: asBoolean(issue.draft),
+          pull_request: issuePullRequest ? { url: asString(issuePullRequest.url) } : undefined,
+        }
+      : undefined,
+  };
+};
 export function normalizeEvent(payload: unknown): Event {
-  const p = (payload ?? {}) as Record<string, any>;
+  const p = webhookPayload(payload);
   const pr = p.pull_request;
   if (p.action === "created" && p.comment && pr)
     return {
@@ -379,7 +507,7 @@ export function normalizeEvent(payload: unknown): Event {
       },
     };
   if (pr) {
-    if (!["opened", "synchronize", "reopened", "ready_for_review"].includes(p.action))
+    if (!["opened", "synchronize", "reopened", "ready_for_review"].includes(p.action ?? ""))
       throw new Error(`Unsupported pull_request action: ${String(p.action)}`);
     return {
       kind: p.action === "opened" ? "opened" : "synchronize",
@@ -410,7 +538,7 @@ export function normalizeEvent(payload: unknown): Event {
   return {
     kind: "manual",
     pr: safeNumber(inputs["pr-number"] ?? inputs.pr_number),
-    targetHead: inputs["target-head"],
+    targetHead: asString(inputs["target-head"]),
     draft: false,
     fork: false,
   };

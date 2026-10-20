@@ -232,6 +232,89 @@ describe("GitHubClient", () => {
       ),
     ).toBe(true);
   });
+  it("rejects a review thread response the schema allows but the read needs", async () => {
+    // The schema makes the repository, the pull request, the node, and a
+    // comment id nullable. A read that cannot use what came back says so
+    // instead of returning incomplete threads.
+    const withData = (data: unknown) => vi.fn().mockResolvedValue(response({ data }));
+    vi.stubGlobal("fetch", withData({ repository: null }));
+    await expect(new GitHubClient("token").listThreads("owner/repo", 1)).rejects.toThrow(
+      "GitHub returned no repository",
+    );
+    vi.stubGlobal(
+      "fetch",
+      withData({
+        repository: {
+          pullRequest: {
+            reviewThreads: { nodes: null, pageInfo: { hasNextPage: false, endCursor: null } },
+          },
+        },
+      }),
+    );
+    await expect(new GitHubClient("token").listThreads("owner/repo", 1)).rejects.toThrow(
+      "GitHub returned no review threads",
+    );
+    vi.stubGlobal(
+      "fetch",
+      withData({
+        repository: {
+          pullRequest: {
+            reviewThreads: {
+              nodes: [
+                {
+                  id: "t1",
+                  isResolved: false,
+                  comments: {
+                    nodes: [{ id: null }],
+                    pageInfo: { hasNextPage: false, endCursor: null },
+                  },
+                },
+              ],
+              pageInfo: { hasNextPage: false, endCursor: null },
+            },
+          },
+        },
+      }),
+    );
+    await expect(new GitHubClient("token").listThreads("owner/repo", 1)).rejects.toThrow(
+      "GitHub returned a review-thread comment without a usable id",
+    );
+  });
+  it("rejects a comment page whose node is not a review thread", async () => {
+    // `comments` is selected inside an inline fragment on
+    // `PullRequestReviewThread`, so another node type does not carry it.
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        response({
+          data: {
+            repository: {
+              pullRequest: {
+                reviewThreads: {
+                  nodes: [
+                    {
+                      id: "t1",
+                      isResolved: false,
+                      comments: {
+                        nodes: [{ id: 1 }],
+                        pageInfo: { hasNextPage: true, endCursor: "c1" },
+                      },
+                    },
+                  ],
+                  pageInfo: { hasNextPage: false, endCursor: null },
+                },
+              },
+            },
+          },
+        }),
+      )
+      .mockResolvedValueOnce(response({ data: { node: {} } }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(new GitHubClient("token").listThreads("owner/repo", 1)).rejects.toThrow(
+      "GitHub returned no comments for the review thread",
+    );
+  });
+
   it("keeps the fullDatabaseId alias that normalizeThreadComment reads", async () => {
     // GitHub returns the numeric id under `id` because `fullDatabaseId` is aliased.
     // Selecting both as `id fullDatabaseId` would put the opaque node id in `comment.id`
