@@ -1,0 +1,14 @@
+dist-ui/index.html
+  h_ea91e2db23540f 7,9,12,14-23,25,31-34,37-47,49-50,63-65,81-84,87-90,92,94,104,122
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "a2bb5f458898ef47ea7804ed324b8f28c7600af1",
+  "prompts": {},
+  "humans": {
+    "h_ea91e2db23540f": {
+      "author": "Emre Şafak <3928300+esafak@users.noreply.github.com>"
+    }
+  }
+}
