@@ -2,11 +2,10 @@
  * Built-in LSP servers for CI reviews, grouped per language.
  *
  * A group owns the file matching rules of one language; its candidates are
- * alternative servers for that language, listed in preference order. Exactly
- * one candidate per group runs — the first one whose binary is available on
- * the runner — so a repository never gets two servers reporting on the same
- * file, and a runner with any one of them installed still gets semantic
- * context for that language.
+ * alternative servers for that language, listed in preference order. Among
+ * installed candidates, the one that serves the most changed files is
+ * selected, with preference order breaking ties. At most one candidate is
+ * selected per group; none is selected when no candidate binary is available.
  *
  * A candidate carries only what makes it a different server (`bin`, `args`,
  * timeouts); everything else comes from the group, so the matching rules stay
@@ -37,7 +36,7 @@ export interface LspGroup {
   include: string[];
   rootMarkers: string[];
   languageIdByExtension: Record<string, string>;
-  /** Candidate ids in preference order — the first available one serves the group. */
+  /** Candidate ids in preference order, used to break ties in served changed-file coverage. */
   candidates: readonly string[];
 }
 
