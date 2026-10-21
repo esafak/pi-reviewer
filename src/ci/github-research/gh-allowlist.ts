@@ -69,7 +69,12 @@ function flagSpec(
   return profile.flags[flag as GhFlag];
 }
 // Typed inputs are converted to fixed argv by the client; this layer verifies command, flag, and value combinations.
-const commands: Record<GhCommand, GhCommandProfile> = {
+/**
+ * The commands the transport may invoke, with the flags and `--json` field
+ * lists it sends for each. This is the contract the CLI contract tests check
+ * against the `gh` binary's own introspection.
+ */
+export const ghCommandProfiles: Record<GhCommand, GhCommandProfile> = {
   "search repos": {
     flags: {
       "--limit": "value",
@@ -237,7 +242,7 @@ function subcommandsFor(group: string): readonly string[] | undefined {
 /** The profile for a group and command pair, or undefined when the pair is not allowed. */
 function profileFor(group: string, command: string): GhCommandProfile | undefined {
   const key = `${group} ${command}`;
-  return Object.hasOwn(commands, key) ? commands[key as GhCommand] : undefined;
+  return Object.hasOwn(ghCommandProfiles, key) ? ghCommandProfiles[key as GhCommand] : undefined;
 }
 
 /** The flags whose values are drawn from a fixed set. */
