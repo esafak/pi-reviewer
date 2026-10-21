@@ -99,6 +99,11 @@ inputs:
     required: false
     default: ""
 
+  url-reader:
+    description: "Enable the bounded URL reader tool in CI comment mode (default: false). It reads one public https page and returns its text; it is the only tool that can reach an arbitrary host."
+    required: false
+    default: "false"
+
   search-max-queries:
     description: "Maximum regular searches per review run (1-10, default: 3)."
     required: false
@@ -506,6 +511,7 @@ runs:
         PI_REVIEWER_AI_SEARCH_PROVIDER: ${{ inputs.ai-search-provider || env.PI_REVIEWER_AI_SEARCH_PROVIDER }}
         PI_REVIEWER_GITHUB_SCOPE: ${{ inputs.github-scope || env.PI_REVIEWER_GITHUB_SCOPE }}
         PI_REVIEWER_GH: ${{ inputs.gh }}
+        PI_REVIEWER_URL_READER: ${{ inputs.url-reader }}
         PI_REVIEWER_SEARCH_MAX_QUERIES: ${{ inputs.search-max-queries }}
         PI_REVIEWER_AI_SEARCH_MAX_QUERIES: ${{ inputs.ai-search-max-queries }}
         PI_REVIEWER_SEARCH_MAX_RESULTS: ${{ inputs.search-max-results }}

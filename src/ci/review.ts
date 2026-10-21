@@ -53,6 +53,7 @@ import { unavailableGitHubResearchWarnings } from "./github-research/config.js";
 import { prepareResearch } from "./research-preparation.js";
 import { createGitHubResearchTools } from "./github-research/tool.js";
 import { probeGhCli } from "./github-research/gh-runner.js";
+import { createWebFetchTools } from "./web-fetch/tool.js";
 import { KNOWN_CI_TOOL_NAMES, LSP_TOOL_NAMES, MCP_TOOL_NAME } from "./tool-names.js";
 import {
   restoreAgentDir,
@@ -995,6 +996,11 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
   const githubResearchTools = githubResearchConfig
     ? createGitHubResearchTools(githubResearchConfig)
     : [];
+  // The URL reader is opt-in and is the only tool that can reach an arbitrary
+  // host, so it is registered only when the action's input turned it on. The
+  // shared preparation decides, so the resolver's candidates and the
+  // registered tools cannot disagree about which locations a run can open.
+  const webFetchTools = preparation?.readers.url ? createWebFetchTools() : [];
   // Resolve once so the startup diagnostic, the system prompt policy, and the
   // registered tools observe the same configuration.
   const codeExecConfig = resolveCodeExecConfig();
@@ -1006,6 +1012,7 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
       ...searchTools,
       ...registryTools,
       ...githubResearchTools,
+      ...webFetchTools,
       ...codeExecTools,
     ].map((tool) => tool.name);
     if (mcpConfig) available.push(MCP_TOOL_NAME);
@@ -1024,6 +1031,9 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
       : []),
     ...(githubResearchTools.length > 0
       ? [`<github_research_policy>\n${PROMPTS.githubResearch}\n</github_research_policy>`]
+      : []),
+    ...(webFetchTools.length > 0
+      ? [`<url_reader_policy>\n${PROMPTS.urlReader}\n</url_reader_policy>`]
       : []),
     // Code exec is CI-comment-only like search/registry; the policy rides with
     // the system prompt so the model treats sandboxed output as verification.
@@ -1119,6 +1129,7 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
     ...searchTools,
     ...registryTools,
     ...githubResearchTools,
+    ...webFetchTools,
     ...codeExecTools,
     reviewTool,
   ];

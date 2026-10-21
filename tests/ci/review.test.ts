@@ -369,6 +369,7 @@ describe("review", () => {
     delete process.env.PI_REVIEWER_CODE_EXEC_MAX_CALLS;
     delete process.env.PI_REVIEWER_CODE_EXEC_WALL_BUDGET_MS;
     delete process.env.PI_REVIEWER_CODE_EXEC_MAX_STREAM_BYTES;
+    delete process.env.PI_REVIEWER_URL_READER;
     delete process.env.PI_REVIEWER_EXTRA_INSTRUCTIONS;
     // model is mandatory — provide a default for tests that don't exercise it
     process.env.PI_REVIEWER_MODEL = "anthropic/claude-opus-4-6";
@@ -2239,6 +2240,7 @@ describe("review", () => {
     process.env.PI_REVIEWER_AI_SEARCH_PROVIDER = "exa";
     process.env.EXA_API_KEY = "test-key";
     process.env.PI_REVIEWER_CODE_EXEC = "true";
+    process.env.PI_REVIEWER_URL_READER = "true";
     const { sink, records } = createMemorySink();
 
     await review({
@@ -2259,11 +2261,62 @@ describe("review", () => {
         "package_lookup",
         "github_search",
         "github_read",
+        "url_read",
         "code_exec",
         "mcp",
       ]),
     );
     expect(status?.fields.unavailable).toEqual([]);
+  });
+
+  it("registers the URL reader only when its input is on", async () => {
+    process.env.GITHUB_ACTIONS = "true";
+    const { sink, records } = createMemorySink();
+
+    await review({
+      cwd: "/repo",
+      pr: 42,
+      githubToken: "token",
+      repo: "owner/repo",
+      output: "comment",
+      lspServers: "none",
+      logger: createLogger({ sink }),
+    });
+
+    const status = records.find(({ event }) => event === "review.tools.status");
+    expect(status?.fields.available).not.toEqual(expect.arrayContaining(["url_read"]));
+    expect(status?.fields.unavailable).toEqual(expect.arrayContaining(["url_read"]));
+
+    const state = AgentMock.mock.calls[0][0].initialState;
+    expect(state.tools).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: "url_read" })]),
+    );
+    expect(state.systemPrompt).not.toContain("<url_reader_policy>");
+  });
+
+  it("registers the URL reader and its policy when its input is on", async () => {
+    process.env.GITHUB_ACTIONS = "true";
+    process.env.PI_REVIEWER_URL_READER = "true";
+    const { sink, records } = createMemorySink();
+
+    await review({
+      cwd: "/repo",
+      pr: 42,
+      githubToken: "token",
+      repo: "owner/repo",
+      output: "comment",
+      lspServers: "none",
+      logger: createLogger({ sink }),
+    });
+
+    const status = records.find(({ event }) => event === "review.tools.status");
+    expect(status?.fields.available).toEqual(expect.arrayContaining(["url_read"]));
+
+    const state = AgentMock.mock.calls[0][0].initialState;
+    expect(state.tools).toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: "url_read" })]),
+    );
+    expect(state.systemPrompt).toContain("<url_reader_policy>");
   });
 
   it("does not log tool availability for local output", async () => {
