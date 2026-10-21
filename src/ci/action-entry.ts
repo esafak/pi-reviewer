@@ -32,6 +32,7 @@ import { recoverSynchronizeReplies } from "./recovery.js";
 import { loadMcpConfigFromBase, resolveDefaultBranchSha } from "./mcp-config.js";
 import { loadLspOverridesFromBase, type LspServerOverrides } from "../core/lsp/config.js";
 import { log } from "./log.js";
+import { assertModeImplemented, parseMode } from "./mode.js";
 
 async function readEvent(): Promise<unknown> {
   const file = process.env.GITHUB_EVENT_PATH;
@@ -143,6 +144,11 @@ async function main(): Promise<void> {
   const event = normalizeEvent(payload);
   const repo = process.env.GITHUB_REPOSITORY;
   const token = process.env.GITHUB_TOKEN;
+  // The mode is validated before anything else runs: a request for a check
+  // this build cannot perform must fail loudly rather than quietly run a
+  // different one.
+  const mode = parseMode(process.env.PI_REVIEWER_MODE);
+  assertModeImplemented(mode);
   if (!repo || !token) {
     log.error(
       "action.configuration.missing",

@@ -41,6 +41,11 @@ inputs:
     required: false
     default: "info"
 
+  mode:
+    description: "Check mode: 'review' (default, review the pull request diff) or 'dependency' (breaking-change analysis of the dependency upgrades in the pull request). Which pull requests reach a mode is decided by the calling workflow, not by the action."
+    required: false
+    default: "review"
+
   max-diff-chars:
     description: "Explicit diff cap in chars. Unset means the cap is derived from the model's context window (default: 100k minimum)."
     required: false
@@ -487,6 +492,7 @@ runs:
         PI_REVIEWER_DEBUG: ${{ inputs.debug }}
         PI_REVIEWER_THINKING_ARTIFACT: ${{ runner.temp }}/pi-reviewer-thinking.jsonl
         MIN_SEVERITY: ${{ inputs.min-severity }}
+        PI_REVIEWER_MODE: ${{ inputs.mode }}
         PI_REVIEWER_MAX_DIFF_CHARS: ${{ inputs.max-diff-chars || env.PI_REVIEWER_MAX_DIFF_CHARS }}
         PI_REVIEWER_SUMMARY: ${{ inputs.summary }}
         PI_REVIEWER_DOC_DIRS: ${{ inputs.doc-dirs }}
