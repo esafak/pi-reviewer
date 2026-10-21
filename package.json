@@ -7,11 +7,12 @@
   },
   "type": "module",
   "scripts": {
-    "build": "vp run build:ui && tsc --noEmit -p tsconfig.json",
+    "build": "vp run build:ui && vp run typecheck",
     "build:ui": "vp build --config ui/vite.config.ts",
     "dev:ui": "vp dev --config ui/vite.config.ts",
     "lint": "vp lint && tsx scripts/lint-graphql.ts",
     "test": "vitest run",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
     "typecheck:types": "tsc --noEmit -p tsconfig.typecheck.json"
   },
   "dependencies": {
