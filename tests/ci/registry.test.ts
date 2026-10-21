@@ -203,6 +203,33 @@ describe("registry providers", () => {
     vi.unstubAllGlobals();
   });
 
+  it("requests the npm version document in full and projects the repository and homepage", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      json({
+        name: "react",
+        version: "19.3.1",
+        repository: { type: "git", url: "git+https://github.com/facebook/react.git" },
+        homepage: "https://react.dev/",
+        readme: "omit",
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await createRegistryProvider("javascript").lookup(
+      { ecosystem: "javascript", name: "react", version: "19.3.1" },
+      AbortSignal.timeout(1000),
+    );
+    // The abbreviated packument omits the repository and the homepage, so a
+    // version document is requested in full.
+    expect(fetchMock.mock.calls[0]![1]).toMatchObject({
+      headers: { accept: "application/json" },
+    });
+    expect(result).toMatchObject({
+      repository: "git+https://github.com/facebook/react.git",
+      homepage: "https://react.dev/",
+    });
+    vi.unstubAllGlobals();
+  });
+
   it("applies Go uppercase escaping before path encoding", async () => {
     const fetchMock = vi
       .fn<typeof fetch>()

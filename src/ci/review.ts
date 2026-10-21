@@ -49,10 +49,8 @@ import { createSearchTools } from "./search/tool.js";
 import { createRegistryTools } from "./registry/tool.js";
 import { resolveCodeExecConfig } from "./code-exec/config.js";
 import { createCodeExecTools } from "./code-exec/tool.js";
-import {
-  resolveGitHubResearchConfig,
-  unavailableGitHubResearchWarnings,
-} from "./github-research/config.js";
+import { unavailableGitHubResearchWarnings } from "./github-research/config.js";
+import { prepareResearch } from "./research-preparation.js";
 import { createGitHubResearchTools } from "./github-research/tool.js";
 import { probeGhCli } from "./github-research/gh-runner.js";
 import { KNOWN_CI_TOOL_NAMES, LSP_TOOL_NAMES, MCP_TOOL_NAME } from "./tool-names.js";
@@ -980,8 +978,11 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
       })
     : [];
   const registryTools = target === "comment" ? createRegistryTools() : [];
-  const githubResearchConfig =
-    target === "comment" ? resolveGitHubResearchConfig(process.env, githubToken) : undefined;
+  // The preparation is shared with the dependency resolver, so the readers a
+  // run has and the tools it registers cannot disagree.
+  const preparation =
+    target === "comment" ? prepareResearch(process.env, { token: githubToken }) : undefined;
+  const githubResearchConfig = preparation?.githubResearch;
   if (target === "comment") {
     for (const warning of unavailableGitHubResearchWarnings(process.env, githubToken))
       logger.warn("review.github_research.unavailable", warning);

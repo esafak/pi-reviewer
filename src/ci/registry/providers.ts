@@ -4,6 +4,7 @@ import {
   boundedRecord,
   boundedString,
   boundedStrings,
+  exactString,
   isRecord,
   nestedProjection,
   optionalBoolean,
@@ -31,7 +32,9 @@ function pypiInfo(value: unknown): Record<string, unknown> {
         Object.entries(urls)
           .slice(0, 10)
           .flatMap(([key, url]) =>
-            typeof url === "string" ? [[key.slice(0, 80), url.slice(0, 300)]] : [],
+            typeof url === "string" && url.length <= 300
+              ? [[key.slice(0, 80), url.slice(0, 300)]]
+              : [],
           ),
       );
     },
@@ -63,7 +66,7 @@ function pypiVulnerability(value: unknown): Record<string, unknown> {
   });
 }
 
-function projectPyPI(raw: unknown): Record<string, unknown> {
+export function projectPyPI(raw: unknown): Record<string, unknown> {
   if (!isRecord(raw)) throw new Error("Registry response has an invalid shape");
   if (
     !isRecord(raw.info) ||
@@ -83,7 +86,7 @@ function projectPyPI(raw: unknown): Record<string, unknown> {
   return output;
 }
 
-function projectMaven(raw: unknown): Record<string, unknown> {
+export function projectMaven(raw: unknown): Record<string, unknown> {
   if (
     !isRecord(raw) ||
     !isRecord(raw.response) ||
@@ -97,12 +100,14 @@ function projectMaven(raw: unknown): Record<string, unknown> {
       docs: raw.response.docs.slice(0, 5).map((doc) =>
         boundedRecord(doc, {
           id: optionalString(300),
-          g: optionalString(200),
-          a: optionalString(200),
-          v: optionalString(128),
+          // The coordinate parts are used to build a POM path, so a value
+          // that does not fit is dropped rather than shortened.
+          g: exactString(200),
+          a: exactString(200),
+          v: exactString(128),
           p: optionalString(80),
           l: optionalString(80),
-          latestVersion: optionalString(128),
+          latestVersion: exactString(128),
           timestamp: optionalNumber,
           versionCount: optionalNumber,
         }),
@@ -111,15 +116,15 @@ function projectMaven(raw: unknown): Record<string, unknown> {
   };
 }
 
-function projectCrate(raw: unknown): Record<string, unknown> {
+export function projectCrate(raw: unknown): Record<string, unknown> {
   if (!isRecord(raw) || !isRecord(raw.crate) || typeof raw.crate.name !== "string")
     throw new Error("Registry response has an invalid shape");
   const crate = boundedRecord(raw.crate, {
     id: optionalString(200),
     name: optionalString(200),
     description: optionalString(600),
-    repository: optionalString(300),
-    homepage: optionalString(300),
+    repository: exactString(300),
+    homepage: exactString(300),
     documentation: optionalString(300),
     downloads: optionalNumber,
     recent_downloads: optionalNumber,
@@ -158,7 +163,7 @@ function projectCrate(raw: unknown): Record<string, unknown> {
   return output;
 }
 
-function projectNpm(raw: unknown, exactVersion: boolean): Record<string, unknown> {
+export function projectNpm(raw: unknown, exactVersion: boolean): Record<string, unknown> {
   if (!isRecord(raw)) throw new Error("Registry response has an invalid shape");
   if (typeof raw.name !== "string" || (exactVersion && typeof raw.version !== "string"))
     throw new Error("Registry response has an invalid shape");
@@ -196,10 +201,21 @@ function projectNpm(raw: unknown, exactVersion: boolean): Record<string, unknown
     engines: (value) =>
       nestedProjection(value, { node: optionalString(100), npm: optionalString(100) }),
     deprecated: optionalString(400),
+    // The upstream location, which the abbreviated packument omits and the
+    // version document carries. The repository is written as a string or as
+    // an object with a url, and the url is what names the project. A value
+    // that does not fit is dropped rather than shortened, because a shortened
+    // location is a different location.
+    repository: (value) => {
+      if (typeof value === "string") return exactString(300)(value);
+      if (!isRecord(value)) return undefined;
+      return exactString(300)(value.url);
+    },
+    homepage: exactString(300),
   });
 }
 
-function projectGo(raw: unknown): Record<string, unknown> {
+export function projectGo(raw: unknown): Record<string, unknown> {
   if (!isRecord(raw) || typeof raw.Version !== "string" || typeof raw.Time !== "string")
     throw new Error("Registry response has an invalid shape");
   return boundedRecord(raw, {
@@ -208,21 +224,23 @@ function projectGo(raw: unknown): Record<string, unknown> {
     Origin: (value) =>
       nestedProjection(value, {
         VCS: optionalString(40),
-        URL: optionalString(300),
+        // The origin URL is a location: a value that does not fit is dropped
+        // rather than shortened.
+        URL: exactString(300),
         Hash: optionalString(128),
         Ref: optionalString(200),
       }),
   });
 }
 
-function encodeGoModulePath(path: string): string {
+export function encodeGoModulePath(path: string): string {
   const escaped = Array.from(path, (char) =>
     char >= "A" && char <= "Z" ? `!${char.toLowerCase()}` : char,
   ).join("");
   return escaped.split("/").map(encodeURIComponent).join("/");
 }
 
-function npmPath(name: string): string {
+export function npmPath(name: string): string {
   return encodeURIComponent(name).replace(/%2F/giu, "%2f");
 }
 
@@ -271,8 +289,13 @@ export function createRegistryProvider(ecosystem: RegistryEcosystem): RegistryPr
               `https://registry.npmjs.org/${packagePath}/${encodeURIComponent(params.version)}`,
             )
           : new URL(`https://registry.npmjs.org/${packagePath}`);
+        // The abbreviated packument omits the repository and the homepage, so
+        // a version document is requested in full. The packument keeps the
+        // abbreviated form, because it is only used to list versions.
         return projectNpm(
-          await requestJson(url, signal, { accept: "application/vnd.npm.install-v1+json" }),
+          await requestJson(url, signal, {
+            accept: params.version ? "application/json" : "application/vnd.npm.install-v1+json",
+          }),
           Boolean(params.version),
         );
       }

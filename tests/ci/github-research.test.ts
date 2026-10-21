@@ -7,11 +7,20 @@ import {
   unavailableGitHubResearchWarnings,
 } from "../../src/ci/github-research/config.js";
 import { createGitHubResearchClient } from "../../src/ci/github-research/client.js";
+import { MAX_RELEASE_BODY_CHARS } from "../../src/ci/github-research/client.js";
+import {
+  MAX_RELEASE_NAME_CHARS,
+  MAX_RELEASE_PUBLISHED_CHARS,
+  MAX_RELEASE_TAG_CHARS,
+  MAX_RELEASE_URL_CHARS,
+  RELEASE_JQ_EXPRESSION,
+  RELEASE_METADATA_CHARS,
+} from "../../src/ci/github-research/gh-allowlist.js";
 import type { GitHubResearchClient } from "../../src/ci/github-research/client.js";
 import { createGitHubResearchTools } from "../../src/ci/github-research/tool.js";
 import { githubReadSchema } from "../../src/ci/github-research/tool.js";
 import { validateGhArgs } from "../../src/ci/github-research/gh-allowlist.js";
-import { createGhRunner } from "../../src/ci/github-research/gh-runner.js";
+import { createGhRunner, MAX_GH_RESULT_BYTES } from "../../src/ci/github-research/gh-runner.js";
 import { readCachedRange, saveCachedFile } from "../../src/ci/github-research/cache.js";
 describe("gh-backed GitHub research", () => {
   it("enables with a token by default and supports opt-out", () => {
@@ -1302,12 +1311,7 @@ describe("gh-backed GitHub research", () => {
       ],
       [
         { kind: "release", owner: "o", repo: "r", number: 13 },
-        [
-          "api",
-          "repos/o/r/releases/13",
-          "--jq",
-          "{tagName:.tag_name,name,isDraft:.draft,url:.html_url,publishedAt:.published_at}",
-        ],
+        ["api", "repos/o/r/releases/13", "--jq", RELEASE_JQ_EXPRESSION],
       ],
       [{ kind: "diff", owner: "o", repo: "r", number: 14 }, ["pr", "diff", "14", "--repo", "o/r"]],
       [
@@ -1404,9 +1408,82 @@ describe("gh-backed GitHub research", () => {
       "api",
       "repos/o/r/releases/1",
       "--jq",
-      "{tagName:.tag_name,name,isDraft:.draft,url:.html_url,publishedAt:.published_at}",
+      RELEASE_JQ_EXPRESSION,
     ]);
     expect(result.result).toMatchObject({ isDraft: true, publishedAt: null });
+  });
+
+  it("delivers the release notes with the release, and says when they are truncated", async () => {
+    const run = vi.fn().mockResolvedValue({
+      stdout: JSON.stringify({
+        tagName: "v2.0.0",
+        name: "Breaking release",
+        isDraft: false,
+        url: "https://github.com/o/r/releases/2",
+        publishedAt: "2026-10-20T04:13:50Z",
+        body: "## Breaking\n- the removed API",
+        bodyTruncated: false,
+      }),
+    });
+    const result = await createGitHubResearchClient("t", "token-accessible", run as never).read({
+      kind: "release",
+      owner: "o",
+      repo: "r",
+      number: 2,
+    });
+    expect(result.result).toMatchObject({
+      body: "## Breaking\n- the removed API",
+      bodyTruncated: false,
+    });
+  });
+
+  it("keeps the release search metadata-only", async () => {
+    const run = vi.fn().mockResolvedValue({
+      stdout: JSON.stringify([{ name: "October release", tagName: "v2.1" }]),
+    });
+    await createGitHubResearchClient("t", "token-accessible", run as never).search(
+      "releases",
+      "October",
+      5,
+    );
+    const argv = run.mock.calls[0]![1] as string[];
+    expect(argv).toContain("release");
+    expect(argv).toContain("list");
+    // The search lists the releases it finds; it never carries the notes,
+    // because `gh release list` has no field for them.
+    expect(argv.join(" ")).not.toContain("body");
+  });
+
+  it("keeps the projected release inside the transport's per-result cap", () => {
+    // The bound is applied inside the projection, so the projected result is
+    // what the transport receives. A character costs up to six bytes once
+    // JSON escapes it, and the release's metadata takes the rest of the room.
+    // The structure is measured, not assumed: it is the projection with
+    // every value empty.
+    const structure = Buffer.byteLength(
+      '{"body":"","bodyTruncated":false,"isDraft":false,"name":null,"publishedAt":null,"tagName":null,"url":null}',
+    );
+    expect((MAX_RELEASE_BODY_CHARS + RELEASE_METADATA_CHARS) * 6 + structure).toBeLessThanOrEqual(
+      MAX_GH_RESULT_BYTES,
+    );
+  });
+
+  it("sends the release projection the allowlist accepts", () => {
+    const run = vi.fn().mockResolvedValue({ stdout: "{}" });
+    const client = createGitHubResearchClient("t", "token-accessible", run as never);
+    return client.read({ kind: "release", owner: "o", repo: "r", number: 1 }).then(() => {
+      const argv = run.mock.calls[0]![1] as string[];
+      expect(validateGhArgs(argv)).toBeUndefined();
+      const expression = argv[argv.indexOf("--jq") + 1]!;
+      expect(expression).toBe(RELEASE_JQ_EXPRESSION);
+      // Every field the projection carries is bounded, so the worst case
+      // fits the transport's cap.
+      expect(expression).toContain(`[0:${MAX_RELEASE_BODY_CHARS}]`);
+      expect(expression).toContain(`[0:${MAX_RELEASE_TAG_CHARS}]`);
+      expect(expression).toContain(`[0:${MAX_RELEASE_NAME_CHARS}]`);
+      expect(expression).toContain(`[0:${MAX_RELEASE_URL_CHARS}]`);
+      expect(expression).toContain(`[0:${MAX_RELEASE_PUBLISHED_CHARS}]`);
+    });
   });
 });
 

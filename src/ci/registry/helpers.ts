@@ -100,6 +100,100 @@ export async function requestJson(
   return responseJson(response);
 }
 
+/**
+ * Reads a response body as text, under the same byte cap the JSON reader
+ * uses.
+ *
+ * A document that is not valid UTF-8 is refused rather than repaired: the
+ * reader would parse the repaired text as if it were the document, and a
+ * replacement character in a URL is a location nobody published.
+ */
+export async function responseText(response: Response): Promise<string> {
+  const length = Number(response.headers.get("content-length"));
+  if (Number.isFinite(length) && length > MAX_RESPONSE_BYTES) {
+    await response.body?.cancel();
+    throw new Error("Registry response exceeded the byte limit");
+  }
+  if (!response.body) throw new Error("Registry response body is empty");
+
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > MAX_RESPONSE_BYTES) {
+        await reader.cancel();
+        throw new Error("Registry response exceeded the byte limit");
+      }
+      chunks.push(value.slice());
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const bytes = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    throw new Error("Registry response is not valid UTF-8");
+  }
+}
+
+/**
+ * Fetches a document as text, following a bounded number of redirects.
+ *
+ * The redirect is followed by hand so every hop is checked against the
+ * allowlist before it is contacted: a redirect to a host outside the
+ * allowlist is refused rather than fetched. Every hop is charged to the
+ * caller's request budget, because a redirect is another request.
+ */
+export async function requestTextFollowingHosts(
+  url: URL,
+  signal: AbortSignal,
+  allowedHosts: readonly string[],
+  charge: () => void = () => {},
+  maxRedirects = 3,
+): Promise<string> {
+  let current = url;
+  for (let hop = 0; hop <= maxRedirects; hop += 1) {
+    if (!allowedHosts.includes(current.hostname.toLowerCase()))
+      throw new Error("Registry request left the allowed hosts");
+    charge();
+    let response: Response;
+    try {
+      response = await fetch(current, {
+        method: "GET",
+        redirect: "manual",
+        signal,
+        headers: { accept: "application/xml, text/xml, text/plain" },
+      });
+    } catch {
+      if (signal.aborted) throw new Error("Registry request timed out");
+      throw new Error("Registry request failed");
+    }
+    if (response.status >= 300 && response.status < 400) {
+      const location = response.headers.get("location");
+      await response.body?.cancel();
+      if (!location) throw new Error("Registry redirect carried no location");
+      current = new URL(location, current);
+      continue;
+    }
+    if (!response.ok) {
+      await response.body?.cancel();
+      throw new Error(`Registry request failed: ${response.status}`);
+    }
+    return responseText(response);
+  }
+  throw new Error("Registry redirect chain exceeded the hop limit");
+}
+
 export function boundedRecord(
   value: unknown,
   fields: Record<string, (value: unknown) => unknown>,
@@ -115,6 +209,18 @@ export function boundedRecord(
 
 export function optionalString(max = 500): (value: unknown) => unknown {
   return (value) => boundedString(value, max);
+}
+
+/**
+ * A string that is dropped when it does not fit, rather than shortened.
+ *
+ * A shortened location is a different location: a URL cut at its cap names
+ * another document, and a version cut at its cap names a version that was
+ * never published. A value that does not fit is left out, so the reader
+ * reports it as unknown instead of answering with something else.
+ */
+export function exactString(max = 500): (value: unknown) => unknown {
+  return (value) => (typeof value === "string" && value.length <= max ? value : undefined);
 }
 
 export function optionalNumber(value: unknown): unknown {

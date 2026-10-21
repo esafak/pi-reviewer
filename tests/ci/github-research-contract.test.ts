@@ -234,6 +234,10 @@ describe("GitHub research payload contracts", () => {
         expect(typeof release.tagName).toBe("string");
         expect(typeof release.isDraft).toBe("boolean");
         expect(typeof release.publishedAt).toBe("string");
+        // The notes travel with the release, and the projection says when it
+        // cut them short.
+        expect(typeof release.body).toBe("string");
+        expect(typeof release.bodyTruncated).toBe("boolean");
       },
     },
     {
