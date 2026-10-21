@@ -143,7 +143,7 @@ describe("gh-backed GitHub research", () => {
         now += 100;
         return { stdout: "ok" };
       });
-      const gh = createGhRunner("t", run as never, { now: () => now, wallMs: 500, timeoutMs: 500 });
+      const gh = createGhRunner("t", run as never, { now: () => now, waitMs: 500, timeoutMs: 500 });
       for (let i = 0; i < 5; i++) await gh(["repo", "view"]);
       await expect(gh(["repo", "view"])).rejects.toThrow("time budget exhausted");
       expect(run).toHaveBeenCalledTimes(5);
@@ -158,7 +158,7 @@ describe("gh-backed GitHub research", () => {
       });
       const gh = createGhRunner("t", run as never, {
         now: () => now,
-        wallMs: 1000,
+        waitMs: 1000,
         timeoutMs: 300,
       });
       await gh(["repo", "view"]);
@@ -176,7 +176,7 @@ describe("gh-backed GitHub research", () => {
       });
       const gh = createGhRunner("t", run as never, {
         now: () => now,
-        wallMs: 250,
+        waitMs: 250,
         timeoutMs: 5000,
       });
       await expect(gh(["repo", "view"])).rejects.toThrow("boom");
@@ -209,7 +209,7 @@ describe("gh-backed GitHub research", () => {
       });
       const gh = createGhRunner("t", run as never, {
         now: () => now,
-        wallMs: 1000,
+        waitMs: 1000,
         timeoutMs: 5000,
       });
       const results = await Promise.all([
@@ -228,7 +228,7 @@ describe("gh-backed GitHub research", () => {
       });
       const gh = createGhRunner("t", run as never, {
         now: () => now,
-        wallMs: 100,
+        waitMs: 100,
         timeoutMs: 5000,
       });
       await gh(["repo", "view"]);
@@ -245,7 +245,7 @@ describe("gh-backed GitHub research", () => {
       });
       const barelyGh = createGhRunner("t", barelyRun as never, {
         now: () => barely,
-        wallMs: 10,
+        waitMs: 10,
         timeoutMs: 5000,
       });
       await barelyGh(["repo", "view"]);
@@ -254,7 +254,7 @@ describe("gh-backed GitHub research", () => {
     });
     it("rejects a limit that is not a finite positive number", () => {
       const run = vi.fn().mockResolvedValue({ stdout: "ok" });
-      expect(() => createGhRunner("t", run as never, { wallMs: Number.NaN })).toThrow(
+      expect(() => createGhRunner("t", run as never, { waitMs: Number.NaN })).toThrow(
         "Invalid gh limit",
       );
       expect(() => createGhRunner("t", run as never, { timeoutMs: 0 })).toThrow("Invalid gh limit");

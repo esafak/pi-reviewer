@@ -3,7 +3,7 @@ import { defaultCacheDir, MAX_RANGE_LINES, saveCachedFile } from "./cache.js";
 import {
   createGhRunner,
   GH_TIMEOUT_MS,
-  GH_WALL_MS,
+  GH_WAIT_MS,
   MAX_GH_REQUESTS,
   MAX_GH_RESULT_BYTES,
   MAX_GH_TOTAL_BYTES,
@@ -98,7 +98,7 @@ export const MAX_GITHUB_RESULT_BYTES = MAX_GH_RESULT_BYTES,
   MAX_GITHUB_TOTAL_BYTES = MAX_GH_TOTAL_BYTES,
   MAX_GITHUB_REQUESTS = MAX_GH_REQUESTS,
   GITHUB_REQUEST_TIMEOUT_MS = GH_TIMEOUT_MS,
-  GITHUB_WAIT_TIME_MS = GH_WALL_MS;
+  GITHUB_WAIT_TIME_MS = GH_WAIT_MS;
 const listFields: Record<GitHubSearchKind, string> = {
   // Search JSON uses fullName/defaultBranch; repo view uses nameWithOwner/defaultBranchRef below.
   repositories: "name,fullName,description,url,visibility,defaultBranch",
