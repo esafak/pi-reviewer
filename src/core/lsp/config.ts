@@ -2,13 +2,20 @@ import { execFileSync } from "node:child_process";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { gitEnv } from "../git-env.js";
-import { parseLspServers, PI_REVIEWER_LSP_SERVERS_ENV } from "./inputs.js";
-import { getLspPreset, getLspPresets, type LspPresetServer } from "./presets.js";
+import {
+  parseLspServers,
+  PI_REVIEWER_LSP_SERVERS_ENV,
+  type LspEnabledSelection,
+} from "./inputs.js";
+import { getLspCandidate, getLspGroups, type LspCandidate, type LspGroup } from "./presets.js";
 
 /** Env var pi-lsp reads for its global config dir (`<dir>/lsp.json`). */
 export const PI_AGENT_DIR_ENV = "PI_AGENT_DIR";
 
 const MAX_LSP_CONFIG_BYTES = 256 * 1024;
+
+const DEFAULT_STARTUP_TIMEOUT_MS = 45_000;
+const DEFAULT_DIAGNOSTICS_WAIT_MS = 2000;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -17,84 +24,174 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 /** User-supplied per-id overrides (from the trusted default-branch file). */
 export type LspServerOverrides = Record<string, Record<string, unknown>>;
 
-/** A pi-lsp file entry. `installHint` is never serialized (see presets.ts). */
-export type LspFileServer = Omit<LspPresetServer, "installHint"> & {
-  enabled?: boolean;
+/** A pi-lsp file entry — the shape written into lsp.json. */
+export interface LspFileServer {
+  id: string;
+  bin: string;
+  args: string[];
+  include: string[];
   exclude?: string[];
+  rootMarkers: string[];
+  languageIdByExtension: Record<string, string>;
+  startupTimeoutMs: number;
+  diagnosticsWaitMs: number;
   cwd?: string;
   env?: Record<string, string>;
   config?: string;
   maxFileSizeBytes?: number;
   settings?: Record<string, unknown>;
   initializationOptions?: Record<string, unknown>;
-};
+}
+
+/** One language group with the candidate servers that may serve it. */
+export interface LspGroupPlan {
+  group: LspGroup;
+  /** Effective candidate entries, in preference order. */
+  candidates: LspFileServer[];
+}
+
+/** Everything the review needs to know about the LSP setup, before probing. */
+export interface LspPlan {
+  disabled: boolean;
+  groups: LspGroupPlan[];
+  /** Config-file servers outside every group; they run as defined. */
+  custom: LspFileServer[];
+}
+
+function emptyPlan(): LspPlan {
+  return { disabled: true, groups: [], custom: [] };
+}
 
 /**
- * Merges preset defaults with trusted overrides. Overrides win per field;
- * `enabled: false` removes the server. Unknown ids require a full definition
+ * Merges group defaults, the candidate's own fields, and trusted overrides
+ * into the entry pi-lsp will run. Overrides win per field.
+ */
+function candidateEntry(
+  group: LspGroup,
+  candidate: LspCandidate,
+  override: Record<string, unknown> | undefined,
+): LspFileServer {
+  return {
+    id: candidate.id,
+    bin: stringOr(override?.bin, candidate.bin),
+    args: override && "args" in override ? arrayOfStrings(override.args) : [...candidate.args],
+    include:
+      override && "include" in override ? arrayOfStrings(override.include) : [...group.include],
+    exclude: override && "exclude" in override ? arrayOfStrings(override.exclude) : undefined,
+    rootMarkers:
+      override && "rootMarkers" in override
+        ? arrayOfStrings(override.rootMarkers)
+        : [...group.rootMarkers],
+    languageIdByExtension:
+      override && isRecord(override.languageIdByExtension)
+        ? recordOfStrings(override.languageIdByExtension)
+        : { ...group.languageIdByExtension },
+    startupTimeoutMs: numberOr(override?.startupTimeoutMs, candidate.startupTimeoutMs),
+    diagnosticsWaitMs: numberOr(override?.diagnosticsWaitMs, candidate.diagnosticsWaitMs),
+    ...optionalSpawnFields(override ?? {}),
+  };
+}
+
+/**
+ * A config-file server outside every group. It needs a full definition
  * (`bin`) — anything less fails fast instead of vanishing inside pi-lsp's
  * silent sanitizing.
  */
-export function buildLspServerEntries(
-  ids: readonly string[],
-  overrides: LspServerOverrides,
-): LspFileServer[] {
-  const entries: LspFileServer[] = [];
-  for (const id of ids) {
-    const preset = getLspPreset(id);
-    const override = overrides[id];
-    if (override?.enabled === false) continue;
-    if (!preset) {
-      if (!override || typeof override.bin !== "string" || !override.bin.trim()) {
-        throw new Error(`Unknown LSP server "${id}" has no config entry with a "bin" field.`);
-      }
-      entries.push({
-        id,
-        bin: override.bin.trim(),
-        args: "args" in override ? arrayOfStrings(override.args) : [],
-        include: "include" in override ? arrayOfStrings(override.include) : [],
-        exclude: "exclude" in override ? arrayOfStrings(override.exclude) : [],
-        rootMarkers: "rootMarkers" in override ? arrayOfStrings(override.rootMarkers) : [],
-        languageIdByExtension: isRecord(override.languageIdByExtension)
-          ? recordOfStrings(override.languageIdByExtension)
-          : {},
-        startupTimeoutMs: numberOr(override.startupTimeoutMs, 45_000),
-        diagnosticsWaitMs: numberOr(override.diagnosticsWaitMs, 2000),
-        ...optionalSpawnFields(override),
-      });
-      continue;
-    }
-    entries.push({
-      id: preset.id,
-      bin: stringOr(override?.bin, preset.bin),
-      args: override && "args" in override ? arrayOfStrings(override.args) : [...preset.args],
-      include:
-        override && "include" in override ? arrayOfStrings(override.include) : [...preset.include],
-      exclude: override && "exclude" in override ? arrayOfStrings(override.exclude) : [],
-      rootMarkers:
-        override && "rootMarkers" in override
-          ? arrayOfStrings(override.rootMarkers)
-          : [...preset.rootMarkers],
-      languageIdByExtension:
-        override && isRecord(override.languageIdByExtension)
-          ? recordOfStrings(override.languageIdByExtension)
-          : { ...preset.languageIdByExtension },
-      startupTimeoutMs: numberOr(override?.startupTimeoutMs, preset.startupTimeoutMs),
-      diagnosticsWaitMs: numberOr(override?.diagnosticsWaitMs, preset.diagnosticsWaitMs),
-      ...optionalSpawnFields(override ?? {}),
-    });
+function customEntry(id: string, override: Record<string, unknown>): LspFileServer {
+  if (typeof override.bin !== "string" || !override.bin.trim()) {
+    throw new Error(`Unknown LSP server "${id}" has no config entry with a "bin" field.`);
   }
-  // Overrides for ids outside the selection are programmer error — fail fast
-  // instead of silently ignoring them.
-  const selected = new Set(ids);
-  for (const id of Object.keys(overrides)) {
-    if (!selected.has(id)) {
+  return {
+    id,
+    bin: override.bin.trim(),
+    args: "args" in override ? arrayOfStrings(override.args) : [],
+    include: "include" in override ? arrayOfStrings(override.include) : [],
+    exclude: "exclude" in override ? arrayOfStrings(override.exclude) : undefined,
+    rootMarkers: "rootMarkers" in override ? arrayOfStrings(override.rootMarkers) : [],
+    languageIdByExtension: isRecord(override.languageIdByExtension)
+      ? recordOfStrings(override.languageIdByExtension)
+      : {},
+    startupTimeoutMs: numberOr(override.startupTimeoutMs, DEFAULT_STARTUP_TIMEOUT_MS),
+    diagnosticsWaitMs: numberOr(override.diagnosticsWaitMs, DEFAULT_DIAGNOSTICS_WAIT_MS),
+    ...optionalSpawnFields(override),
+  };
+}
+
+/**
+ * Turns a selection plus trusted overrides into the servers to probe.
+ *
+ * Each language group contributes its candidates in preference order; a
+ * pinned group contributes only the named ones. A group-level override
+ * (`{"id": "python", "enabled": false}`) switches that language off, and a
+ * candidate-level `enabled: false` drops that candidate so the group falls
+ * back to the next one.
+ */
+export function buildLspPlan(
+  selection: LspEnabledSelection,
+  overrides: LspServerOverrides,
+): LspPlan {
+  const groups: LspGroupPlan[] = [];
+  const custom: LspFileServer[] = [];
+  const consumed = new Set<string>();
+
+  for (const group of getLspGroups()) {
+    const groupOverride = overrides[group.id];
+    if (groupOverride) {
+      consumed.add(group.id);
+      const fields = Object.keys(groupOverride).filter((field) => field !== "enabled");
+      if (fields.length > 0) {
+        throw new Error(
+          `LSP config entry "${group.id}" may only set "enabled"; per-server fields belong on a candidate id.`,
+        );
+      }
+    }
+    const groupEnabled = groupOverride?.enabled !== false;
+    const pinnedIds = selection.pinned[group.id];
+    if (!groupEnabled && pinnedIds) {
       throw new Error(
-        `LSP config entry "${id}" does not match any selected server (${ids.join(", ")}).`,
+        `lsp-servers pins ${group.id} to ${pinnedIds.join(", ")}, but lsp-config-file switches ${group.id} off.`,
       );
     }
+    const candidates: LspFileServer[] = [];
+    const disabled: string[] = [];
+    for (const candidateId of group.candidates) {
+      const candidate = getLspCandidate(candidateId);
+      if (!candidate) throw new Error(`Unknown LSP candidate "${candidateId}".`);
+      const override = overrides[candidateId];
+      // A built-in candidate is never a custom server, whatever the group
+      // does with it: consuming it here keeps a disabled language from
+      // reappearing as an unnamed server.
+      if (override) consumed.add(candidateId);
+      if (!groupEnabled) continue;
+      if (override?.enabled === false) {
+        disabled.push(candidateId);
+        continue;
+      }
+      if (pinnedIds && !pinnedIds.includes(candidateId)) {
+        // The group was pinned to other candidates: this override configures
+        // a server that will not run.
+        continue;
+      }
+      candidates.push(candidateEntry(group, candidate, override));
+    }
+    if (pinnedIds && candidates.length === 0) {
+      throw new Error(
+        `lsp-servers pins ${group.id} to ${pinnedIds.join(", ")}, but lsp-config-file disables ${disabled.join(", ")}.`,
+      );
+    }
+    if (!groupEnabled) continue;
+    groups.push({ group, candidates });
   }
-  return entries;
+
+  // Config-file servers outside every group are custom servers: they need a
+  // full definition and always run, whatever the selection pinned.
+  for (const [id, override] of Object.entries(overrides)) {
+    if (consumed.has(id)) continue;
+    if (override.enabled === false) continue;
+    custom.push(customEntry(id, override));
+  }
+
+  return { disabled: false, groups, custom };
 }
 
 function arrayOfStrings(value: unknown): string[] {
@@ -239,22 +336,23 @@ export function parseLspOverridesFile(text: string, label: string): LspServerOve
 
 /**
  * Single entry point for LSP setup: parses the `lsp-servers` selection
- * (custom ids come from the trusted overrides) and merges presets with
- * overrides. Non-comment targets get no servers. The caller writes the
- * result with `writeTrustedLspConfig`.
+ * (custom ids come from the trusted overrides) and merges group defaults,
+ * candidate fields, and overrides. Non-comment targets get no servers. The
+ * caller probes the plan, picks one server per group, and writes the result
+ * with `writeTrustedLspConfig`.
  */
-export function resolveLspEntries(
+export function resolveLspPlan(
   target: string,
   rawServers: string | undefined,
   overrides: LspServerOverrides,
-): LspFileServer[] {
-  if (target !== "comment") return [];
+): LspPlan {
+  if (target !== "comment") return emptyPlan();
   const selection = parseLspServers(
     rawServers ?? process.env[PI_REVIEWER_LSP_SERVERS_ENV],
     Object.keys(overrides),
   );
-  if (selection.disabled) return [];
-  return buildLspServerEntries(selection.ids, overrides);
+  if (selection.disabled) return emptyPlan();
+  return buildLspPlan(selection, overrides);
 }
 
 function validateRepoRelativePath(rawPath: string, label: string): string {
@@ -307,6 +405,7 @@ export function loadLspOverridesFromBase(
   return parseLspOverridesFile(text, label);
 }
 
-export function presetInstallHint(id: string): string | undefined {
-  return getLspPresets().find((preset) => preset.id === id)?.installHint;
+/** The install hint of a built-in candidate, if it has one. */
+export function lspInstallHint(id: string): string | undefined {
+  return getLspCandidate(id)?.installHint;
 }

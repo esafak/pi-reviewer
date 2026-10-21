@@ -1,14 +1,18 @@
 import { accessSync, constants } from "node:fs";
 import path from "node:path";
-import type { LspFileServer } from "./config.js";
-import { presetInstallHint } from "./config.js";
+import type { LspFileServer, LspGroupPlan } from "./config.js";
+import { lspInstallHint } from "./config.js";
 import { loadPiLspModule } from "./extension.js";
+import type { LspGroupId } from "./presets.js";
 import type { LspServerRoot } from "./roots.js";
 
 export interface LspBinaryProbe {
   id: string;
   bin: string;
+  /** The binary was found in at least one workspace root. */
   found: boolean;
+  /** The changed files this server can serve: those in roots with the binary. */
+  servedFiles: string[];
   installHint?: string;
 }
 
@@ -109,14 +113,56 @@ export async function probeServerBinaries(
       }).bin;
     const resolved =
       roots.length > 0
-        ? roots.map((match) => resolveFor(match.root, match.files[0]))
-        : [resolveFor(options.cwd, undefined)];
-    const found = resolved.some((bin) => findLspBinary(bin, pathValue) !== undefined);
+        ? roots.map((match) => ({ root: match.root, bin: resolveFor(match.root, match.files[0]) }))
+        : [{ root: options.cwd, bin: resolveFor(options.cwd, undefined) }];
+    const missingRoots = resolved
+      .filter((resolvedBin) => findLspBinary(resolvedBin.bin, pathValue) === undefined)
+      .map((resolvedBin) => resolvedBin.root);
+    const found = missingRoots.length < resolved.length;
     return {
       id: entry.id,
       bin: entry.bin,
       found,
-      installHint: found ? undefined : presetInstallHint(entry.id),
+      // A file is served only when the server can start in the root that
+      // holds it.
+      servedFiles: roots
+        .filter((match) => !missingRoots.includes(match.root))
+        .flatMap((match) => match.files),
+      installHint: found ? undefined : lspInstallHint(entry.id),
+    };
+  });
+}
+
+/** The server a language group ended up with. */
+export interface LspGroupPick {
+  group: LspGroupId;
+  /** The candidate that serves the group, when one was available. */
+  entry?: LspFileServer;
+}
+
+/**
+ * Picks one server per language group. Two servers for one language would
+ * report on the same files, so the group gets at most one.
+ *
+ * The candidate that serves the most of the language's files wins, because
+ * availability alone is not coverage: a server installed in one workspace
+ * root serves only that root's files, and a server matched to no file at all
+ * serves none. Ties keep the group's preference order.
+ */
+export function pickGroupServers(
+  groups: readonly LspGroupPlan[],
+  probes: readonly LspBinaryProbe[],
+): LspGroupPick[] {
+  const byId = new Map(probes.map((probe) => [probe.id, probe]));
+  const installed = (candidate: LspFileServer) => byId.get(candidate.id)?.found === true;
+  const served = (candidate: LspFileServer) => byId.get(candidate.id)?.servedFiles.length ?? 0;
+  return groups.map((group) => {
+    // Stable sort: candidates of equal coverage keep the group's preference
+    // order.
+    const ranked = group.candidates.filter(installed).sort((a, b) => served(b) - served(a));
+    return {
+      group: group.group.id,
+      entry: ranked[0],
     };
   });
 }

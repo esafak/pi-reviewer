@@ -61,7 +61,7 @@ inputs:
     required: false
 
   lsp-servers:
-    description: "Comma-separated LSP server preset ids for semantic review context (default: ty, markdown-oxide, rust-analyzer, taplo, gopls, tsc-rs, kotlin-lsp). Set to 'none' to disable LSP."
+    description: "LSP server ids for semantic review context. Each language runs one installed server, preferring the one that covers the most changed files: Python (ty, pyrefly, pyright), TypeScript (tsrs, tsc-rs, typescript-language-server), Markdown (markdown-oxide), Rust (rust-analyzer), TOML (taplo), Go (gopls), Kotlin (kotlin-lsp). Naming ids pins that language to them and leaves the other languages on their own order. Set to 'none' to disable LSP."
     required: false
     default: ""
 

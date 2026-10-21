@@ -101,7 +101,7 @@ To switch models without editing the workflow, put the full model name in a `MOD
           review-drafts: 'false'  # true to review draft PRs
           doc-dirs: '.pi/notes,docs/review'  # inject matching project docs (off by default)
           # skills-dirs: '.pi/skills'  # default-on review guidance; 'none' disables
-          # lsp-servers: 'tsc-rs'      # semantic hover/definition; preinstalled binaries only, 'none' disables
+          # lsp-servers: 'pyright'     # pin Python's server; other languages keep theirs
           # mcp-config-file: '.github/mcp.json'  # opt-in MCP servers, read from the default branch
           # code-exec: 'true'          # verify by running tests/typechecks in a no-network sandbox
           extra-instructions: |   # maintainer focus notes (off by default)
@@ -112,7 +112,7 @@ To switch models without editing the workflow, put the full model name in a `MOD
 - **Drafts** are skipped by default, including manual `/pi-review` runs.
 - **Doc context** injects `.md` files with a `description` frontmatter whose description or filename matches the changed paths. Nothing is injected unless you set `doc-dirs`.
 - **Skills** are default-on guidance: `SKILL.md` files under the skill dirs are loaded into the review; skills changed by the PR itself are treated as untrusted and reviewed as code instead. Set `skills-dirs: 'none'` to disable.
-- **LSP** gives best-effort semantic context (hover/definition/references) on top of the diff. Binaries must be preinstalled on the runner — missing ones warn and skip. Set `lsp-servers: 'none'` to disable.
+- **LSP** gives best-effort semantic context (hover/definition/references) on top of the diff. Each language runs one installed server (`ty`/`pyrefly`/`pyright` for Python, `tsrs`/`tsc-rs`/`typescript-language-server` for TypeScript), preferring the one that covers the most changed files. Binaries must be preinstalled — missing ones warn and skip that language. Set `lsp-servers: 'none'` to disable.
 - **MCP servers** are opt-in via a JSON config file read from the repository's default branch — never the PR head — so a pull request cannot change which commands run. Keep credentials in GitHub Secrets mapped through the step's `env:`; never commit tokens. Output is treated as untrusted reference data, not instructions.
 - **Code execution** (`code-exec: 'true'`) lets the reviewer verify instead of guess: it runs tests/typechecks in a no-network sandbox (fail-closed without a backend). Pre-install dependencies before the review step so calls are incremental rebuilds, not cold installs.
 - **Web search** (`web-search: 'true'`) and **AI search** (`ai-search: 'true'`) verify current public facts. Both are disabled by default and CI-only. Exa and Brave need their API keys; DuckDuckGo offers best-effort unauthenticated regular search only. Results are untrusted, and queries must not contain secrets, private source, or the diff.
@@ -150,7 +150,7 @@ Authenticated servers use `auth: bearer` with a `bearerTokenEnv` variable mapped
 
 `loggableArgs` names the arguments whose values may appear in the logs — the argument that carries a repository identifier, for instance. The declaration is the authorization: the values it covers are disclosed as-is once they are shaped like an identifier (`owner/name`), private repository names included. Declare only arguments whose values are safe to see in a log, and keep secrets out of them.
 
-**LSP.** Seven preset servers cover Python (`ty`), Markdown (`markdown-oxide`), Rust (`rust-analyzer`), TOML (`taplo`), Go (`gopls`), TypeScript (`tsc-rs`), and Kotlin (`kotlin-lsp`). The selection is correctness-oriented (type errors, broken references) — diagnostics are breakage signal, not style findings. Custom servers or preset overrides go in a pi-lsp `{ version: 1, servers: [...] }` JSON file set via `lsp-config-file`, also read from the default branch. Both inputs apply to CI comment reviews only.
+**LSP.** Seven languages have built-in servers, each with interchangeable candidates: Python (`ty` → `pyrefly` → `pyright`), TypeScript (`tsrs` → `tsc-rs` → `typescript-language-server`), Markdown (`markdown-oxide`), Rust (`rust-analyzer`), TOML (`taplo`), Go (`gopls`), Kotlin (`kotlin-lsp`). Exactly one built-in server runs per language — the installed candidate that covers the most changed files, the built-in order breaking ties — so having any one of them installed is enough, and two built-in servers never report on the same file. Naming ids in `lsp-servers` pins that language to those candidates and leaves the other languages on their own preference order; `none` disables LSP entirely. The selection is correctness-oriented (type errors, broken references) — diagnostics are breakage signal, not style findings. Custom servers or per-candidate overrides go in a pi-lsp `{ version: 1, servers: [...] }` JSON file set via `lsp-config-file`, also read from the default branch: a candidate id configures that server (`enabled: false` drops it, so the language falls back to the next candidate), a language id (`python`) with `enabled: false` switches the language off. Both inputs apply to CI comment reviews only.
 
 **Search budgets.** Regular search: 3 queries, 5 results each, 8s per request. AI search: 1 query, 5 sources, 15s. Package registry lookup (PyPI, Maven Central, crates.io, npm, Go proxy) is default-on in CI comment reviews with no opt-out: 5 lookups per review, 8s each, 15s total. GitHub research (`gh`-backed, also default-on; `gh: 'false'` disables) is bounded to 8 dispatched `gh` subprocesses and 15s of cumulative `gh` wait time, defaulting to public scope (`github-scope: token-accessible` allows token-readable resources). The request budget counts dispatched subprocesses, not GitHub API calls: a repository visibility probe and a failed attempt each cost one, and the three research tools share the budget. The time budget measures time spent waiting on `gh`, so the time the model spends thinking does not consume it. All external results are untrusted.
 
@@ -194,7 +194,7 @@ Mirrors [`action.yml`](./action.yml) — the action is source of truth if they d
 | `skills-dirs` | `.pi/skills,.claude/skills,.agents/skills,skills` | Skill dirs for review guidance; `none` disables |
 | `extra-instructions` | off | Maintainer focus notes, appended verbatim |
 | `mcp-config-file` | off | MCP JSON config path, read from the default branch |
-| `lsp-servers` | all seven presets | Subset or `none` to disable semantic context |
+| `lsp-servers` | all languages, best changed-file coverage | Pin a language's server, or `none` to disable semantic context |
 | `lsp-config-file` | off | LSP JSON overrides, read from the default branch |
 | `web-search` | `false` | Regular web search for current public facts |
 | `search-provider` | — | `exa`, `brave`, or `duckduckgo` (no fallback) |

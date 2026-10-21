@@ -58,13 +58,14 @@ import { probeGhCli } from "./github-research/gh-runner.js";
 import { KNOWN_CI_TOOL_NAMES, LSP_TOOL_NAMES, MCP_TOOL_NAME } from "./tool-names.js";
 import {
   restoreAgentDir,
-  resolveLspEntries,
+  resolveLspPlan,
   setAgentDir,
   writeTrustedLspConfig,
+  type LspFileServer,
   type LspServerOverrides,
 } from "../core/lsp/config.js";
 import { loadPiLspExtension, partitionExtensionTools } from "../core/lsp/extension.js";
-import { probeServerBinaries } from "../core/lsp/probe.js";
+import { pickGroupServers, probeServerBinaries } from "../core/lsp/probe.js";
 import { resolveLspRoots } from "../core/lsp/roots.js";
 import type { CiMcpConfig } from "./mcp-config.js";
 
@@ -734,7 +735,8 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
   // LSP is CI-comment-only like MCP: local terminal/file runs never spawn
   // servers. Unknown ids without a trusted definition fail fast here so a
   // typo can never silently narrow coverage for one language only.
-  const lspEntries = resolveLspEntries(target, options.lspServers, options.lspOverrides ?? {});
+  const lspPlan = resolveLspPlan(target, options.lspServers, options.lspOverrides ?? {});
+  const lspEnabled = !lspPlan.disabled;
   if (options.lspServers !== undefined && target !== "comment")
     logger.warn(
       "review.lsp.disabled",
@@ -762,20 +764,119 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
   const explicitMaxDiffChars = resolveExplicitMaxDiffChars(options.maxDiffChars);
 
   const diffFiles = extractDiffFiles(stripNoiseFiles(rawDiff).kept.join(""));
-  // Root diagnostic: which workspace root each changed file resolves to per
-  // server, using pi-lsp's own matching. A file that matches no server is
-  // reviewed from text alone; a file whose markers are missing skips that
-  // server with a warning naming the expected markers.
-  if (lspEntries.length > 0) {
-    const roots = await resolveLspRoots(cwd, diffFiles, lspEntries);
-    for (const match of roots.matches) {
+  // One server per language: the candidates of a group are alternatives, and
+  // the installed one that covers the most changed files serves the language.
+  // Custom config-file servers run exactly as configured.
+  let lspEntries: LspFileServer[] = [];
+  const candidateEntries = [
+    ...lspPlan.groups.flatMap((group) => group.candidates),
+    ...lspPlan.custom,
+  ];
+  if (candidateEntries.length > 0) {
+    // Root diagnostic: which workspace root each changed file resolves to per
+    // server, using pi-lsp's own matching. A file that matches no server is
+    // reviewed from text alone; a file whose markers are missing skips that
+    // server with a warning naming the expected markers.
+    const roots = await resolveLspRoots(cwd, diffFiles, candidateEntries);
+    // Startup availability per candidate: operators see what will run and
+    // what was skipped before the agent starts. Binaries resolve per matched
+    // workspace root, exactly as pi-lsp will spawn them; missing ones
+    // warn-and-skip per the require-preinstalled policy.
+    const probes = await probeServerBinaries(candidateEntries, { cwd, roots: roots.matches });
+    const probeById = new Map(probes.map((probe) => [probe.id, probe]));
+    const picks = pickGroupServers(lspPlan.groups, probes);
+    // The servers that will run: one per language group plus the custom
+    // ones. Roots are reported for those only — a candidate that lost the
+    // preference order never opens a workspace.
+    lspEntries = [...picks.flatMap((pick) => (pick.entry ? [pick.entry] : [])), ...lspPlan.custom];
+    const runningIds = new Set(lspEntries.map((entry) => entry.id));
+    for (const pick of picks) {
+      // The files of the language: what any of its candidates was matched to,
+      // plus the files that matched it but resolved to no workspace root.
+      const groupPlan = lspPlan.groups.find((group) => group.group.id === pick.group);
+      const candidateIds = new Set(groupPlan?.candidates.map((candidate) => candidate.id) ?? []);
+      const languageFiles = new Set([
+        ...roots.matches
+          .filter((match) => candidateIds.has(match.id))
+          .flatMap((match) => match.files),
+        ...roots.skipped
+          .filter((skipped) => candidateIds.has(skipped.server))
+          .map((skipped) => skipped.file),
+      ]);
+      if (pick.entry) {
+        const entry = pick.entry;
+        logger.info("review.lsp.server.selected", "LSP server selected", {
+          language: pick.group,
+          server: entry.id,
+          bin: entry.bin,
+        });
+        // A configured server is not a served file: the selected server can
+        // match fewer files than the language has (an overridden include
+        // pattern), and then those files get no semantic context. Files the
+        // running server skipped for a missing root are reported separately.
+        const served = new Set(probeById.get(entry.id)?.servedFiles ?? []);
+        const explained = new Set(
+          roots.skipped
+            .filter((skipped) => skipped.server === entry.id)
+            .map((skipped) => skipped.file),
+        );
+        const uncovered = [...languageFiles].filter(
+          (file) => !served.has(file) && !explained.has(file),
+        );
+        if (uncovered.length > 0) {
+          logger.warn(
+            "review.lsp.language.uncovered",
+            "LSP server does not serve every changed file",
+            {
+              language: pick.group,
+              server: entry.id,
+              files: uncovered,
+            },
+          );
+        }
+        continue;
+      }
+      // A language the diff does not touch needs no server: the warning about
+      // missing binaries is about coverage the review actually lost.
+      if (languageFiles.size === 0) continue;
+      const ruledOut =
+        groupPlan?.candidates.filter((candidate) => !probeById.get(candidate.id)?.found) ?? [];
+      logger.warn("review.lsp.language.missing", "No LSP server available; language skipped", {
+        language: pick.group,
+        candidates: ruledOut.map((candidate) => {
+          const probe = probeById.get(candidate.id);
+          return `${candidate.id} (${probe?.bin ?? "?"}: ${probe?.installHint ?? "no install hint"})`;
+        }),
+      });
+    }
+    const customIds = new Set(lspPlan.custom.map((entry) => entry.id));
+    for (const probe of probes.filter(
+      (candidate) => candidate.found && customIds.has(candidate.id),
+    ))
+      logger.info("review.lsp.server.available", "LSP server available", {
+        server: probe.id,
+        bin: probe.bin,
+      });
+    const missingCustom = probes.filter(
+      (candidate) => !candidate.found && customIds.has(candidate.id),
+    );
+    if (missingCustom.length > 0) {
+      logger.warn("review.lsp.server.missing", "LSP servers missing; languages skipped", {
+        servers: missingCustom.map(
+          (probe) => `${probe.id} (${probe.bin}: ${probe.installHint ?? "no install hint"})`,
+        ),
+      });
+    }
+    // Roots are reported for the running servers only — a candidate that
+    // lost the preference order never opens a workspace.
+    for (const match of roots.matches.filter((candidate) => runningIds.has(candidate.id))) {
       logger.info("review.lsp.root", "LSP workspace root", {
         server: match.id,
         root: match.root,
         files: match.files.length,
       });
     }
-    for (const skipped of roots.skipped) {
+    for (const skipped of roots.skipped.filter((candidate) => runningIds.has(candidate.server))) {
       logger.warn(
         "review.lsp.root.missing",
         "LSP root markers not found; language skipped for file",
@@ -788,26 +889,6 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
     }
     for (const rootWarning of roots.warnings) {
       logger.warn("review.lsp.root.warning", rootWarning);
-    }
-    // Startup availability per server: operators see what will run and what
-    // was skipped before the agent starts. Binaries resolve per matched
-    // workspace root, exactly as pi-lsp will spawn them; missing ones
-    // warn-and-skip per the require-preinstalled policy. All missing servers
-    // share one warn line so bare runners don't pay a line per language.
-    const probes = await probeServerBinaries(lspEntries, { cwd, roots: roots.matches });
-    for (const probe of probes.filter((candidate) => candidate.found)) {
-      logger.info("review.lsp.server.available", "LSP server available", {
-        server: probe.id,
-        bin: probe.bin,
-      });
-    }
-    const missing = probes.filter((candidate) => !candidate.found);
-    if (missing.length > 0) {
-      logger.warn("review.lsp.server.missing", "LSP servers missing; languages skipped", {
-        servers: missing.map(
-          (probe) => `${probe.id} (${probe.bin}: ${probe.installHint ?? "no install hint"})`,
-        ),
-      });
     }
   }
   const context = await loadContext({ cwd, diffFiles });
@@ -927,7 +1008,7 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
       ...codeExecTools,
     ].map((tool) => tool.name);
     if (mcpConfig) available.push(MCP_TOOL_NAME);
-    if (lspEntries.length > 0) available.push(...LSP_TOOL_NAMES);
+    if (lspEnabled) available.push(...LSP_TOOL_NAMES);
     logger.info("review.tools.status", "Tool availability", {
       available,
       unavailable: KNOWN_CI_TOOL_NAMES.filter((name) => !available.includes(name)),
@@ -1092,8 +1173,10 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
     return mcpLoggableArgs.get(key) ?? [];
   };
   // The extension session path serves both MCP and LSP. It exists whenever
-  // either is configured; otherwise the agent runs without extensions.
-  const needsExtensionSession = Boolean(mcpConfig) || lspEntries.length > 0;
+  // either is configured; otherwise the agent runs without extensions. LSP
+  // counts as configured even when no server binary turned out to be
+  // installed: the tool surface stays the same on every runner.
+  const needsExtensionSession = Boolean(mcpConfig) || lspEnabled;
   if (needsExtensionSession) {
     const agentDir = await mkdtemp(path.join(tmpdir(), "pi-reviewer-agent-"));
     let session: Awaited<ReturnType<typeof createAgentSession>>["session"] | undefined;
@@ -1115,7 +1198,7 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
         else process.env.MCP_UI_DEBUG = previousMcpUiDebug;
         restoreAgentDir(previousPiAgentDir);
       };
-      if (lspEntries.length > 0) {
+      if (lspEnabled) {
         await writeTrustedLspConfig(agentDir, lspEntries);
       }
       const extensionFactories: never[] = [];
@@ -1168,7 +1251,7 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
       }
       // pi-lsp ships untyped TypeScript sources (see loadPiLspExtension), so
       // it is loaded only when LSP is enabled for CI comment reviews.
-      if (lspEntries.length > 0) {
+      if (lspEnabled) {
         extensionFactories.push((await loadPiLspExtension()) as never);
       }
       const resourceLoader = new DefaultResourceLoader({
@@ -1202,7 +1285,7 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
             // missing here are filtered from the tool registry, so the
             // session could never activate them below even though their
             // extension registered them.
-            ...(lspEntries.length > 0 ? LSP_TOOL_NAMES : []),
+            ...(lspEnabled ? LSP_TOOL_NAMES : []),
             ...baseTools.map((tool) => tool.name),
           ]),
         ],
@@ -1220,7 +1303,7 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
       for (const name of lspToolNames) registeredLspTools.add(name);
       if (mcpConfig && mcpToolNames.length === 0)
         throw new Error("MCP adapter did not register any tools for the configured servers");
-      if (lspEntries.length > 0 && lspToolNames.length === 0)
+      if (lspEnabled && lspToolNames.length === 0)
         throw new Error("pi-lsp did not register any tools");
       session.setActiveToolsByName([
         ...new Set([
@@ -1230,7 +1313,7 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
           // Each family is gated on its own config: an unrelated extension's
           // `lsp_*` tool must not leak into an MCP-only review or vice versa.
           ...(mcpConfig ? mcpToolNames : []),
-          ...(lspEntries.length > 0 ? lspToolNames : []),
+          ...(lspEnabled ? lspToolNames : []),
           ...baseTools.map((tool) => tool.name),
         ]),
       ]);
@@ -1242,7 +1325,7 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
       if (mcpConfig && mcpTools.length === 0)
         throw new Error("MCP adapter tools were not enabled in the review agent");
       const lspTools = session.agent.state.tools.filter((tool) => lspToolNames.includes(tool.name));
-      if (lspEntries.length > 0 && lspTools.length === 0)
+      if (lspEnabled && lspTools.length === 0)
         throw new Error("LSP tools were not enabled in the review agent");
 
       agent = session.agent;
@@ -1278,7 +1361,7 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
       };
       if (mcpConfig)
         logger.info("review.mcp.enabled", "MCP enabled", { toolCount: registeredMcpTools.size });
-      if (lspEntries.length > 0)
+      if (lspEnabled)
         logger.info("review.lsp.enabled", "LSP enabled", {
           servers: lspEntries.map((entry) => entry.id),
           toolCount: registeredLspTools.size,
