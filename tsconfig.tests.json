@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["node"],
+    "noEmit": true,
+    "allowImportingTsExtensions": true
+  },
+  "include": ["tests"],
+  "//exclude": "The UI tests live under tsconfig.ui-tests.json: they import the UI sources, which resolve under the bundler resolution the UI is built with, not the NodeNext resolution the rest of the suite uses.",
+  "exclude": ["./tests/ui"]
+}

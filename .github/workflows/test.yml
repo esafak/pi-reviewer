@@ -72,6 +72,9 @@ jobs:
       - name: Run type tests
         run: vpr typecheck:types
 
+      - name: Typecheck the test suite
+        run: vpr typecheck:tests
+
       - name: Run lint
         run: vpr lint
 

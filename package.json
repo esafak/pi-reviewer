@@ -13,6 +13,7 @@
     "lint": "vp lint && tsx scripts/lint-graphql.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit -p tsconfig.json",
+    "typecheck:tests": "tsc --noEmit -p tsconfig.tests.json && tsc --noEmit -p tsconfig.ui-tests.json",
     "typecheck:types": "tsc --noEmit -p tsconfig.typecheck.json"
   },
   "dependencies": {
