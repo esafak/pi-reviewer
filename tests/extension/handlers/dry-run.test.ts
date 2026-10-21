@@ -64,6 +64,7 @@ function makeOpts(parsedOverrides: Partial<ReviewCommandArgs> = {}) {
     defaultModel: undefined,
     availableModels: [],
     defaultThinking: undefined,
+    sessionModel: undefined,
   };
 }
 

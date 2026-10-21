@@ -146,7 +146,12 @@ function makeFakeFsOps(files: Record<string, string>) {
   };
 }
 
-function captureProvider() {
+function captureProvider(): (opts: {
+  cwd: string;
+  diffFiles: string[];
+  fs: any;
+  gitRoot?: string;
+}) => Promise<{ path: string; content: string }[]> {
   const handlers = new Map<string, Array<(data: unknown) => void>>();
   const events = {
     emit(channel: string, data: unknown) {

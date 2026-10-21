@@ -234,10 +234,11 @@ describe("gh CLI contract", () => {
         // unknown flag, so the premise is checked rather than assumed.
         expect(await probeFlag(command, UNKNOWN_FLAG)).toBe("rejected");
       });
-      if (!profile.json) continue;
+      const jsonFields = profile.json;
+      if (!jsonFields) continue;
       it(`${command} still supports the fields the transport requests`, async () => {
         const fields = await supportedFields(command);
-        for (const list of profile.json)
+        for (const list of jsonFields)
           for (const field of list.split(","))
             expect(fields.has(field), `${command} no longer supports the field ${field}`).toBe(
               true,

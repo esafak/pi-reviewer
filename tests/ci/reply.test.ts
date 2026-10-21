@@ -523,7 +523,7 @@ describe("review-comment reply action path", () => {
   it("resolves each candidate author once and excludes unknown permissions", async () => {
     const github = client();
     github.getCollaboratorPermission.mockImplementation(async (_repo: string, login: string) =>
-      login === "admin" ? "admin" : undefined,
+      login === "admin" ? "admin" : "read",
     );
     const authorized = await resolveAuthorizedLogins(github, "owner/repo", [
       "admin",

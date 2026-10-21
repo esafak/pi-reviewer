@@ -15,6 +15,7 @@ import {
   sendOutput,
 } from "../../src/core/output.js";
 import { decodeBatchMarker } from "../../src/ci/batch.js";
+import type { AiFixContext } from "../../src/core/ai-fix-footer.js";
 import {
   bodyFindingId,
   decodeBodyFindingMarkers,
@@ -1232,7 +1233,7 @@ describe("sendOutput", () => {
   });
 
   it("renders summary and Fixit payloads independently from canonical prose", () => {
-    const context = { file: "src/a.ts", line: 2, side: "RIGHT", severity: "WARN" };
+    const context: AiFixContext = { file: "src/a.ts", line: 2, side: "RIGHT", severity: "WARN" };
     const body = "Check this:\n\n```ts\nreturn value;\n```";
     expect(renderFindingSummary(context, body)).toBe(
       "🟡 **`src/a.ts:2 · RIGHT`**\n\nCheck this:\n\n```ts\nreturn value;\n```",

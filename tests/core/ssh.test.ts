@@ -4,6 +4,8 @@ vi.mock("node:child_process", () => ({
   execFile: vi.fn(),
 }));
 
+import type { ExecFileException, ExecFileOptions } from "node:child_process";
+import type { NonSharedBuffer } from "node:buffer";
 import { execFile } from "node:child_process";
 import { resolveSshState } from "../../src/core/ssh.js";
 
@@ -12,12 +14,19 @@ const execFileMock = vi.mocked(execFile);
 function mockSsh(output: string): void {
   execFileMock.mockImplementation(
     (
-      _command: string,
-      _args: string[],
-      _options: unknown,
-      callback: (...args: unknown[]) => void,
+      _file: string,
+      _args: readonly string[] | null | undefined,
+      _options: ExecFileOptions | null | undefined,
+      callback:
+        | ((
+            error: ExecFileException | null,
+            stdout: string | NonSharedBuffer,
+            stderr: string | NonSharedBuffer,
+          ) => void)
+        | null
+        | undefined,
     ) => {
-      callback(null, output, "");
+      callback?.(null, output, "");
       return undefined as never;
     },
   );

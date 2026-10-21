@@ -85,6 +85,7 @@ function makeOpts(parsedOverrides: Partial<ReviewCommandArgs> = {}) {
     defaultModel: undefined,
     availableModels: [],
     defaultThinking: undefined,
+    sessionModel: undefined,
   };
 }
 
@@ -124,7 +125,9 @@ describe("handleSSHReview — non-UI path (sshState = null)", () => {
   it("registers before_agent_start and agent_end hooks", async () => {
     const opts = makeOpts();
     await handleSSHReview(opts);
-    const events = vi.mocked(opts.pi.on).mock.calls.map((c) => c[0]);
+    const events = vi
+      .mocked(opts.pi.on)
+      .mock.calls.map((call: [string, (data: unknown) => void]) => call[0]);
     expect(events).toContain("before_agent_start");
     expect(events).toContain("agent_end");
   });

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { beforeEach, describe, expect, it, vi, type Mock } from "vite-plus/test";
 import { access, chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -50,36 +50,56 @@ vi.mock("@earendil-works/pi-coding-agent", () => ({
   SessionManager: { inMemory: vi.fn(() => ({})) },
 }));
 
+/**
+ * The MCP adapter factory the review path loads.
+ *
+ * The adapter ships TypeScript sources, so the test takes the factory's type
+ * from the call the review path makes instead of importing the package: a
+ * static import would pull those sources into the test program and typecheck
+ * them along with the tests.
+ */
+const { createMcpAdapterMock } = vi.hoisted(() => ({
+  createMcpAdapterMock: vi.fn<(options: McpAdapterOptions) => unknown>(() => () => {}),
+}));
+
 vi.mock("pi-mcp-adapter", () => ({
-  createMcpAdapter: vi.fn(() => () => {}),
+  createMcpAdapter: createMcpAdapterMock,
 }));
 
-vi.mock("../../src/core/review-tool.js", () => ({
-  createReviewTool: vi.fn(() => ({
-    tool: {
-      name: "submit_review",
-      label: "submit_review",
-      description: "test",
-      parameters: {},
-      execute: vi.fn(),
-    },
-    getResult: () => undefined,
-  })),
-}));
+vi.mock("../../src/core/review-tool.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/core/review-tool.js")>();
+  return {
+    ...actual,
+    createReviewTool: vi.fn(() => ({
+      tool: {
+        name: "submit_review",
+        label: "submit_review",
+        description: "test",
+        parameters: reviewSchema,
+        execute: vi.fn(),
+      },
+      getResult: () => undefined,
+    })),
+  };
+});
 
-vi.mock("../../src/core/reply-tool.js", () => ({
-  ALLOWED_REACTIONS: ["+1", "-1", "laugh", "confused", "heart", "hooray", "rocket", "eyes"],
-  createReplyTool: vi.fn(() => ({
-    tool: {
-      name: "submit_reply",
-      label: "submit_reply",
-      description: "test",
-      parameters: {},
-      execute: vi.fn(),
-    },
-    getResult: () => undefined,
-  })),
-}));
+vi.mock("../../src/core/reply-tool.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/core/reply-tool.js")>();
+  return {
+    ...actual,
+    ALLOWED_REACTIONS: ["+1", "-1", "laugh", "confused", "heart", "hooray", "rocket", "eyes"],
+    createReplyTool: vi.fn(() => ({
+      tool: {
+        name: "submit_reply",
+        label: "submit_reply",
+        description: "test",
+        parameters: replySchema,
+        execute: vi.fn(),
+      },
+      getResult: () => undefined,
+    })),
+  };
+});
 
 import { Agent } from "@earendil-works/pi-agent-core";
 import {
@@ -87,14 +107,13 @@ import {
   createReadOnlyTools,
   DefaultResourceLoader,
 } from "@earendil-works/pi-coding-agent";
-import { createMcpAdapter } from "pi-mcp-adapter";
 import { loadContext } from "../../src/core/context.js";
 import { extractDiffFiles, resolveRawDiff } from "../../src/core/diff-resolver.js";
 import { loadDocContext } from "../../src/core/doc-context.js";
 import { loadSkillContext, resolveSkillDirs } from "../../src/core/skill-context.js";
-import { sendOutput } from "../../src/core/output.js";
-import { createReviewTool } from "../../src/core/review-tool.js";
-import { createReplyTool } from "../../src/core/reply-tool.js";
+import { sendOutput, type ReviewResult } from "../../src/core/output.js";
+import { createReviewTool, reviewSchema } from "../../src/core/review-tool.js";
+import { createReplyTool, replySchema } from "../../src/core/reply-tool.js";
 import type { CiMcpConfig } from "../../src/ci/mcp-config.js";
 import { LSP_TOOL_NAMES } from "../../src/ci/tool-names.js";
 import {
@@ -115,6 +134,7 @@ import {
   REPLY_INPUT_LIMITS,
   truncateReplyInput,
 } from "../../src/ci/review.js";
+import type { McpAdapterOptions } from "../../src/ci/review.js";
 
 describe("reply prompt limits", () => {
   it("truncates untrusted reply inputs with an explicit marker", () => {
@@ -202,7 +222,6 @@ const AgentMock = vi.mocked(Agent);
 const createReadOnlyToolsMock = vi.mocked(createReadOnlyTools);
 const createAgentSessionMock = vi.mocked(createAgentSession);
 const DefaultResourceLoaderMock = vi.mocked(DefaultResourceLoader);
-const createMcpAdapterMock = vi.mocked(createMcpAdapter);
 const createReviewToolMock = vi.mocked(createReviewTool);
 const createReplyToolMock = vi.mocked(createReplyTool);
 
@@ -214,16 +233,23 @@ let fakeToolExecutions: Array<{ toolName: string; toolCallId: string; args: unkn
 let fakeMcpSession: ReturnType<typeof makeFakeMcpSession>;
 
 interface FakeAgent {
-  subscribe: ReturnType<typeof vi.fn>;
-  prompt: ReturnType<typeof vi.fn>;
+  subscribe: Mock<(cb: (event: unknown) => void) => unknown>;
+  prompt: Mock<(message: string) => Promise<unknown>>;
   state: { tools: unknown[] };
-  streamFunction: ReturnType<typeof vi.fn>;
+  streamFunction: Mock<(...args: never[]) => void>;
+}
+
+/** The state the first agent run was given. */
+function agentState() {
+  const state = AgentMock.mock.calls[0]?.[0]?.initialState;
+  if (!state) throw new Error("the agent run was not observed");
+  return state;
 }
 
 function makeFakeAgent(text = "LGTM"): FakeAgent {
   let listener: ((event: unknown) => void) | undefined;
   const agent: FakeAgent = {
-    subscribe: vi.fn((cb: (event: unknown) => void) => {
+    subscribe: vi.fn<(cb: (event: unknown) => void) => unknown>((cb) => {
       listener = cb;
       return vi.fn();
     }),
@@ -232,7 +258,7 @@ function makeFakeAgent(text = "LGTM"): FakeAgent {
     // agent_end. The prompt also calls the *installed* stream function — the
     // review wrapper once review() has run — so a test can observe the request
     // the run would have sent.
-    prompt: vi.fn(async () => {
+    prompt: vi.fn<(message: string) => Promise<unknown>>(async () => {
       agent.streamFunction({} as never, {} as never, {} as never);
       for (const event of fakeAgentEvents) listener?.(event);
       for (const call of fakeToolExecutions) {
@@ -253,7 +279,7 @@ function makeFakeAgent(text = "LGTM"): FakeAgent {
       });
     }),
     state: { tools: [] },
-    streamFunction: vi.fn(),
+    streamFunction: vi.fn<(...args: never[]) => void>(),
   };
   return agent;
 }
@@ -308,21 +334,22 @@ describe("review", () => {
     resolveRawDiffMock.mockResolvedValue({
       raw: "diff --git a/a.ts b/a.ts",
       source: "git diff origin/main...HEAD",
+      changedFiles: [],
     });
     loadContextMock.mockResolvedValue({
       conventions: [{ path: "AGENTS.md", content: "- Use strict typing" }],
       reviewRules: [],
     });
-    sendOutputMock.mockResolvedValue(undefined);
+    sendOutputMock.mockResolvedValue({ commentIds: [], fallback: false });
     createReadOnlyToolsMock.mockReturnValue([]);
     createAgentSessionMock.mockResolvedValue({ session: fakeMcpSession } as never);
-    createMcpAdapterMock.mockReturnValue((() => {}) as never);
+    createMcpAdapterMock.mockReturnValue(() => {});
     createReviewToolMock.mockReturnValue({
       tool: {
         name: "submit_review",
         label: "submit_review",
         description: "test",
-        parameters: {},
+        parameters: reviewSchema,
         execute: vi.fn(),
       },
       getResult: () => ({ action: "review", result: { summary: "LGTM", comments: [] } }),
@@ -332,7 +359,7 @@ describe("review", () => {
         name: "submit_reply",
         label: "submit_reply",
         description: "test",
-        parameters: {},
+        parameters: replySchema,
         execute: vi.fn(),
       },
       getResult: () => undefined,
@@ -486,10 +513,10 @@ describe("review", () => {
         }),
       }),
     );
-    expect(AgentMock.mock.calls[0][0].initialState.tools).not.toEqual(
+    expect(agentState().tools).not.toEqual(
       expect.arrayContaining([expect.objectContaining({ name: "web_search" })]),
     );
-    expect(AgentMock.mock.calls[0][0].initialState.tools).not.toEqual(
+    expect(agentState().tools).not.toEqual(
       expect.arrayContaining([expect.objectContaining({ name: "package_lookup" })]),
     );
     expect(sendOutputMock).toHaveBeenCalledWith(
@@ -504,7 +531,7 @@ describe("review", () => {
   it("registers code_exec only for enabled CI comment reviews", async () => {
     process.env.PI_REVIEWER_CODE_EXEC = "true";
     await review({ cwd: "/repo", output: "comment", lspServers: "none" });
-    expect(AgentMock.mock.calls[0][0].initialState.tools).toEqual(
+    expect(agentState().tools).toEqual(
       expect.arrayContaining([expect.objectContaining({ name: "code_exec" })]),
     );
   });
@@ -512,14 +539,14 @@ describe("review", () => {
   it("withholds code_exec for non-comment output even when enabled", async () => {
     process.env.PI_REVIEWER_CODE_EXEC = "true";
     await review({ cwd: "/repo", output: "terminal" });
-    expect(AgentMock.mock.calls[0][0].initialState.tools).not.toEqual(
+    expect(agentState().tools).not.toEqual(
       expect.arrayContaining([expect.objectContaining({ name: "code_exec" })]),
     );
   });
 
   it("withholds code_exec for comment output when not enabled", async () => {
     await review({ cwd: "/repo", output: "comment", lspServers: "none" });
-    expect(AgentMock.mock.calls[0][0].initialState.tools).not.toEqual(
+    expect(agentState().tools).not.toEqual(
       expect.arrayContaining([expect.objectContaining({ name: "code_exec" })]),
     );
   });
@@ -1147,7 +1174,7 @@ describe("review", () => {
         name: "submit_review",
         label: "submit_review",
         description: "test",
-        parameters: {},
+        parameters: reviewSchema,
         execute: vi.fn(),
       },
       getResult: () => undefined,
@@ -2185,7 +2212,7 @@ describe("review", () => {
       lspServers: "none",
     });
 
-    const state = AgentMock.mock.calls[0][0].initialState;
+    const state = agentState();
     expect(state.tools).toEqual(
       expect.arrayContaining([expect.objectContaining({ name: "package_lookup" })]),
     );
@@ -2287,7 +2314,7 @@ describe("review", () => {
     expect(status?.fields.available).not.toEqual(expect.arrayContaining(["url_read"]));
     expect(status?.fields.unavailable).toEqual(expect.arrayContaining(["url_read"]));
 
-    const state = AgentMock.mock.calls[0][0].initialState;
+    const state = agentState();
     expect(state.tools).not.toEqual(
       expect.arrayContaining([expect.objectContaining({ name: "url_read" })]),
     );
@@ -2312,7 +2339,7 @@ describe("review", () => {
     const status = records.find(({ event }) => event === "review.tools.status");
     expect(status?.fields.available).toEqual(expect.arrayContaining(["url_read"]));
 
-    const state = AgentMock.mock.calls[0][0].initialState;
+    const state = agentState();
     expect(state.tools).toEqual(
       expect.arrayContaining([expect.objectContaining({ name: "url_read" })]),
     );
@@ -2340,7 +2367,7 @@ describe("review", () => {
       lspServers: "none",
     });
 
-    const state = AgentMock.mock.calls[0][0].initialState;
+    const state = agentState();
     expect(state.tools).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ name: "github_search" }),
@@ -2356,7 +2383,7 @@ describe("review", () => {
 
     await review({ cwd: "/repo", githubToken: "token" });
 
-    const state = AgentMock.mock.calls[0][0].initialState;
+    const state = agentState();
     expect(state.tools).not.toEqual(
       expect.arrayContaining([expect.objectContaining({ name: "github_search" })]),
     );
@@ -2416,7 +2443,11 @@ describe("review", () => {
   it("passes the resolved diff to sendOutput for position validation", async () => {
     const diff =
       "diff --git a/src/a.ts b/src/a.ts\n--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1,3 +1,3 @@\n";
-    resolveRawDiffMock.mockResolvedValue({ raw: diff, source: "git diff origin/main...HEAD" });
+    resolveRawDiffMock.mockResolvedValue({
+      raw: diff,
+      source: "git diff origin/main...HEAD",
+      changedFiles: [],
+    });
 
     await review({ cwd: "/repo" });
 
@@ -2708,7 +2739,7 @@ describe("review", () => {
         name: "submit_reply",
         label: "submit_reply",
         description: "test",
-        parameters: {},
+        parameters: replySchema,
         execute: vi.fn(),
       },
       getResult: () => toolAction,
@@ -2738,7 +2769,7 @@ describe("review", () => {
         name: "submit_reply",
         label: "submit_reply",
         description: "test",
-        parameters: {},
+        parameters: replySchema,
         execute: vi.fn(),
       },
       getResult: () => ({ action: "invalid" }) as any,
@@ -2786,7 +2817,7 @@ describe("review", () => {
   });
 
   it("uses submit_review tool result when the model called the tool", async () => {
-    const toolReview = {
+    const toolReview: ReviewResult = {
       summary: "Tool-based review",
       comments: [
         { file: "src/a.ts", line: 7, side: "RIGHT", severity: "WARN", body: "Handle undefined" },
@@ -2797,7 +2828,7 @@ describe("review", () => {
         name: "submit_review",
         label: "submit_review",
         description: "test",
-        parameters: {},
+        parameters: reviewSchema,
         execute: vi.fn(),
       },
       getResult: () => ({ action: "review", result: toolReview }),
@@ -2816,7 +2847,7 @@ describe("review", () => {
   });
 
   it("returns only the overview without posting in summary-only mode", async () => {
-    const toolReview = {
+    const toolReview: ReviewResult = {
       summary: "One line",
       pr_summary: "What: x. Why: y. Risks: z.",
       pr_diagram: "flowchart TD\nA-->B",
@@ -2829,7 +2860,7 @@ describe("review", () => {
         name: "submit_review",
         label: "submit_review",
         description: "test",
-        parameters: {},
+        parameters: reviewSchema,
         execute: vi.fn(),
       },
       getResult: () => ({ action: "review", result: toolReview }),
@@ -2859,7 +2890,7 @@ describe("review", () => {
       side: "RIGHT",
       body: "body finding",
     };
-    const toolReview = {
+    const toolReview: ReviewResult = {
       summary: "Updated body finding",
       comments: [],
       finding_updates: [
@@ -2871,7 +2902,7 @@ describe("review", () => {
         name: "submit_review",
         label: "submit_review",
         description: "test",
-        parameters: {},
+        parameters: reviewSchema,
         execute: vi.fn(),
       },
       getResult: () => ({ action: "review", result: toolReview }),
@@ -2924,7 +2955,7 @@ describe("review", () => {
         name: "submit_review",
         label: "submit_review",
         description: "test",
-        parameters: {},
+        parameters: reviewSchema,
         execute: vi.fn(),
       },
       getResult: () => ({
@@ -2947,7 +2978,7 @@ describe("review", () => {
         name: "submit_review",
         label: "submit_review",
         description: "test",
-        parameters: {},
+        parameters: reviewSchema,
         execute: vi.fn(),
       },
       getResult: () => undefined,
@@ -2969,7 +3000,7 @@ describe("review", () => {
         name: "submit_review",
         label: "submit_review",
         description: "test",
-        parameters: {},
+        parameters: reviewSchema,
         execute: vi.fn(),
       },
       getResult: () => undefined,
@@ -3011,7 +3042,7 @@ describe("review", () => {
         name: "submit_review",
         label: "submit_review",
         description: "test",
-        parameters: {},
+        parameters: reviewSchema,
         execute: vi.fn(),
       },
       // The first run produces nothing; the retry produces the decision.
@@ -3054,7 +3085,7 @@ describe("review", () => {
         name: "submit_review",
         label: "submit_review",
         description: "test",
-        parameters: {},
+        parameters: reviewSchema,
         execute: vi.fn(),
       },
       getResult: () => (decisionReads++ === 0 ? undefined : { action: "none" }),
@@ -3092,7 +3123,7 @@ describe("review", () => {
         name: "submit_review",
         label: "submit_review",
         description: "test",
-        parameters: {},
+        parameters: reviewSchema,
         execute: vi.fn(),
       },
       getResult: () => undefined,
@@ -3173,7 +3204,7 @@ describe("review", () => {
         name: "submit_review",
         label: "submit_review",
         description: "test",
-        parameters: {},
+        parameters: reviewSchema,
         execute: vi.fn(),
       },
       getResult: () => (decisionReads++ === 0 ? undefined : { action: "none" }),
@@ -3214,7 +3245,7 @@ describe("review", () => {
         name: "submit_review",
         label: "submit_review",
         description: "test",
-        parameters: {},
+        parameters: reviewSchema,
         execute: vi.fn(),
       },
       getResult: () => (decisionReads++ === 0 ? undefined : { action: "none" }),

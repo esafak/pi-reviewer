@@ -69,7 +69,7 @@ import { resolveLspRoots } from "../core/lsp/roots.js";
 import type { CiMcpConfig } from "./mcp-config.js";
 
 /** The options the MCP adapter is created with. */
-interface McpAdapterOptions {
+export interface McpAdapterOptions {
   config: CiMcpConfig;
 }
 import { formatServerNamespace, getServerPrefix } from "pi-mcp-adapter/types";

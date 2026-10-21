@@ -286,12 +286,12 @@ describe("lsp agent unavailable binaries", () => {
         const extension = await loadPiLspExtension();
         extension({
           registerMessageRenderer: () => {},
-          registerTool: (def) => {
+          registerTool: (def: { name: string }) => {
             if (def && typeof def.name === "string") tools.set(def.name, def);
           },
-          on: () => {},
+          on: () => () => {},
           sendMessage: () => {},
-        });
+        } as never);
         const hover = tools.get("lsp_hover");
         await expect(
           hover.execute(

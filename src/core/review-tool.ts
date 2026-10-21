@@ -125,7 +125,7 @@ const ACTION_DESCRIPTION =
  * never a harness outcome (a reaction, a comment) whose policy and state the
  * harness owns. The schema is therefore constant across runs.
  */
-const reviewSchema = Type.Object(
+export const reviewSchema = Type.Object(
   {
     action: Type.Union([Type.Literal("review"), Type.Literal("none")], {
       description: ACTION_DESCRIPTION,

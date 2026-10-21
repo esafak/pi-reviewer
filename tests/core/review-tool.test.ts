@@ -1,17 +1,35 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { validateToolArguments } from "@earendil-works/pi-ai";
+import { validateToolArguments, type JsonObject, type JsonValue } from "@earendil-works/pi-ai";
 
 import { createReviewTool } from "../../src/core/review-tool.js";
 
+/** The arguments the review tool accepts, taken from the tool itself. */
+type ReviewParams = Parameters<ReturnType<typeof createReviewTool>["tool"]["execute"]>[1];
+
+/** One comment as the arguments carry it. */
+type ReviewComment = NonNullable<ReviewParams["comments"]>[number];
+
+/**
+ * The arguments with their comments present.
+ *
+ * The comments are required here so a fixture can address one by index; the
+ * tool's own type has them optional.
+ */
+type ReviewFixture = {
+  action: ReviewParams["action"];
+  summary: string;
+  comments: ReviewComment[];
+};
+
 /** Minimal ToolCall shape expected by validateToolArguments. */
-function toolCall(args: Record<string, unknown>) {
+function toolCall(args: JsonObject) {
   return { type: "toolCall" as const, id: "tc-1", name: "submit_review", arguments: args };
 }
 
-function validArgs() {
+function validArgs(): ReviewFixture {
   return {
-    action: "review" as const,
+    action: "review",
     summary: "Looks good overall.",
     comments: [
       {
@@ -29,6 +47,20 @@ function validArgs() {
         body: "This removal breaks callers.",
       },
     ],
+  };
+}
+
+/**
+ * The arguments as the tool receives them, with one comment left mutable.
+ *
+ * The rejection cases feed the schema a value it must refuse, so the comment
+ * is a JSON object whose fields vary rather than the schema's own type.
+ */
+function argsWithComment(comment: Record<string, JsonValue>): JsonObject {
+  return {
+    action: "review",
+    summary: "Looks good overall.",
+    comments: [comment],
   };
 }
 
@@ -140,40 +172,79 @@ describe("createReviewTool", () => {
 
   it("accepts optional replacement code, including an empty deletion", () => {
     const { tool } = createReviewTool();
-    const args = validArgs();
-    (args.comments[0] as Record<string, unknown>).suggestion = "return value;";
-    (args.comments[1] as Record<string, unknown>).suggestion = "";
+    const args: JsonObject = {
+      action: "review",
+      summary: "Looks good overall.",
+      comments: [
+        {
+          file: "src/a.ts",
+          line: 10,
+          side: "RIGHT",
+          severity: "WARN",
+          body: "Consider a null check.",
+          suggestion: "return value;",
+        },
+        {
+          file: "src/b.ts",
+          line: 5,
+          side: "LEFT",
+          severity: "CRITICAL",
+          body: "This removal breaks callers.",
+          suggestion: "",
+        },
+      ],
+    };
     expect(() => validateToolArguments(tool, toolCall(args))).not.toThrow();
   });
 
   it("schema rejects an invalid side value", () => {
     const { tool } = createReviewTool();
-    const args = validArgs();
-    (args.comments[0] as Record<string, unknown>).side = "CENTER";
+    const args = argsWithComment({
+      file: "src/a.ts",
+      line: 10,
+      side: "CENTER",
+      severity: "WARN",
+      body: "Consider a null check.",
+    });
 
     expect(() => validateToolArguments(tool, toolCall(args))).toThrow(/Validation failed/);
   });
 
   it("schema rejects an invalid severity value", () => {
     const { tool } = createReviewTool();
-    const args = validArgs();
-    (args.comments[0] as Record<string, unknown>).severity = "ERROR";
+    const args = argsWithComment({
+      file: "src/a.ts",
+      line: 10,
+      side: "RIGHT",
+      severity: "ERROR",
+      body: "Consider a null check.",
+    });
 
     expect(() => validateToolArguments(tool, toolCall(args))).toThrow(/Validation failed/);
   });
 
   it("schema rejects a non-numeric line", () => {
     const { tool } = createReviewTool();
-    const args = validArgs();
-    (args.comments[0] as Record<string, unknown>).line = "not-a-number";
+    const args = argsWithComment({
+      file: "src/a.ts",
+      line: "not-a-number",
+      side: "RIGHT",
+      severity: "WARN",
+      body: "Consider a null check.",
+    });
 
     expect(() => validateToolArguments(tool, toolCall(args))).toThrow(/Validation failed/);
   });
 
   it("schema rejects fractional line numbers", () => {
     const { tool } = createReviewTool();
-    const args = validArgs();
-    (args.comments[0] as Record<string, unknown>).line = 10.5;
+    const args = argsWithComment({
+      file: "src/a.ts",
+      line: 10.5,
+      side: "RIGHT",
+      severity: "WARN",
+      body: "Consider a null check.",
+    });
 
     expect(() => validateToolArguments(tool, toolCall(args))).toThrow(/Validation failed/);
   });

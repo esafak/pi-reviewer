@@ -135,10 +135,12 @@ describe("gh-backed GitHub research", () => {
     const timeoutsOf = (run: TimedRun) => run.mock.calls.map((call) => call[2]?.timeout);
     it("does not spend the allowance on time between calls", async () => {
       let now = 0;
-      const run = vi.fn(async () => {
-        now += 1;
-        return { stdout: "ok" };
-      });
+      const run = vi.fn(
+        async (_command: string, _args: string[], _options: { timeout?: number }) => {
+          now += 1;
+          return { stdout: "ok" };
+        },
+      );
       const gh = createGhRunner("t", run as never, { now: () => now });
       for (let i = 0; i < 8; i++) {
         now += 60_000;
@@ -148,10 +150,12 @@ describe("gh-backed GitHub research", () => {
     });
     it("fails without dispatching once the allowance is spent", async () => {
       let now = 0;
-      const run = vi.fn(async () => {
-        now += 100;
-        return { stdout: "ok" };
-      });
+      const run = vi.fn(
+        async (_command: string, _args: string[], _options: { timeout?: number }) => {
+          now += 100;
+          return { stdout: "ok" };
+        },
+      );
       const gh = createGhRunner("t", run as never, { now: () => now, waitMs: 500, timeoutMs: 500 });
       for (let i = 0; i < 5; i++) await gh(["repo", "view"]);
       await expect(gh(["repo", "view"])).rejects.toThrow("time budget exhausted");
@@ -161,10 +165,12 @@ describe("gh-backed GitHub research", () => {
     });
     it("shrinks the subprocess timeout as the allowance is consumed", async () => {
       let now = 0;
-      const run = vi.fn(async () => {
-        now += 400;
-        return { stdout: "ok" };
-      });
+      const run = vi.fn(
+        async (_command: string, _args: string[], _options: { timeout?: number }) => {
+          now += 400;
+          return { stdout: "ok" };
+        },
+      );
       const gh = createGhRunner("t", run as never, {
         now: () => now,
         waitMs: 1000,
@@ -231,10 +237,12 @@ describe("gh-backed GitHub research", () => {
     });
     it("passes an integer timeout for a fractional clock", async () => {
       let now = 0;
-      const run = vi.fn(async () => {
-        now += 5.25;
-        return { stdout: "ok" };
-      });
+      const run = vi.fn(
+        async (_command: string, _args: string[], _options: { timeout?: number }) => {
+          now += 5.25;
+          return { stdout: "ok" };
+        },
+      );
       const gh = createGhRunner("t", run as never, {
         now: () => now,
         waitMs: 100,

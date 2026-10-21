@@ -23,7 +23,7 @@ export type ReplyAction =
 // falls back to text. Model the action as a discriminated object and enforce
 // the per-action requirements in `execute`. Guarded by
 // tests/core/tool-schemas.test.ts.
-const replySchema = Type.Object(
+export const replySchema = Type.Object(
   {
     action: Type.Union([Type.Literal("react"), Type.Literal("reply"), Type.Literal("resolve")], {
       description:
