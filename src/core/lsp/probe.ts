@@ -142,7 +142,7 @@ export interface LspGroupPick {
 
 /**
  * Picks one server per language group. Two servers for one language would
- * report on the same files, so the group gets exactly one.
+ * report on the same files, so the group gets at most one.
  *
  * The candidate that serves the most of the language's files wins, because
  * availability alone is not coverage: a server installed in one workspace
