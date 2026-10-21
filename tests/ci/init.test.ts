@@ -52,6 +52,8 @@ describe("init", () => {
     expect(content).not.toContain("reactions: write");
     expect(content).not.toContain("react-on-no-findings");
     expect(content).toContain("review-drafts: 'false'");
+    expect(content).toContain("# mode: 'dependency'");
+    expect(content).toContain("# url-reader: 'true'");
   });
 
   it("creates intermediate directories when missing", async () => {

@@ -87,6 +87,12 @@ jobs:
           # ai-search-provider: 'brave' # optional
           # gh: 'false' # optional: disable gh-backed GitHub research
           # github-scope: 'public' # or 'token-accessible'; defaults to public
+          # mode: 'dependency' # optional: check dependency upgrades instead of the diff.
+          #   This job skips renovate[bot] pull requests, so the dependency mode
+          #   reaches only the bumps a person made.
+          # url-reader: 'true' # optional: read release notes from upstreams that are
+          #   not on GitHub; off by default because it is the only tool that can
+          #   reach an arbitrary host.
           # code-exec: 'true' # optional, sandboxed offline code execution (code_exec)
           # code-exec-timeout-ms: '120000' # per-command timeout
           # code-exec-max-calls: '5' # calls per review
