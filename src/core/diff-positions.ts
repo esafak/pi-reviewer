@@ -79,6 +79,19 @@ export function parseDiffPositions(diff: string): DiffPositionMap {
   return map;
 }
 
+/**
+ * The identity a comment is deduplicated by.
+ *
+ * Two comments that share it are the same comment: the partition keeps the
+ * first and drops the rest. A caller that deduplicates on its own uses this,
+ * so its notion of "the same comment" cannot drift from the partition's.
+ */
+export function commentIdentity(
+  comment: Pick<ReviewComment, "file" | "line" | "side" | "body">,
+): string {
+  return `${comment.file}:${comment.line}:${comment.side}:${comment.body}`;
+}
+
 export interface PartitionResult {
   /** Comments whose (file, line, side) is positionable on the diff — safe to post inline. */
   inline: ReviewComment[];
@@ -103,7 +116,7 @@ export function partitionComments(
   const seen = new Set<string>();
 
   for (const comment of comments) {
-    const key = `${comment.file}:${comment.line}:${comment.side}:${comment.body}`;
+    const key = commentIdentity(comment);
     if (seen.has(key)) continue;
     seen.add(key);
 

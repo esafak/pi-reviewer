@@ -48,6 +48,22 @@ export interface ReviewComment {
   };
 }
 
+/**
+ * A finding as it was published.
+ *
+ * A published finding may carry no position at all: a finding the harness
+ * could not anchor on a diff line is published in the review body rather
+ * than inline. `ReviewComment` requires a file, a line, and a side, so it
+ * does not fit.
+ */
+export interface PublishedFinding {
+  file?: string;
+  line?: number;
+  side?: ReviewComment["side"];
+  severity: Severity;
+  body: string;
+}
+
 export interface TokenUsage {
   inputTokens: number;
   outputTokens: number;

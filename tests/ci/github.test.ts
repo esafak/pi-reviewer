@@ -166,6 +166,96 @@ describe("GitHubClient", () => {
       expect.anything(),
     );
   });
+  it("creates a check run on the head commit", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(response({ id: 5, status: "in_progress" }));
+    vi.stubGlobal("fetch", fetchMock);
+    await new GitHubClient("token").createCheckRun("owner/repo", {
+      head_sha: "abc123",
+      name: "pi-reviewer/breaking-changes",
+      status: "in_progress",
+      output: { title: "Dependency breaking-change analysis", summary: "Running." },
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.github.com/repos/owner/repo/check-runs",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          head_sha: "abc123",
+          name: "pi-reviewer/breaking-changes",
+          status: "in_progress",
+          output: { title: "Dependency breaking-change analysis", summary: "Running." },
+        }),
+      }),
+    );
+  });
+  it("updates a check run", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(response({ id: 5, status: "completed" }));
+    vi.stubGlobal("fetch", fetchMock);
+    await new GitHubClient("token").updateCheckRun("owner/repo", 5, {
+      status: "completed",
+      conclusion: "failure",
+      output: { title: "Dependency breaking-change analysis", summary: "1 breaking change." },
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.github.com/repos/owner/repo/check-runs/5",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({
+          status: "completed",
+          conclusion: "failure",
+          output: { title: "Dependency breaking-change analysis", summary: "1 breaking change." },
+        }),
+      }),
+    );
+  });
+  it("rejects a completed check run update that carries no conclusion", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(
+      new GitHubClient("token").updateCheckRun("owner/repo", 5, { status: "completed" }),
+    ).rejects.toThrow(/must carry a conclusion/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+  it("lists the check runs of a commit from the envelope the endpoint returns", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        response({ total_count: 1, check_runs: [{ id: 5, name: "pi-reviewer/breaking-changes" }] }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const runs = await new GitHubClient("token").listCheckRuns("owner/repo", "abc123");
+    expect(runs).toEqual([{ id: 5, name: "pi-reviewer/breaking-changes" }]);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.github.com/repos/owner/repo/commits/abc123/check-runs?per_page=100&page=1",
+      expect.anything(),
+    );
+  });
+  it("encodes the commit a check run list addresses", async () => {
+    // A ref that is not a commit must not address another route.
+    const fetchMock = vi.fn().mockResolvedValue(response({ total_count: 0, check_runs: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+    await new GitHubClient("token").listCheckRuns("owner/repo", "heads/main");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.github.com/repos/owner/repo/commits/heads%2Fmain/check-runs?per_page=100&page=1",
+      expect.anything(),
+    );
+  });
+  it("paginates the check runs of a commit", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        response({
+          total_count: 101,
+          check_runs: Array.from({ length: 100 }, (_, id) => ({ id })),
+        }),
+      )
+      .mockResolvedValueOnce(response({ total_count: 101, check_runs: [{ id: 100 }] }));
+    vi.stubGlobal("fetch", fetchMock);
+    const runs = await new GitHubClient("token").listCheckRuns("owner/repo", "abc123");
+    expect(runs).toHaveLength(101);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[1][0]).toContain("page=2");
+  });
   it("follows GraphQL thread cursors", async () => {
     const fetchMock = vi
       .fn()

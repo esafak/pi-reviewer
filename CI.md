@@ -190,6 +190,7 @@ Mirrors [`action.yml`](./action.yml) — the action is source of truth if they d
 | `thinking` | `off` | Thinking budget: `off`, `minimal`, `low`, `medium`, `high`, `xhigh` |
 | `debug` | `false` | Log tool calls; upload thinking trace as a 1-day artifact |
 | `min-severity` | `info` | `info` reports everything, `warn` skips nits, `critical` only blockers |
+| `mode` | `review` | `review` reviews the diff; `dependency` analyzes the pull request's dependency upgrades — understood but not available in this build yet |
 | `max-diff-chars` | model-derived (100k floor) | Explicit diff cap; whole file sections drop, never mid-hunk |
 | `summary` | `true` | Collapsed What/Why/Risks on the first review |
 | `doc-dirs` | off | Comma-separated dirs for matching project docs |
