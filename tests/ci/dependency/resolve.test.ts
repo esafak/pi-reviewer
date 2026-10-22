@@ -247,6 +247,50 @@ describe("upstream resolution", () => {
     }
   });
 
+  it("resolves each library ecosystem through the registry that publishes it", async () => {
+    const cases = [
+      {
+        name: "nuget",
+        upgrade: change({ registry: "nuget", dialect: "semver", name: "Newtonsoft.Json" }),
+        url: "https://api.nuget.org/v3/registration5-gz-semver2/newtonsoft.json/index.json",
+      },
+      {
+        name: "rubygems",
+        upgrade: change({ registry: "rubygems", dialect: "semver", name: "rails" }),
+        url: "https://rubygems.org/api/v1/gems/rails.json",
+      },
+      {
+        name: "packagist",
+        upgrade: change({ registry: "packagist", dialect: "semver", name: "monolog/monolog" }),
+        url: "https://repo.packagist.org/p2/monolog/monolog.json",
+      },
+    ];
+    for (const testCase of cases) {
+      const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(json({}));
+      vi.stubGlobal("fetch", fetchMock);
+      await resolveUpstreams([testCase.upgrade], [upgradeId(testCase.upgrade)], githubOnly);
+      expect(String(fetchMock.mock.calls[0]![0]), testCase.name).toBe(testCase.url);
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("resolves a Gradle dependency through the Maven registry", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(json({}));
+    vi.stubGlobal("fetch", fetchMock);
+    // The Gradle reader names the artifact as a Maven coordinate, and the
+    // Maven adapter looks the coordinate up.
+    const gradle = change({
+      registry: "maven",
+      dialect: "maven",
+      name: "com.google.guava:guava",
+    });
+    await resolveUpstreams([gradle], [upgradeId(gradle)], githubOnly);
+    const url = new URL(String(fetchMock.mock.calls[0]![0]));
+    expect(url.host).toBe("search.maven.org");
+    expect(url.searchParams.get("q")).toBe("g:com.google.guava AND a:guava");
+    vi.unstubAllGlobals();
+  });
+
   it("does not read a repository out of a shorthand that names none", async () => {
     for (const source of ["github:o/.git", "git@github.com:o/.git", "github:o"]) {
       const fetchMock = vi

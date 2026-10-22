@@ -11,6 +11,9 @@ import type {
 import { parseVersion } from "./versions.js";
 import { findChild, findDescendants, readXmlDocument } from "./xml.js";
 import { collectEntries, findEntry, readYamlDocument, scalarText, type YamlNode } from "./yaml.js";
+import { readNuGetItems } from "./nuget.js";
+import { readGemfile } from "./gemfile.js";
+import { readGradleDependencies } from "./gradle.js";
 
 /**
  * The manifest formats the detector reads.
@@ -74,8 +77,14 @@ export interface ManifestParser {
   readonly format: ManifestFormat;
   /** Whether this parser owns a path. */
   matches(path: string): boolean;
-  /** Parses a complete manifest. */
-  parse(text: string): ManifestParseResult;
+  /**
+   * Parses a complete manifest.
+   *
+   * The path is given to the readers that need the dialect of the script
+   * they read, because a path and a format do not always say the same
+   * thing.
+   */
+  parse(text: string, path?: string): ManifestParseResult;
 }
 
 interface FormatSpec {
@@ -84,7 +93,7 @@ interface FormatSpec {
   dialect: VersionDialect;
   category: DependencyCategory;
   matches: (path: string) => boolean;
-  parse: (text: string) => ManifestParseResult;
+  parse: (text: string, path?: string) => ManifestParseResult;
 }
 
 /** A requirement string, split into the parts a comparison needs. */
@@ -1479,6 +1488,286 @@ function stripQuotes(value: string): string {
   return trimmed;
 }
 
+/** The file's name, without its directory. */
+function fileName(path: string): string {
+  return path.split("/").pop() ?? path;
+}
+
+/**
+ * The reads a NuGet manifest's packages are read with.
+ *
+ * A project file names its packages with `Include` and versions them with
+ * `Version`, and a central package management file does the same, so the
+ * two spellings are the same reader. The legacy format writes `id` and
+ * `version` instead.
+ */
+const csproj: FormatSpec = {
+  format: "csproj",
+  registry: "nuget",
+  dialect: "semver",
+  category: "library",
+  matches: (path) => {
+    const name = fileName(path);
+    return name.endsWith(".csproj") || name.endsWith(".fsproj");
+  },
+  parse(text) {
+    const document = readXmlDocument(text);
+    if (document.error || !document.root)
+      return {
+        records: [],
+        warnings: [`a project file is malformed: ${document.error ?? "no root element"}`],
+      };
+    const records: DependencyRecord[] = [];
+    const read = readNuGetItems(document.root, {
+      elements: ["PackageReference", "PackageVersion"],
+      nameAttributes: ["Include", "Update"],
+      versionAttribute: "Version",
+      versionElement: "Version",
+      updateAttribute: "Update",
+      removeAttribute: "Remove",
+      containers: ["ItemGroup"],
+      roots: ["Project"],
+      conditions: ["Choose", "When", "Otherwise"],
+      conditionalScopes: ["Choose", "When", "Otherwise"],
+    });
+    if (read.error) return { records, warnings: [read.error] };
+    const warnings = [...read.warnings];
+    for (const item of read.items) {
+      if (item.reason) {
+        warnings.push(
+          item.name
+            ? `the package ${item.name} ${item.reason}`
+            : `a ${item.element} item ${item.reason}`,
+        );
+        continue;
+      }
+      if (!item.version) {
+        // A package whose version the item does not carry is a package
+        // whose version lives elsewhere — a central package management
+        // file — or one that names a version the reader does not read.
+        warnings.push(`the package ${item.name} has no version`);
+        continue;
+      }
+      records.push(record(csproj, item.name as string, "", item.version));
+    }
+    return { records, warnings };
+  },
+};
+
+/**
+ * The central package management file.
+ *
+ * The file names the version of every package the project uses, so it is
+ * where a version bump lands when the project pins its packages centrally.
+ * An `Update` item names the package whose version the file changes, and
+ * it is a version declaration like any other.
+ */
+const packagesProps: FormatSpec = {
+  format: "packages.props",
+  registry: "nuget",
+  dialect: "semver",
+  category: "library",
+  matches: (path) => fileName(path) === "Directory.Packages.props",
+  parse(text) {
+    const document = readXmlDocument(text);
+    if (document.error || !document.root)
+      return {
+        records: [],
+        warnings: [
+          `a package management file is malformed: ${document.error ?? "no root element"}`,
+        ],
+      };
+    const records: DependencyRecord[] = [];
+    const read = readNuGetItems(document.root, {
+      elements: ["PackageVersion"],
+      nameAttributes: ["Include", "Update"],
+      versionAttribute: "Version",
+      versionElement: "Version",
+      updateAttribute: "Update",
+      removeAttribute: "Remove",
+      containers: ["ItemGroup"],
+      roots: ["Project"],
+      conditions: ["Choose", "When", "Otherwise"],
+      conditionalScopes: ["Choose", "When", "Otherwise"],
+    });
+    if (read.error) return { records, warnings: [read.error] };
+    const warnings = [...read.warnings];
+    for (const item of read.items) {
+      if (item.reason) {
+        warnings.push(
+          item.name
+            ? `the package ${item.name} ${item.reason}`
+            : `a ${item.element} item ${item.reason}`,
+        );
+        continue;
+      }
+      if (!item.version) {
+        warnings.push(`the package ${item.name} has no version`);
+        continue;
+      }
+      records.push(record(packagesProps, item.name as string, "", item.version));
+    }
+    return { records, warnings };
+  },
+};
+
+/** The legacy NuGet manifest. */
+const packagesConfig: FormatSpec = {
+  format: "packages.config",
+  registry: "nuget",
+  dialect: "semver",
+  category: "library",
+  matches: (path) => fileName(path) === "packages.config",
+  parse(text) {
+    const document = readXmlDocument(text);
+    if (document.error || !document.root)
+      return {
+        records: [],
+        warnings: [`a packages.config is malformed: ${document.error ?? "no root element"}`],
+      };
+    const records: DependencyRecord[] = [];
+    const read = readNuGetItems(document.root, {
+      elements: ["package"],
+      nameAttributes: ["id"],
+      versionAttribute: "version",
+      containers: ["packages"],
+      roots: ["packages"],
+      conditions: [],
+      conditionalScopes: [],
+    });
+    if (read.error) return { records, warnings: [read.error] };
+    const warnings = [...read.warnings];
+    for (const item of read.items) {
+      if (item.reason) {
+        warnings.push(
+          item.name
+            ? `the package ${item.name} ${item.reason}`
+            : `a ${item.element} item ${item.reason}`,
+        );
+        continue;
+      }
+      if (!item.version) {
+        warnings.push(`the package ${item.name} has no version`);
+        continue;
+      }
+      records.push(record(packagesConfig, item.name as string, "", item.version));
+    }
+    return { records, warnings };
+  },
+};
+
+/**
+ * The Gemfile.
+ *
+ * The group a gem is declared in is not part of the gem's identity: the
+ * same gem in two groups is one dependency of the project, and the
+ * comparison collapses the repeated declarations into one transition.
+ */
+const gemfile: FormatSpec = {
+  format: "Gemfile",
+  registry: "rubygems",
+  dialect: "semver",
+  category: "library",
+  matches: (path) => fileName(path) === "Gemfile",
+  parse(text) {
+    const { gems, warnings } = readGemfile(text);
+    const records = gems.map((gem) => record(gemfile, gem.name, "", gem.requirement ?? ""));
+    return { records, warnings };
+  },
+};
+
+/**
+ * Whether a Composer requirement names the platform rather than a package.
+ *
+ * A requirement on the PHP runtime, on an extension, or on Composer's own
+ * API is a requirement on the environment, and the registry publishes no
+ * package for it. Reading one as a package would send the model to
+ * whatever the registry happens to publish under that name.
+ */
+function isPlatformRequirement(name: string): boolean {
+  if (name === "php" || name.startsWith("php-")) return true;
+  if (name.startsWith("ext-") || name.startsWith("lib-")) return true;
+  if (name === "composer" || name.startsWith("composer-")) return true;
+  return false;
+}
+
+/**
+ * The Composer manifest.
+ *
+ * A requirement is a constraint, and the constraint is kept as it was
+ * written: a constraint with more than one bound names no single version,
+ * and the comparison must not read one of the bounds as the version.
+ */
+const composer: FormatSpec = {
+  format: "composer.json",
+  registry: "packagist",
+  dialect: "semver",
+  category: "library",
+  matches: (path) => fileName(path) === "composer.json",
+  parse(text) {
+    const warnings: string[] = [];
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      return { records: [], warnings: ["composer.json is not valid JSON"] };
+    }
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return { records: [], warnings: ["composer.json is not an object"] };
+    }
+    const root = parsed as Record<string, unknown>;
+    const records: DependencyRecord[] = [];
+    for (const section of ["require", "require-dev"]) {
+      const group = root[section];
+      if (group === undefined) continue;
+      if (!isPlainObject(group)) {
+        warnings.push(`composer.json ${section} is not a table of requirements`);
+        continue;
+      }
+      for (const [name, raw] of Object.entries(group)) {
+        if (typeof raw !== "string") {
+          warnings.push(`composer.json requirement ${name} has no version`);
+          continue;
+        }
+        if (isPlatformRequirement(name)) {
+          warnings.push(`composer.json requirement ${name} is a platform requirement`);
+          continue;
+        }
+        records.push(record(composer, name, section, raw));
+      }
+    }
+    return { records, warnings };
+  },
+};
+
+/**
+ * The Gradle build script.
+ *
+ * The declarations are the ones in a `dependencies` block, and they name
+ * a Maven coordinate. A version that is a Gradle variable or a property
+ * reference is kept as it was written: the comparison cannot read it, and
+ * the report names the variable that changed.
+ */
+const gradle: FormatSpec = {
+  format: "build.gradle",
+  registry: "maven",
+  dialect: "maven",
+  category: "library",
+  matches: (path) => {
+    const name = fileName(path);
+    return name === "build.gradle" || name === "build.gradle.kts";
+  },
+  parse(text, path) {
+    // The Kotlin script's strings are raw: they process no escape.
+    const kotlin = path !== undefined && path.endsWith(".kts");
+    const { dependencies, warnings } = readGradleDependencies(text, kotlin);
+    const records = dependencies.map((dependency) =>
+      record(gradle, dependency.coordinate, "", dependency.version ?? ""),
+    );
+    return { records, warnings };
+  },
+};
+
 const specs: FormatSpec[] = [
   packageJson,
   requirements,
@@ -1490,6 +1779,12 @@ const specs: FormatSpec[] = [
   toolVersions,
   aqua,
   githubActions,
+  csproj,
+  packagesProps,
+  packagesConfig,
+  gemfile,
+  composer,
+  gradle,
 ];
 
 /**
@@ -1513,8 +1808,12 @@ export function isSupportedManifest(path: string): boolean {
 }
 
 /** Parses a complete manifest in a known format. */
-export function parseManifest(format: ManifestFormat, text: string): ManifestParseResult {
+export function parseManifest(
+  format: ManifestFormat,
+  text: string,
+  path?: string,
+): ManifestParseResult {
   const parser = parsers.find((candidate) => candidate.format === format);
   if (!parser) return { records: [], warnings: [`unsupported manifest format: ${format}`] };
-  return parser.parse(text);
+  return parser.parse(text, path);
 }

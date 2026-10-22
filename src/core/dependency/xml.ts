@@ -15,6 +15,14 @@ export interface XmlElement {
   text: string;
   /** The element's child elements. */
   children: XmlElement[];
+  /**
+   * The element's attributes, by name.
+   *
+   * The names are the ones the document wrote, because an attribute name is
+   * case-sensitive: a NuGet manifest writes `Include` and a `packages.config`
+   * writes `id`, and the two name different attributes.
+   */
+  attributes: Record<string, string>;
 }
 
 /** The result of reading a document. */
@@ -29,7 +37,7 @@ export interface XmlDocument {
 export type XmlToken =
   | { kind: "text"; value: string }
   | { kind: "cdata"; value: string }
-  | { kind: "open"; name: string; selfClosing: boolean }
+  | { kind: "open"; name: string; selfClosing: boolean; attributes: Record<string, string> }
   | { kind: "close"; name: string };
 
 /** What a tokenizer produced. */
@@ -123,12 +131,13 @@ function tokenize(text: string): XmlTokenization {
     const name = (selfClosing ? body.trimEnd().slice(0, -1) : body).trim().split(/\s+/)[0] ?? "";
     if (!/^[A-Za-z_][\w.:-]*$/.test(name))
       return { tokens, error: `a tag has an invalid name: ${name}` };
-    // The attributes are validated, because a tag the reader does not
-    // understand is a tag it cannot trust to have ended where it says.
-    const attributes = selfClosing ? body.trimEnd().slice(0, -1) : body;
-    if (!hasValidAttributes(attributes))
-      return { tokens, error: `a tag has invalid attributes: ${name}` };
-    tokens.push({ kind: "open", name, selfClosing });
+    // The attributes are parsed, because a tag the reader does not
+    // understand is a tag it cannot trust to have ended where it says — and
+    // because a manifest may carry a version in an attribute rather than in
+    // the element's text.
+    const attributes = parseAttributes(selfClosing ? body.trimEnd().slice(0, -1) : body);
+    if (!attributes) return { tokens, error: `a tag has invalid attributes: ${name}` };
+    tokens.push({ kind: "open", name, selfClosing, attributes });
     index = end + 1;
   }
   return { tokens };
@@ -156,44 +165,52 @@ function findTagEnd(text: string, from: number): number {
 }
 
 /**
- * Whether a tag's attributes are well formed.
+ * Reads a tag's attributes.
  *
- * An attribute is a name, an equals sign, and a quoted value. Anything
- * else — an unquoted value, a missing value — is rejected, so a tag the
- * reader does not understand leaves the document uncertain.
+ * An attribute is a name, an equals sign, and a quoted value. Anything else
+ * — an unquoted value, a missing value — is rejected, so a tag the reader
+ * does not understand leaves the document uncertain. A name that repeats is
+ * rejected too, because there would be no unambiguous value to choose.
+ *
+ * The values are returned decoded, the way the element's text is: a
+ * character reference in an attribute value names the character it stands
+ * for, not a literal ampersand.
  */
-function hasValidAttributes(text: string): boolean {
+function parseAttributes(text: string): Record<string, string> | undefined {
   // The text starts with the element's name, which is not an attribute.
   const element = /^[A-Za-z_][\w.:-]*/.exec(text);
-  if (!element) return false;
+  if (!element) return undefined;
+  const attributes: Record<string, string> = {};
   let index = element[0].length;
   const seen = new Set<string>();
   while (index < text.length) {
     // Attributes are separated by whitespace, so a name that runs into the
     // previous value is not an attribute.
     const separator = /^\s+/.exec(text.slice(index));
-    if (!separator) return false;
+    if (!separator) return undefined;
     index += separator[0].length;
     if (index >= text.length) break;
     const name = /^[A-Za-z_][\w.:-]*/.exec(text.slice(index));
-    if (!name) return false;
-    if (seen.has(name[0])) return false;
+    if (!name) return undefined;
+    if (seen.has(name[0])) return undefined;
     seen.add(name[0]);
     index += name[0].length;
     while (index < text.length && /\s/.test(text[index] as string)) index += 1;
-    if (text[index] !== "=") return false;
+    if (text[index] !== "=") return undefined;
     index += 1;
     while (index < text.length && /\s/.test(text[index] as string)) index += 1;
     const quote = text[index];
-    if (quote !== '"' && quote !== "'") return false;
+    if (quote !== '"' && quote !== "'") return undefined;
     index += 1;
     const end = text.indexOf(quote, index);
-    if (end === -1) return false;
+    if (end === -1) return undefined;
+    const value = text.slice(index, end);
     // A raw `<` in an attribute value is not well formed.
-    if (text.slice(index, end).includes("<")) return false;
+    if (value.includes("<")) return undefined;
+    attributes[name[0]] = decodeCharacterReferences(value);
     index = end + 1;
   }
-  return true;
+  return attributes;
 }
 
 /**
@@ -256,7 +273,12 @@ export function readXmlDocument(text: string): XmlDocument {
       continue;
     }
     if (token.kind === "open") {
-      const element: XmlElement = { name: token.name, text: "", children: [] };
+      const element: XmlElement = {
+        name: token.name,
+        text: "",
+        children: [],
+        attributes: token.attributes,
+      };
       if (stack.length === 0) {
         if (root) return { error: "the document has more than one root element" };
         root = element;

@@ -21,6 +21,8 @@ export const DEPENDENCY_LOCKFILE_PATTERNS: readonly RegExp[] = [
   /(?:^|\/)uv\.lock$/,
   /(?:^|\/)poetry\.lock$/,
   /(?:^|\/)gradle\.lockfile$/,
+  /(?:^|\/)Gemfile\.lock$/,
+  /(?:^|\/)composer\.lock$/,
 ];
 
 /**

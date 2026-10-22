@@ -57,6 +57,58 @@ describe("detectDependencyChanges", () => {
     });
   });
 
+  it("finds a major version bump in a .NET project", async () => {
+    const before = [
+      "<Project>",
+      "  <ItemGroup>",
+      '    <PackageReference Include="Serilog" Version="3.0.0" />',
+      "  </ItemGroup>",
+      "</Project>",
+    ].join("\n");
+    const after = before.replace("3.0.0", "4.0.0");
+    await write("App.csproj", before);
+    git(["add", "App.csproj"]);
+    commit("init");
+    await write("App.csproj", after);
+    git(["add", "App.csproj"]);
+    commit("bump");
+
+    const detection = detectDependencyChanges(dir, base(), head());
+    expect(detection.changes).toHaveLength(1);
+    expect(detection.changes[0]).toMatchObject({
+      registry: "nuget",
+      name: "Serilog",
+      kind: "major",
+      from: "3.0.0",
+      to: "4.0.0",
+      manifest: "App.csproj",
+    });
+  });
+
+  it("finds a major version bump in a Gradle build", async () => {
+    const before = [
+      "dependencies {",
+      "    implementation 'com.google.guava:guava:33.0.0'",
+      "}",
+    ].join("\n");
+    const after = before.replace("33.0.0", "34.0.0");
+    await write("build.gradle", before);
+    git(["add", "build.gradle"]);
+    commit("init");
+    await write("build.gradle", after);
+    git(["add", "build.gradle"]);
+    commit("bump");
+
+    const detection = detectDependencyChanges(dir, base(), head());
+    expect(detection.changes).toHaveLength(1);
+    expect(detection.changes[0]).toMatchObject({
+      registry: "maven",
+      name: "com.google.guava:guava",
+      kind: "major",
+      manifest: "build.gradle",
+    });
+  });
+
   it("finds a Go module major path transition as one change", async () => {
     await write("go.mod", "module example.com/app\n\nrequire example.com/m v1.2.3\n");
     git(["add", "go.mod"]);

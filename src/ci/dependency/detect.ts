@@ -225,7 +225,7 @@ export function detectDependencyChanges(
 function parseRecords(manifest: string, text: string, warnings: string[]): DependencyRecord[] {
   const format = manifestFormat(manifest);
   if (!format) return [];
-  const parsed = parseManifest(format, text);
+  const parsed = parseManifest(format, text, manifest);
   for (const warning of parsed.warnings) warnings.push(`${manifest}: ${warning}`);
   return parsed.records;
 }

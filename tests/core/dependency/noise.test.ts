@@ -23,6 +23,8 @@ describe("the dependency mode's noise list", () => {
       "uv.lock",
       "poetry.lock",
       "gradle.lockfile",
+      "Gemfile.lock",
+      "composer.lock",
     ]) {
       expect(isDependencyNoise(path), path).toBe(true);
     }
@@ -34,6 +36,8 @@ describe("the dependency mode's noise list", () => {
       "src/MyProject/packages.lock.json",
       "tools/mise.lock",
       "backend/pdm.lock",
+      "api/Gemfile.lock",
+      "api/composer.lock",
     ]) {
       expect(isDependencyNoise(path), path).toBe(true);
     }
