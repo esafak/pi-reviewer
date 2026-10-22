@@ -1,4 +1,5 @@
 import { readTomlDocument, type TomlEntry } from "./toml.js";
+import { isAquaStandardRegistry } from "./aqua.js";
 import type {
   DependencyCategory,
   DependencyRecord,
@@ -7,7 +8,9 @@ import type {
   PackageRegistry,
   VersionDialect,
 } from "./types.js";
+import { parseVersion } from "./versions.js";
 import { findChild, findDescendants, readXmlDocument } from "./xml.js";
+import { collectEntries, findEntry, readYamlDocument, scalarText, type YamlNode } from "./yaml.js";
 
 /**
  * The manifest formats the detector reads.
@@ -26,6 +29,10 @@ export const SUPPORTED_MANIFESTS: readonly string[] = [
   "Cargo.toml",
   "go.mod",
   "mise.toml",
+  ".mise.toml",
+  "mise.local.toml",
+  ".config/mise/config.toml",
+  ".config/mise/config.local.toml",
   ".tool-versions",
   "aqua.yaml",
   "*.csproj",
@@ -238,9 +245,114 @@ const packageJson: FormatSpec = {
         records.push(record(packageJson, name, section, alias.range, alias.name));
       }
     }
+    records.push(...readRuntimePins(root, warnings));
+    const manager = readPackageManager(root, warnings);
+    if (manager) records.push(manager);
     return { records, warnings };
   },
 };
+
+/** The section a runtime pin is declared in. */
+const RUNTIME_SECTION = "devEngines.runtime";
+
+/**
+ * The runtime pins a package manifest declares.
+ *
+ * `devEngines.runtime` names the runtime the project runs on. It is a
+ * single object or an array of them, so both forms are read. A runtime is a
+ * tool rather than a library: the build invokes it rather than importing
+ * it, and its registry is unknown, because no registry describes Node.js or
+ * Python — the tool table does.
+ */
+function readRuntimePins(root: Record<string, unknown>, warnings: string[]): DependencyRecord[] {
+  const records: DependencyRecord[] = [];
+  const devEngines = root["devEngines"];
+  if (devEngines === undefined) return records;
+  if (!isPlainObject(devEngines)) {
+    warnings.push("package.json devEngines is not a table");
+    return records;
+  }
+  const runtimes = devEngines["runtime"];
+  if (runtimes === undefined) return records;
+  const entries = Array.isArray(runtimes) ? runtimes : [runtimes];
+  for (const entry of entries) {
+    if (!isPlainObject(entry)) {
+      warnings.push("package.json devEngines.runtime is not a runtime");
+      continue;
+    }
+    const name = entry["name"];
+    const version = entry["version"];
+    if (typeof name !== "string" || !name.trim().length) {
+      warnings.push("package.json devEngines.runtime has no name");
+      continue;
+    }
+    if (typeof version !== "string" || !version.trim().length) {
+      warnings.push(`package.json devEngines.runtime ${name} has no version`);
+      continue;
+    }
+    records.push({
+      registry: "unknown",
+      dialect: "tool",
+      category: "tool",
+      name: name.trim(),
+      section: RUNTIME_SECTION,
+      constraint: version.trim(),
+    });
+  }
+  return records;
+}
+
+/**
+ * The package manager a manifest pins.
+ *
+ * The name is split from the version at the last `@` that is not a scope
+ * marker, so a scoped package splits correctly, and the integrity suffix a
+ * package manager carries is not part of its version.
+ */
+function readPackageManager(
+  root: Record<string, unknown>,
+  warnings: string[],
+): DependencyRecord | undefined {
+  const raw = root["packageManager"];
+  if (raw === undefined) return undefined;
+  if (typeof raw !== "string" || !raw.trim().length) {
+    warnings.push("package.json packageManager is not a version");
+    return undefined;
+  }
+  const value = raw.trim();
+  const at = value.lastIndexOf("@");
+  // An `@` at the start of the name is a scope marker, not a separator.
+  if (at <= 0) {
+    warnings.push("package.json packageManager names no version");
+    return undefined;
+  }
+  const name = value.slice(0, at).trim();
+  const version = value.slice(at + 1).trim();
+  if (!name.length || !version.length) {
+    warnings.push("package.json packageManager names no version");
+    return undefined;
+  }
+  // The integrity suffix is a hash of the tarball, not part of the version.
+  const plus = version.indexOf("+");
+  const constraint = (plus === -1 ? version : version.slice(0, plus)).trim();
+  if (!constraint.length) {
+    warnings.push("package.json packageManager names no version");
+    return undefined;
+  }
+  return {
+    registry: "npm",
+    dialect: "semver",
+    category: "tool",
+    name,
+    section: "packageManager",
+    constraint,
+  };
+}
+
+/** Whether a value is a plain object. */
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
 
 const requirements: FormatSpec = {
   format: "requirements",
@@ -670,6 +782,634 @@ const gomod: FormatSpec = {
   },
 };
 
+/** The section a mise tool pin is declared in. */
+const MISE_SECTION = "tools";
+
+/**
+ * The mise backends the harness reads.
+ *
+ * A backend decides where a tool comes from, so it decides the registry the
+ * tool is looked up in. A GitHub backend names the repository outright. An
+ * aqua backend names a recipe, which is not necessarily a repository. The
+ * core backend selects mise's own backend, and an asdf backend names a
+ * plugin, whose repository is the installer rather than the tool.
+ *
+ * A backend that is not here keeps the unknown registry: the harness never
+ * substitutes a different project for one it could not identify. The table
+ * is a map rather than an object, so a key that names an inherited property
+ * is not an entry.
+ */
+const MISE_BACKENDS: ReadonlyMap<string, PackageRegistry> = new Map([
+  ["npm", "npm"],
+  ["cargo", "crates"],
+  ["go", "go"],
+  ["gem", "rubygems"],
+  ["github", "github"],
+  ["aqua", "aqua"],
+  ["core", "mise-core"],
+  ["asdf", "unknown"],
+]);
+
+/** Whether a path names a mise configuration. */
+function isMiseConfig(path: string): boolean {
+  if (path === "mise.toml" || path === ".mise.toml" || path === "mise.local.toml") return true;
+  if (path === ".config/mise/config.toml" || path === ".config/mise/config.local.toml") return true;
+  return path.endsWith("/mise.toml") || path.endsWith("/.mise.toml");
+}
+
+/**
+ * The version a mise tool pin carries.
+ *
+ * A pin is normally a scalar. mise also allows an array of versions and an
+ * option table with a `version` key, and only the first version of an array
+ * is compared — the rest are reported, because a pin the harness did not
+ * read is a pin it cannot claim to have covered.
+ *
+ * An array that holds a value that is not a version is not read at all: the
+ * reader has kept the array's versions but not their places, so the first
+ * version it holds is not necessarily the array's first element.
+ */
+function miseConstraint(entry: TomlEntry, warnings: string[]): string | undefined {
+  if (entry.string !== undefined) return entry.string;
+  if (entry.items !== undefined) {
+    if (entry.otherItems) {
+      warnings.push(
+        `mise.toml tool ${entry.key} has ${entry.otherItems} value(s) that are not versions`,
+      );
+      return undefined;
+    }
+    const first = entry.items[0];
+    if (first === undefined) {
+      warnings.push(`mise.toml tool ${entry.key} has no version`);
+      return undefined;
+    }
+    if (entry.items.length > 1) {
+      warnings.push(
+        `mise.toml tool ${entry.key} pins ${entry.items.length} versions; only the first is compared`,
+      );
+    }
+    return first;
+  }
+  if (entry.inline !== undefined) {
+    const version = entry.inline.find(
+      (nested) => nested.scope.length === 0 && nested.key === "version",
+    )?.string;
+    if (version === undefined) {
+      warnings.push(`mise.toml tool ${entry.key} has no version`);
+      return undefined;
+    }
+    return version;
+  }
+  warnings.push(`mise.toml tool ${entry.key} has no version`);
+  return undefined;
+}
+
+/**
+ * The record a mise tool pin declares.
+ *
+ * A bare pin has no known registry, and it is still comparable: the tool
+ * dialect is the pin's own grammar, not the registry's. A backend prefix
+ * decides the registry, and a backend the harness does not know keeps the
+ * unknown registry rather than being read as some other project's tool.
+ */
+function miseRecord(key: string, constraint: string): DependencyRecord {
+  const colon = key.indexOf(":");
+  const base = {
+    dialect: "tool" as const,
+    category: "tool" as const,
+    name: key,
+    section: MISE_SECTION,
+    constraint,
+  };
+  if (colon === -1) return { ...base, registry: "unknown" };
+  const backend = key.slice(0, colon);
+  const target = key.slice(colon + 1);
+  const registry = MISE_BACKENDS.get(backend);
+  if (!registry) return { ...base, registry: "unknown" };
+  // The target is the name to look up: the package name in a registry, the
+  // repository in a GitHub backend, and the plugin name in an asdf backend,
+  // which the tool table is keyed by.
+  return {
+    ...base,
+    registry,
+    ...(target.length ? { resolvedName: target } : {}),
+  };
+}
+
+/**
+ * Whether a mise tool pin names a registry of its own.
+ *
+ * The aqua backend reads its recipe from the standard registry unless the
+ * pin names another one, and a recipe the harness cannot place is a pin it
+ * cannot resolve. The pin may name the registry in an option table or as a
+ * field of the tool's own table, so both are read.
+ */
+function miseNamesRegistry(entry: TomlEntry, scope: readonly string[]): boolean {
+  if (entry.inline?.some((nested) => nested.scope.length === 0 && nested.key === "registry"))
+    return true;
+  return scope.length === 2 && entry.key === "registry";
+}
+
+/**
+ * Whether a mise setting chooses where an aqua recipe comes from.
+ *
+ * The settings that name a registry, or that turn off the registry mise
+ * has built in, move the recipes somewhere the harness cannot read. The
+ * settings that only verify a package leave the registry alone.
+ */
+function miseSettingSelectsRegistry(name: string, entry: TomlEntry): boolean {
+  if (name === "registries" || name === "registry_url") return true;
+  if (name === "baked_registry") {
+    // The registry mise has built in is used unless the setting turns it off.
+    return (entry.string ?? entry.value).trim() === "false";
+  }
+  return false;
+}
+
+/** A setting a mise configuration declares, by its own name. */
+interface MiseSetting {
+  /** The setting's name, such as `settings.aqua.registry_url`. */
+  path: string;
+  /** The entry the setting was written in. */
+  entry: TomlEntry;
+}
+
+/**
+ * The settings a table declares, by their own names.
+ *
+ * A setting may be written as a table of its own, as a dotted key, or as a
+ * table of its own inside another table, and all three name the same
+ * setting. The names are the paths the entries spell, so a caller can ask
+ * whether a name selects a registry without knowing which spelling was
+ * used.
+ */
+function miseSettings(
+  entries: readonly TomlEntry[],
+  prefix: readonly string[] = [],
+  depth = 0,
+): MiseSetting[] {
+  if (depth > 4) return [];
+  const settings: MiseSetting[] = [];
+  for (const entry of entries) {
+    const scope = [...prefix, ...entry.scope];
+    settings.push({ path: [...scope, entry.key].join("."), entry });
+    // A table of its own continues the path of the key that holds it.
+    if (entry.inline)
+      settings.push(...miseSettings(entry.inline, [...scope, entry.key], depth + 1));
+  }
+  return settings;
+}
+
+/**
+ * Whether a mise configuration names an aqua registry of its own.
+ *
+ * The aqua settings may be written as a table of their own, as a dotted
+ * key, or as a table of their own inside another table, so the whole
+ * document is walked for the setting that chooses the registry.
+ */
+function miseNamesAquaRegistry(entries: readonly TomlEntry[]): boolean {
+  for (const setting of miseSettings(entries)) {
+    if (!setting.path.startsWith("settings.aqua.")) continue;
+    const name = setting.path.slice("settings.aqua.".length);
+    // A nested table is not a setting.
+    if (name.includes(".")) continue;
+    if (miseSettingSelectsRegistry(name, setting.entry)) return true;
+  }
+  return false;
+}
+
+const mise: FormatSpec = {
+  format: "mise.toml",
+  registry: "unknown",
+  dialect: "tool",
+  category: "tool",
+  matches: (path) => isMiseConfig(path),
+  parse(text) {
+    const warnings: string[] = [];
+    const records: DependencyRecord[] = [];
+    const document = readTomlDocument(text);
+    for (const warning of document.warnings) warnings.push(warning);
+    for (const error of document.errors) warnings.push(error);
+    if (document.uncertain) return { records, warnings };
+    // A tool pin is written in one of two shapes: as the value of a key in
+    // the tool table, or as a table of its own with a `version` key.
+    const versions = new Map<string, string>();
+    const tables = new Set<string>();
+    // The tools whose recipe comes from a registry the harness cannot read.
+    const namedRegistry = new Set<string>();
+    const markNamedRegistry = (name: string): void => {
+      if (namedRegistry.has(name)) return;
+      namedRegistry.add(name);
+      warnings.push(`mise.toml tool ${name} names a registry, which is not read`);
+    };
+    const aquaRegistrySetting = miseNamesAquaRegistry(document.entries);
+    // A tool table is declared whether or not it holds an assignment, so a
+    // table the reader cannot read is still reported.
+    for (const scope of document.tables) {
+      if (scope.length === 2 && scope[0] === "tools") tables.add(scope[1]!);
+    }
+    for (const entry of document.entries) {
+      if (entry.error) {
+        warnings.push(`mise.toml tool ${entry.key}: ${entry.error}`);
+        continue;
+      }
+      // An entry in a scope the reader does not interpret is not a
+      // declaration: it is an array element or a table below one.
+      if (entry.unsupported) continue;
+      const scope = entry.scope;
+      if (scope.length === 1 && scope[0] === "tools") {
+        if (entry.key.startsWith("aqua:") && miseNamesRegistry(entry, scope)) {
+          markNamedRegistry(entry.key);
+          continue;
+        }
+        const constraint = miseConstraint(entry, warnings);
+        if (constraint !== undefined) versions.set(entry.key, constraint);
+        continue;
+      }
+      if (scope.length === 2 && scope[0] === "tools") {
+        const name = scope[1]!;
+        tables.add(name);
+        if (entry.key === "registry" && name.startsWith("aqua:")) {
+          markNamedRegistry(name);
+          continue;
+        }
+        if (entry.key !== "version") continue;
+        if (entry.string === undefined) {
+          warnings.push(`mise.toml tool ${name} has no version`);
+          continue;
+        }
+        versions.set(name, entry.string);
+      }
+    }
+    for (const name of tables) {
+      if (!versions.has(name)) warnings.push(`mise.toml tool ${name} has no version`);
+    }
+    if (aquaRegistrySetting) {
+      warnings.push("mise.toml names an aqua registry, which is not read");
+    }
+    for (const [name, constraint] of versions) {
+      // A configuration that points the aqua backend at a registry of its
+      // own leaves every aqua pin's recipe somewhere the harness cannot
+      // read.
+      if (namedRegistry.has(name)) continue;
+      if (aquaRegistrySetting && name.startsWith("aqua:")) continue;
+      records.push(miseRecord(name, constraint));
+    }
+    return { records, warnings };
+  },
+};
+
+/**
+ * The pseudo-versions asdf writes instead of a version.
+ *
+ * They name where the tool comes from rather than which version of it is
+ * used, so there is no version to compare.
+ */
+function isPseudoVersion(value: string): boolean {
+  if (value === "system") return true;
+  return value.startsWith("ref:") || value.startsWith("path:");
+}
+
+const toolVersions: FormatSpec = {
+  format: "tool-versions",
+  registry: "unknown",
+  dialect: "tool",
+  category: "tool",
+  matches: (path) => path === ".tool-versions" || path.endsWith("/.tool-versions"),
+  parse(text) {
+    const warnings: string[] = [];
+    const records: DependencyRecord[] = [];
+    for (const raw of text.split("\n")) {
+      const line = stripComment(raw).trim();
+      if (!line) continue;
+      const parts = line.split(/\s+/);
+      const plugin = parts[0]!;
+      const versions = parts.slice(1);
+      if (!versions.length) {
+        warnings.push(`.tool-versions entry ${plugin} has no version`);
+        continue;
+      }
+      if (versions.length > 1) {
+        warnings.push(
+          `.tool-versions entry ${plugin} lists ${versions.length} versions; only the first is compared`,
+        );
+      }
+      const version = versions[0]!;
+      if (isPseudoVersion(version)) {
+        warnings.push(`.tool-versions entry ${plugin} has no version`);
+        continue;
+      }
+      records.push(record(toolVersions, plugin, "", version));
+    }
+    return { records, warnings };
+  },
+};
+
+/**
+ * The checksum suffix an aqua version may carry.
+ *
+ * The checksum is the hash of the release, not part of the version, so it
+ * is stripped before the version is compared.
+ */
+function stripAquaChecksum(version: string): string {
+  const at = version.indexOf("@");
+  return at === -1 ? version : version.slice(0, at);
+}
+
+/**
+ * The package an aqua entry names.
+ *
+ * A package is named either in one string — `owner/tool@version` — or by a
+ * name and a version of its own. The two spellings name the same package,
+ * so the version is read from whichever carries it.
+ */
+interface AquaPackage {
+  /** The package's name. */
+  name?: string;
+  /** The version the entry names. */
+  version?: string;
+}
+
+/** The package and version an aqua entry names. */
+function aquaPackage(entry: YamlNode): AquaPackage {
+  if (entry.kind === "scalar") {
+    const value = entry.value.trim();
+    const at = value.indexOf("@", value.lastIndexOf("/") + 1);
+    if (at === -1) return { name: value };
+    return { name: value.slice(0, at).trim(), version: value.slice(at + 1).trim() };
+  }
+  const name = scalarText(findEntry(entry, "name")?.value)?.trim();
+  const version = scalarText(findEntry(entry, "version")?.value)?.trim();
+  const combined = name ? aquaPackage({ kind: "scalar", value: name, line: 0, quoted: false }) : {};
+  return {
+    ...((combined.name ?? name) ? { name: combined.name ?? name } : {}),
+    ...((version ?? combined.version) ? { version: version ?? combined.version } : {}),
+  };
+}
+
+/**
+ * A registry an aqua configuration declares.
+ *
+ * The standard registry is the one the harness reads: its recipes name the
+ * repositories that publish the packages. A registry that is not the
+ * standard one holds its own recipes, which the harness cannot place.
+ */
+interface AquaRegistry {
+  /** The registry is the standard registry. */
+  standard: boolean;
+}
+
+/** The registries an aqua configuration declares. */
+interface AquaRegistries {
+  /** The registries, by name. */
+  registries: Map<string, AquaRegistry>;
+  /**
+   * The registry configuration could not be read, so the harness cannot
+   * know which registry the recipes come from.
+   */
+  unread: boolean;
+  /** The registries the harness cannot read, reported as coverage. */
+  warnings: string[];
+}
+
+/**
+ * A field of an aqua registry declaration, as the manifest writes it.
+ *
+ * A field the reader did not interpret is not a field with an empty value:
+ * applying a default to it would name the official registry for a
+ * declaration that names another one.
+ */
+interface AquaField {
+  /** The field's text. */
+  text?: string;
+  /** The field was not read. */
+  unread: boolean;
+}
+
+/**
+ * The text of a field, and whether it was read.
+ *
+ * A field the declaration does not have takes aqua's default, and a field
+ * written empty takes it too. A field the reader did not interpret is
+ * neither: it says nothing about what the declaration names.
+ */
+function aquaField(item: YamlNode, key: string): AquaField {
+  const entry = findEntry(item, key);
+  if (!entry) return { unread: false };
+  const value = entry.value;
+  if (value.kind !== "scalar") return { unread: true };
+  if (value.unread) return { unread: true };
+  const text = value.value.trim();
+  return { ...(text.length ? { text } : {}), unread: false };
+}
+
+/**
+ * The registries an aqua configuration declares.
+ *
+ * The standard registry needs no declaration: it is the one aqua falls
+ * back to, and a package that names no registry uses it. A declaration
+ * that names no registry names the standard one, and the fields it leaves
+ * out take aqua's defaults.
+ *
+ * A registry configuration that is present but could not be read is not the
+ * same as one that is absent: the first may select a registry the harness
+ * cannot place, and the second selects the standard one.
+ */
+function aquaRegistries(root: YamlNode | undefined): AquaRegistries {
+  const registries = new Map<string, AquaRegistry>();
+  const warnings: string[] = [];
+  const declared = findEntry(root, "registries");
+  if (!declared) {
+    registries.set("standard", { standard: true });
+    return { registries, unread: false, warnings };
+  }
+  const list = declared.value;
+  if (list.kind !== "sequence") return { registries, unread: true, warnings };
+  for (const item of list.items) {
+    if (item.kind !== "mapping") return { registries, unread: true, warnings };
+    const name = aquaField(item, "name");
+    const type = aquaField(item, "type");
+    const owner = aquaField(item, "repo_owner");
+    const repository = aquaField(item, "repo_name");
+    const path = aquaField(item, "path");
+    // A field the reader did not interpret leaves the declaration's source
+    // unknown, and a default would name the official registry for it.
+    if ([name, type, owner, repository, path].some((field) => field.unread)) {
+      return { registries, unread: true, warnings };
+    }
+    // A declaration that names no registry names the standard one, and a
+    // name written empty is a name left out.
+    const key = name.text || "standard";
+    const standard = isAquaStandardRegistry({
+      type: type.text,
+      owner: owner.text,
+      repository: repository.text,
+      path: path.text,
+    });
+    registries.set(key, { standard });
+    // A registry that is not the standard one holds recipes the harness
+    // cannot place, whether or not a package selects it.
+    if (!standard) {
+      warnings.push(`aqua.yaml registry ${key} is not the standard registry, which is not read`);
+    }
+  }
+  if (!registries.has("standard")) registries.set("standard", { standard: true });
+  return { registries, unread: false, warnings };
+}
+
+const aqua: FormatSpec = {
+  format: "aqua.yaml",
+  registry: "aqua",
+  dialect: "tool",
+  category: "tool",
+  matches: (path) => path === "aqua.yaml" || path.endsWith("/aqua.yaml"),
+  parse(text) {
+    const warnings: string[] = [];
+    const records: DependencyRecord[] = [];
+    const document = readYamlDocument(text);
+    for (const warning of document.warnings) warnings.push(warning);
+    for (const error of document.errors) warnings.push(error);
+    if (document.uncertain) return { records, warnings };
+    const { registries, unread, warnings: registryWarnings } = aquaRegistries(document.root);
+    warnings.push(...registryWarnings);
+    const packages = findEntry(document.root, "packages")?.value;
+    if (packages?.kind !== "sequence") {
+      warnings.push("aqua.yaml declares no packages");
+      return { records, warnings };
+    }
+    if (unread) {
+      // The registries the file declares could not be read, so the recipes
+      // may come from a registry the harness cannot place.
+      warnings.push("aqua.yaml registries could not be read");
+      return { records, warnings };
+    }
+    for (const item of packages.items) {
+      const { name, version } = aquaPackage(item);
+      if (!name) {
+        warnings.push("aqua.yaml package has no name");
+        continue;
+      }
+      // A package names the registry its recipe lives in, and the standard
+      // registry is the one it names when it names none.
+      const registryName = scalarText(findEntry(item, "registry")?.value)?.trim() ?? "standard";
+      const registry = registries.get(registryName);
+      if (!registry) {
+        warnings.push(
+          `aqua.yaml package names the registry ${registryName}, which is not declared`,
+        );
+        continue;
+      }
+      if (!registry.standard) {
+        warnings.push(
+          `aqua.yaml package ${name} is in the registry ${registryName}, which is not read`,
+        );
+        continue;
+      }
+      if (!version) {
+        warnings.push(`aqua.yaml package ${name} has no version`);
+        continue;
+      }
+      records.push(record(aqua, name, "packages", stripAquaChecksum(version)));
+    }
+    return { records, warnings };
+  },
+};
+
+/** Whether a path names a workflow or an action definition. */
+function isWorkflowPath(path: string): boolean {
+  if (path === "action.yml" || path === "action.yaml") return true;
+  if (/^\.github\/workflows\/[^/]+\.ya?ml$/.test(path)) return true;
+  if (/^\.github\/actions\/.+\/action\.ya?ml$/.test(path)) return true;
+  return false;
+}
+
+/** Whether a reference names a commit rather than a tag. */
+function isCommitReference(reference: string): boolean {
+  return /^[0-9a-f]{7,40}$/i.test(reference);
+}
+
+/**
+ * The version a pinned action carries.
+ *
+ * A reference is either a version tag or a commit. A commit carries no
+ * version of its own, so the version is read from the comment beside it —
+ * which is where a repository that pins actions to digests keeps it. A
+ * reference with no recognizable version is reported as unresolved rather
+ * than left out, so the pin stays visible.
+ */
+function actionVersion(
+  reference: string | undefined,
+  comment: string | undefined,
+  warnings: string[],
+): string {
+  if (reference === undefined) {
+    warnings.push("an action reference names no version");
+    return "unresolved";
+  }
+  if (isCommitReference(reference)) {
+    for (const token of (comment ?? "").split(/\s+/)) {
+      if (token.length && parseVersion("semver", token)) return token;
+    }
+    warnings.push(`the action pinned to a commit has no version in its comment`);
+    return "unresolved";
+  }
+  if (parseVersion("semver", reference)) return reference;
+  warnings.push(`the action reference ${reference} names no version`);
+  return "unresolved";
+}
+
+const githubActions: FormatSpec = {
+  format: "github-actions",
+  registry: "github",
+  dialect: "semver",
+  category: "tool",
+  matches: (path) => isWorkflowPath(path),
+  parse(text) {
+    const warnings: string[] = [];
+    const records: DependencyRecord[] = [];
+    const document = readYamlDocument(text);
+    for (const warning of document.warnings) warnings.push(warning);
+    for (const error of document.errors) warnings.push(error);
+    if (document.uncertain) return { records, warnings };
+    for (const entry of collectEntries(document.root, "uses")) {
+      const value = entry.value;
+      if (value.kind !== "scalar") {
+        warnings.push(`the uses: entry on line ${entry.line} is not a reference`);
+        continue;
+      }
+      const reference = value.value.trim();
+      if (!reference.length) {
+        warnings.push(`the uses: entry on line ${entry.line} is empty`);
+        continue;
+      }
+      // A local action and a container image are not repositories, so they
+      // name no upstream to research.
+      if (reference.startsWith("./") || reference.startsWith("../")) continue;
+      if (reference.includes("://")) {
+        warnings.push(`the uses: entry on line ${entry.line} is not a repository`);
+        continue;
+      }
+      const at = reference.lastIndexOf("@");
+      const target = at === -1 ? reference : reference.slice(0, at);
+      const segments = target.split("/").filter(Boolean);
+      if (segments.length < 2) {
+        warnings.push(`the uses: entry on line ${entry.line} names no repository`);
+        continue;
+      }
+      // A reference may name a directory inside the repository, which is
+      // not part of the repository's identity.
+      const name = `${segments[0]}/${segments[1]}`;
+      const constraint = actionVersion(
+        at === -1 ? undefined : reference.slice(at + 1),
+        value.comment,
+        warnings,
+      );
+      records.push(record(githubActions, name, "", constraint));
+    }
+    return { records, warnings };
+  },
+};
+
 /**
  * The items of a TOML array.
  *
@@ -739,7 +1479,18 @@ function stripQuotes(value: string): string {
   return trimmed;
 }
 
-const specs: FormatSpec[] = [packageJson, requirements, pyproject, pom, cargo, gomod];
+const specs: FormatSpec[] = [
+  packageJson,
+  requirements,
+  pyproject,
+  pom,
+  cargo,
+  gomod,
+  mise,
+  toolVersions,
+  aqua,
+  githubActions,
+];
 
 /**
  * The parser registry. Each format is one entry, so a new format is a new

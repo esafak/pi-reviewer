@@ -42,6 +42,60 @@ describe("compareManifests", () => {
     expect(compareManifests(before, after, "package.json")).toHaveLength(0);
   });
 
+  it("reports nothing when a repeated declaration did not change", () => {
+    // A manifest may declare the same package more than once: a workflow
+    // that pins one action in two steps.
+    const before = [record({ constraint: "^1.0.0" }), record({ constraint: "^1.0.0" })];
+    const after = [record({ constraint: "^1.0.0" }), record({ constraint: "^1.0.0" })];
+    expect(compareManifests(before, after, "package.json")).toHaveLength(0);
+  });
+
+  it("reports nothing when a repeated declaration was reordered", () => {
+    const before = [record({ constraint: "^1.0.0" }), record({ constraint: "^2.0.0" })];
+    const after = [record({ constraint: "^2.0.0" }), record({ constraint: "^1.0.0" })];
+    expect(compareManifests(before, after, "package.json")).toHaveLength(0);
+  });
+
+  it("reports the changed declaration among repeated ones", () => {
+    const before = [record({ constraint: "^1.0.0" }), record({ constraint: "^2.0.0" })];
+    const after = [record({ constraint: "^1.0.0" }), record({ constraint: "^3.0.0" })];
+    const changes = compareManifests(before, after, "package.json");
+    expect(changes).toHaveLength(1);
+    expect(changes[0]).toMatchObject({ kind: "major", from: "^2.0.0", to: "^3.0.0" });
+  });
+
+  it("reports one change when every repeated declaration moved to another version", () => {
+    // Every declaration changed to the same version, so the transition they
+    // name is the one that happened — and it is one change, not one per
+    // declaration.
+    const before = [record({ constraint: "^1.0.0" }), record({ constraint: "^1.0.0" })];
+    const after = [record({ constraint: "^2.0.0" }), record({ constraint: "^2.0.0" })];
+    const changes = compareManifests(before, after, "package.json");
+    expect(changes).toHaveLength(1);
+    expect(changes[0]).toMatchObject({ kind: "major", from: "^1.0.0", to: "^2.0.0" });
+  });
+
+  it("reports a repeated declaration that was removed along with the change", () => {
+    const before = [record({ constraint: "^1.0.0" }), record({ constraint: "^1.0.0" })];
+    const after = [record({ constraint: "^2.0.0" })];
+    const changes = compareManifests(before, after, "package.json");
+    expect(changes.map((change) => change.kind).sort()).toEqual(["major", "removed"]);
+  });
+
+  it("refuses to pair repeated declarations it cannot tell apart", () => {
+    // Two declarations that changed in ways that cannot be paired are
+    // reported as removals and additions rather than as a guess.
+    const before = [record({ constraint: "^1.0.0" }), record({ constraint: "^2.0.0" })];
+    const after = [record({ constraint: "^3.0.0" }), record({ constraint: "^4.0.0" })];
+    const changes = compareManifests(before, after, "package.json");
+    expect(changes.map((change) => change.kind).sort()).toEqual([
+      "added",
+      "added",
+      "removed",
+      "removed",
+    ]);
+  });
+
   it("pairs a reordered entry by name even when the constraints differ", () => {
     // A positional pairing would report two changes here, and the one it
     // would report for `b` would start at the wrong constraint, so the
@@ -210,6 +264,27 @@ describe("compareManifests", () => {
     ];
     const changes = compareManifests(before, after, "go.mod");
     expect(changes.map((change) => change.kind).sort()).toEqual(["added", "removed"]);
+  });
+
+  it("refuses ambiguous Go major paths whose written constraints agree", () => {
+    // The path carries a Go module's major, so two modules whose constraints
+    // read the same are two different versions. A group that cannot be
+    // paired without guessing is reported as removals and additions.
+    const before = [
+      record({ registry: "go", dialect: "go", name: "example.com/m/v2", constraint: "v1.0.0" }),
+      record({ registry: "go", dialect: "go", name: "example.com/m/v3", constraint: "v1.0.0" }),
+    ];
+    const after = [
+      record({ registry: "go", dialect: "go", name: "example.com/m/v4", constraint: "v1.0.0" }),
+      record({ registry: "go", dialect: "go", name: "example.com/m/v5", constraint: "v1.0.0" }),
+    ];
+    const changes = compareManifests(before, after, "go.mod");
+    expect(changes.map((change) => change.kind).sort()).toEqual([
+      "added",
+      "added",
+      "removed",
+      "removed",
+    ]);
   });
 });
 

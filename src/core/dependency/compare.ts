@@ -36,6 +36,11 @@ function normalizedKey(record: DependencyRecord): string {
  * without also matching a module against an unrelated one. A group with
  * more than one candidate on a side cannot be paired without guessing, so
  * it is reported as removals and additions.
+ *
+ * A manifest may declare the same package more than once, so the first pass
+ * pairs the declarations whose version did not change before it pairs the
+ * rest. A reordering is then not a change, and a declaration that changed
+ * is paired with the one it replaced.
  */
 export function compareManifests(
   before: DependencyRecord[],
@@ -70,7 +75,48 @@ export function compareManifests(
       changes.push(...comparePair(beforeRecords[0], afterRecords[0], manifest));
       continue;
     }
-    unmatchedBefore.push(...beforeRecords);
+    // A manifest may declare the same package more than once: a workflow
+    // that pins one action in two steps. The declarations whose version did
+    // not change are paired first, so a reordering is not a change, and the
+    // declarations that are left changed are paired when they all carry the
+    // same version: every one of them changed to the other version, and
+    // that is one transition rather than one per declaration.
+    const unmatchedAfterRecords = [...afterRecords];
+    const unmatchedBeforeRecords: DependencyRecord[] = [];
+    for (const before of beforeRecords) {
+      const index = unmatchedAfterRecords.findIndex(
+        (after) => after.constraint === before.constraint,
+      );
+      if (index === -1) {
+        unmatchedBeforeRecords.push(before);
+        continue;
+      }
+      const [after] = unmatchedAfterRecords.splice(index, 1);
+      pairedAfter.add(after);
+      changes.push(...comparePair(before, after, manifest));
+    }
+    if (unmatchedBeforeRecords.length && unmatchedAfterRecords.length) {
+      const beforeVersion = unmatchedBeforeRecords[0]!.constraint;
+      const afterVersion = unmatchedAfterRecords[0]!.constraint;
+      const homogeneous =
+        unmatchedBeforeRecords.every((entry) => entry.constraint === beforeVersion) &&
+        unmatchedAfterRecords.every((entry) => entry.constraint === afterVersion);
+      if (homogeneous) {
+        const pairs = Math.min(unmatchedBeforeRecords.length, unmatchedAfterRecords.length);
+        for (let index = 0; index < pairs; index += 1) {
+          const after = unmatchedAfterRecords[index]!;
+          pairedAfter.add(after);
+          // The transition is one change, however many declarations carry it.
+          if (index === 0) {
+            changes.push(...comparePair(unmatchedBeforeRecords[index]!, after, manifest));
+          }
+        }
+        // The declarations that have no counterpart are reported as removals
+        // and additions.
+        unmatchedBeforeRecords.splice(0, pairs);
+      }
+    }
+    unmatchedBefore.push(...unmatchedBeforeRecords);
   }
 
   const leftoverAfter = after.filter((record) => !pairedAfter.has(record));
