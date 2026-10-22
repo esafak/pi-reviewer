@@ -147,6 +147,20 @@ export async function responseText(response: Response): Promise<string> {
 }
 
 /**
+ * Whether a registry URL is one the reader may contact.
+ *
+ * The registry's documents are read over https, without credentials, and
+ * from the port https uses. A redirect that changes any of those leaves the
+ * transport the reader trusts, so it is refused rather than followed.
+ */
+export function isSecureRegistryUrl(url: URL): boolean {
+  if (url.protocol !== "https:") return false;
+  if (url.username.length || url.password.length) return false;
+  if (url.port.length && url.port !== "443") return false;
+  return true;
+}
+
+/**
  * Fetches a document as text, following a bounded number of redirects.
  *
  * The redirect is followed by hand so every hop is checked against the
@@ -165,6 +179,8 @@ export async function requestTextFollowingHosts(
   for (let hop = 0; hop <= maxRedirects; hop += 1) {
     if (!allowedHosts.includes(current.hostname.toLowerCase()))
       throw new Error("Registry request left the allowed hosts");
+    if (!isSecureRegistryUrl(current))
+      throw new Error("Registry request left the secure transport");
     charge();
     let response: Response;
     try {

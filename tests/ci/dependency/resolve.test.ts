@@ -119,7 +119,7 @@ describe("upstream resolution", () => {
     vi.unstubAllGlobals();
   });
 
-  it("resolves a known tool through the tool table and leaves an unknown one unresolved", async () => {
+  it("resolves a known tool through the tool table", async () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(json({}));
     vi.stubGlobal("fetch", fetchMock);
     const python = change({
@@ -129,29 +129,49 @@ describe("upstream resolution", () => {
       name: "python",
       section: "tools",
     });
-    const aqua = change({
-      registry: "aqua",
-      dialect: "tool",
-      category: "tool",
-      name: "atlassian.com/acli",
-      section: "tools",
-    });
-    const resolutions = await resolveUpstreams(
-      [python, aqua],
-      [upgradeId(python), upgradeId(aqua)],
-      githubOnly,
-    );
+    const resolutions = await resolveUpstreams([python], [upgradeId(python)], githubOnly);
     expect(resolutions[0]!.candidates[0]).toMatchObject({
       repo: "python/cpython",
       via: "tool-table",
     });
-    expect(resolutions[1]!.candidates).toEqual([]);
-    expect(resolutions[1]!.unresolved).toContain("aqua");
     expect(fetchMock).not.toHaveBeenCalled();
     vi.unstubAllGlobals();
   });
 
-  it("does not substitute a tool for an identity from a registry it does not identify", async () => {
+  it("resolves an aqua recipe through the registry that publishes it", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(
+        text(
+          [
+            "packages:",
+            "  - type: github_release",
+            "    repo_owner: cli",
+            "    repo_name: cli",
+          ].join("\n"),
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const aqua = change({
+      registry: "aqua",
+      dialect: "tool",
+      category: "tool",
+      name: "cli/cli",
+      section: "tools",
+    });
+    // The lookup costs one request of the run's budget.
+    const resolutions = await resolveUpstreams([aqua], [upgradeId(aqua)], githubOnly, {
+      maxRequests: 1,
+    });
+    expect(resolutions[0]!.candidates[0]).toMatchObject({
+      repo: "cli/cli",
+      via: "registry-metadata",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    vi.unstubAllGlobals();
+  });
+
+  it("leaves an aqua recipe it cannot place unresolved", async () => {
     const fetchMock = vi.fn<typeof fetch>().mockImplementation(async () => json({}));
     vi.stubGlobal("fetch", fetchMock);
     // The aqua registry describes its own recipes, so a recipe named after a

@@ -433,10 +433,15 @@ export async function resolveUpstreams(
       if (repo) locations.push({ repo, url: `https://github.com/${repo}` });
       else reason = "the manifest does not name a GitHub repository";
     } else if (change.registry === "aqua") {
-      // The aqua registry describes its own recipes, and a recipe is not a
-      // repository: the tool table names the tools it knows, and the harness
-      // never substitutes a different project for one it could not identify.
-      reason = "the aqua registry describes a recipe, and no repository publishes it";
+      // The aqua registry describes each recipe in a file of its own, and
+      // the recipe names the repository the package is released from.
+      const source = await sourceFor(change);
+      reason = source.reason;
+      for (const raw of source.locations) {
+        const location = classifyLocation(raw);
+        if (location) locations.push(location);
+        else reason ??= `the registry reported a source the model cannot open: ${raw}`;
+      }
     } else if (!REGISTRY_BACKED.has(change.registry)) {
       // A tool pin that no registry describes is answered by the tool table.
       via = "tool-table";

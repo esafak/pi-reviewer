@@ -347,10 +347,114 @@ describe("registry source lookups", () => {
     vi.unstubAllGlobals();
   });
 
-  it("reports no source for a registry that describes none", async () => {
-    const result = await fetchPackageSource("aqua", "atlassian.com/acli", request());
+  it("reads the repository an aqua recipe names", async () => {
+    let charged = 0;
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(
+        text(
+          [
+            "packages:",
+            "  - type: github_release",
+            "    repo_owner: cli",
+            "    repo_name: cli",
+            "    version_source: github_tag",
+          ].join("\n"),
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await fetchPackageSource("aqua", "cli/cli", {
+      signal: AbortSignal.timeout(1000),
+      charge: () => {
+        charged += 1;
+      },
+    });
+    expect(String(fetchMock.mock.calls[0]![0])).toBe(
+      "https://raw.githubusercontent.com/aquaproj/aqua-registry/main/pkgs/cli/cli/registry.yaml",
+    );
+    expect(result.locations).toEqual(["https://github.com/cli/cli"]);
+    // The lookup costs one request of the run's budget.
+    expect(charged).toBe(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    vi.unstubAllGlobals();
+  });
+
+  it("reports no source for an aqua recipe that names no repository", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(
+        text(["packages:", "  - type: http", "    url: https://example.test"].join("\n")),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await fetchPackageSource("aqua", "example.test/tool", request());
     expect(result.locations).toEqual([]);
-    expect(result.reason).toContain("does not report an upstream location");
+    expect(result.reason).toContain("names no repository");
+    vi.unstubAllGlobals();
+  });
+
+  it("reports no source for an aqua recipe it could not read", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(text("packages: [unclosed"));
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await fetchPackageSource("aqua", "cli/cli", request());
+    expect(result.locations).toEqual([]);
+    expect(result.reason).toBeTruthy();
+    vi.unstubAllGlobals();
+  });
+
+  it("refuses a redirect that leaves the secure transport", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(null, {
+        status: 302,
+        headers: { location: "http://raw.githubusercontent.com/aquaproj/registry.yaml" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(fetchPackageSource("aqua", "cli/cli", request())).rejects.toThrow(
+      "secure transport",
+    );
+    // The forbidden hop was never contacted.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    vi.unstubAllGlobals();
+  });
+
+  it("does not ask the registry for a recipe name that is not a path", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(text("packages: []"));
+    vi.stubGlobal("fetch", fetchMock);
+    for (const name of [
+      "node",
+      "../../etc/passwd",
+      "cli/../cli",
+      "cli/cli/extra/more/deep/deeper/deepest",
+      `cli/${"x".repeat(300)}`,
+    ]) {
+      const result = await fetchPackageSource("aqua", name, request());
+      expect(result.locations, name).toEqual([]);
+      expect(result.reason, name).toContain("not a registry path");
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
+  it("reads a recipe whose path is nested", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(
+        text(
+          [
+            "packages:",
+            "  - type: github_release",
+            "    repo_owner: golang",
+            "    repo_name: tools",
+          ].join("\n"),
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await fetchPackageSource("aqua", "golang.org/x/tools/gopls", request());
+    expect(String(fetchMock.mock.calls[0]![0])).toBe(
+      "https://raw.githubusercontent.com/aquaproj/aqua-registry/main/pkgs/golang.org/x/tools/gopls/registry.yaml",
+    );
+    expect(result.locations).toEqual(["https://github.com/golang/tools"]);
+    vi.unstubAllGlobals();
   });
 
   it("drops a source that does not fit rather than shortening it", async () => {

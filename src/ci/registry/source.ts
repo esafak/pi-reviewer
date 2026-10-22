@@ -1,5 +1,8 @@
 import { findChild, readXmlDocument } from "../../core/dependency/xml.js";
+import { AQUA_STANDARD_OWNER, AQUA_STANDARD_REPOSITORY } from "../../core/dependency/aqua.js";
+import { findEntry, readYamlDocument, scalarText } from "../../core/dependency/yaml.js";
 import type { PackageRegistry } from "../../core/dependency/types.js";
+import { isGitHubRepository } from "../github-research/repository.js";
 import { isRecord, requestJson, requestTextFollowingHosts } from "./helpers.js";
 import {
   encodeGoModulePath,
@@ -35,6 +38,95 @@ export interface PackageSourceResult {
 }
 
 const MAVEN_CENTRAL_HOSTS = ["search.maven.org", "repo1.maven.org", "repo.maven.apache.org"];
+
+/** The hosts the standard registry's recipes are read from. */
+const AQUA_REGISTRY_HOSTS = ["raw.githubusercontent.com"];
+
+/** A segment of a recipe's path in the standard registry. */
+const AQUA_RECIPE_SEGMENT = /^[A-Za-z0-9._-]+$/;
+
+/** The most segments a recipe's path may have. */
+const AQUA_MAX_RECIPE_SEGMENTS = 6;
+
+/** The most characters a recipe's name may have. */
+const AQUA_MAX_RECIPE_LENGTH = 200;
+
+/**
+ * The path a recipe's file has in the standard registry.
+ *
+ * A recipe is named by the path it has: `cli/cli` is `pkgs/cli/cli`, and
+ * `golang.org/x/tools/gopls` is `pkgs/golang.org/x/tools/gopls`. The name
+ * comes from a manifest, so every segment is checked before it reaches the
+ * URL, and the name as a whole is bounded.
+ */
+export function aquaRecipePath(name: string): string | undefined {
+  const trimmed = name.trim();
+  if (!trimmed.length || trimmed.length > AQUA_MAX_RECIPE_LENGTH) return undefined;
+  const segments = trimmed.split("/");
+  if (segments.length < 2 || segments.length > AQUA_MAX_RECIPE_SEGMENTS) return undefined;
+  for (const segment of segments) {
+    if (!AQUA_RECIPE_SEGMENT.test(segment)) return undefined;
+    if (segment === "." || segment === "..") return undefined;
+  }
+  return segments.map((segment) => encodeURIComponent(segment)).join("/");
+}
+
+/** The repository an aqua recipe publishes its package from. */
+interface AquaRecipe {
+  /** The repository's owner. */
+  owner?: string;
+  /** The repository's name. */
+  name?: string;
+}
+
+/**
+ * The repository an aqua recipe publishes its package from.
+ *
+ * The recipe is a YAML document whose `packages` list holds the recipe
+ * itself, and the recipe names the repository the package is released
+ * from. That repository is where the versions come from, so it is where the
+ * release notes are.
+ */
+function readAquaRecipe(text: string): AquaRecipe {
+  const document = readYamlDocument(text);
+  if (document.uncertain) return {};
+  const packages = findEntry(document.root, "packages")?.value;
+  if (packages?.kind !== "sequence") return {};
+  const recipe = packages.items[0];
+  if (!recipe) return {};
+  const owner = scalarText(findEntry(recipe, "repo_owner")?.value)?.trim();
+  const name = scalarText(findEntry(recipe, "repo_name")?.value)?.trim();
+  return { ...(owner ? { owner } : {}), ...(name ? { name } : {}) };
+}
+
+/**
+ * aqua's upstream.
+ *
+ * The standard registry describes each recipe it publishes in a file of its
+ * own, and the recipe names the repository the package is released from.
+ * The recipe is read from the registry's current state rather than from the
+ * ref a configuration pins, because the repository a recipe names does not
+ * move between refs.
+ */
+async function aquaSource(name: string, request: SourceRequest): Promise<PackageSourceResult> {
+  const path = aquaRecipePath(name);
+  if (!path) return { locations: [], reason: "the aqua recipe name is not a registry path" };
+  const url = new URL(
+    `https://raw.githubusercontent.com/${AQUA_STANDARD_OWNER}/${AQUA_STANDARD_REPOSITORY}/main/pkgs/${path}/registry.yaml`,
+  );
+  // The helper charges every request it makes, so the lookup costs one
+  // request of the run's budget.
+  const text = await requestTextFollowingHosts(url, request.signal, AQUA_REGISTRY_HOSTS, () =>
+    request.charge(),
+  );
+  const recipe = readAquaRecipe(text);
+  const owner = recipe.owner;
+  const repository = recipe.name;
+  if (!owner || !repository || !isGitHubRepository(owner, repository)) {
+    return { locations: [], reason: "the aqua recipe names no repository" };
+  }
+  return { locations: [`https://github.com/${owner}/${repository}`] };
+}
 
 const CRATES_USER_AGENT = "pi-reviewer (https://github.com/esafak/pi-reviewer)";
 
@@ -364,6 +456,8 @@ export async function fetchPackageSource(
       return rubygemsSource(packageName, request);
     case "packagist":
       return packagistSource(packageName, request);
+    case "aqua":
+      return aquaSource(packageName, request);
     default:
       return {
         locations: [],
