@@ -25,6 +25,7 @@ import {
   removeAiFixFooter,
 } from "./ai-fix-footer.js";
 import type { SearchCitation } from "../ci/search/types.js";
+import type { UpgradeResearch } from "../ci/dependency/resolve.js";
 
 export type OutputTarget = "terminal" | "comment" | "file";
 export type { Severity } from "./severity.js";
@@ -65,6 +66,11 @@ export interface ReviewResult {
   pr_summary?: string;
   /** Raw Mermaid source (no fences) for the summary block diagram. */
   pr_diagram?: string;
+  /**
+   * The research dispositions the model reported for the dependency
+   * upgrades it was given. One per upgrade, and absent in the review mode.
+   */
+  research?: UpgradeResearch[];
   /** Raw diff included by the agent in SSH+UI mode */
   diff?: string;
   tokenUsage?: TokenUsage;
@@ -145,6 +151,14 @@ export interface OutputOptions {
   skippedDiff?: SkippedDiffNotice;
   /** Current-run, server-recorded external evidence; never model-authored. */
   evidence?: readonly SearchCitation[];
+  /**
+   * The research dispositions the model reported.
+   *
+   * The `none` action drops every other field, so the dispositions travel
+   * beside it: a run that found no breaking change still has to account for
+   * the upgrades it was given.
+   */
+  research?: UpgradeResearch[];
 }
 
 /**
@@ -198,6 +212,16 @@ export interface OutputMetadata {
   reviewId?: number;
   commentIds: number[];
   fallback: boolean;
+  /**
+   * The research dispositions the model reported.
+   *
+   * The `none` action drops every other field, so the dispositions travel
+   * beside it: a run that found no breaking change still has to account for
+   * the upgrades it was given. The coverage the check reports is built from
+   * the decision, inside `review()`; this copy is the record of what
+   * reached the output layer.
+   */
+  research?: UpgradeResearch[];
 }
 async function responseJson(
   response: Response,
@@ -325,6 +349,34 @@ function structuredResultRejection(
   return undefined;
 }
 
+/**
+ * The research dispositions, bounded for publication.
+ *
+ * A disposition is model text, and the model text that reaches a public
+ * comment is bounded like the rest of it. An entry that names no upgrade is
+ * dropped: it is not a disposition for anything.
+ */
+function normalizeResearchEntries(entries: readonly UpgradeResearch[]): UpgradeResearch[] {
+  const normalized: UpgradeResearch[] = [];
+  for (const entry of entries) {
+    const id = typeof entry.id === "string" ? entry.id.trim().slice(0, 64) : "";
+    if (!id) continue;
+    if (entry.status === "researched") {
+      const source = typeof entry.source === "string" ? entry.source.trim().slice(0, 2000) : "";
+      // A disposition with no source names nothing, so it is not a
+      // disposition: the upgrade stays unaccounted for, which is the state
+      // the harness reports.
+      if (!source) continue;
+      normalized.push({ id, status: "researched", source });
+      continue;
+    }
+    const reason = typeof entry.reason === "string" ? entry.reason.trim().slice(0, 2000) : "";
+    if (!reason) continue;
+    normalized.push({ id, status: "unverified", reason });
+  }
+  return normalized;
+}
+
 /** Normalize tool output while isolating contextual finding validation from the review itself. */
 export function normalizeReviewResult(
   result: ReviewResult,
@@ -424,6 +476,9 @@ export function normalizeReviewResult(
       : {}),
     ...(typeof result.pr_diagram === "string" && result.pr_diagram.trim()
       ? { pr_diagram: result.pr_diagram.slice(0, PR_DIAGRAM_MAX_LENGTH) }
+      : {}),
+    ...(result.research !== undefined
+      ? { research: normalizeResearchEntries(result.research) }
       : {}),
     ...(result.diff !== undefined ? { diff: result.diff } : {}),
   };
@@ -1597,7 +1652,27 @@ async function acknowledgeWithoutReview(options: OutputOptions, react: boolean):
   }
 }
 
+/**
+ * Publish the review.
+ *
+ * The research dispositions are attached here rather than on each posting
+ * path, so a disposition the model reported is never silently dropped on the
+ * way out. The `none` action carries them beside the decision, and the
+ * `review` action carries them inside the result; both land here.
+ */
 export async function sendOutput(options: OutputOptions): Promise<OutputMetadata> {
+  const metadata = await publishOutput(options);
+  const reported = options.research ?? options.structuredResult?.research;
+  // The copy that leaves the layer is the bounded one: the dispositions the
+  // model reported and the ones the harness published are the same ones.
+  const research = reported ? normalizeResearchEntries(reported) : [];
+  return {
+    ...metadata,
+    ...(research.length ? { research } : {}),
+  };
+}
+
+async function publishOutput(options: OutputOptions): Promise<OutputMetadata> {
   if (options.none) {
     if (options.target === "comment") {
       if (!options.githubToken) throw new Error("GITHUB_TOKEN is required to post a comment");

@@ -113,6 +113,7 @@ import { loadDocContext } from "../../src/core/doc-context.js";
 import { loadSkillContext, resolveSkillDirs } from "../../src/core/skill-context.js";
 import { sendOutput, type ReviewResult } from "../../src/core/output.js";
 import { createReviewTool, reviewSchema } from "../../src/core/review-tool.js";
+import { upgradeId } from "../../src/core/dependency/upgrade-id.js";
 import { createReplyTool, replySchema } from "../../src/core/reply-tool.js";
 import type { CiMcpConfig } from "../../src/ci/mcp-config.js";
 import { LSP_TOOL_NAMES } from "../../src/ci/tool-names.js";
@@ -3271,6 +3272,96 @@ describe("review", () => {
     await review({ cwd: "/repo" });
 
     expect(agent!.prompt).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("review — the dependency profile", () => {
+  /** The upgrade the dependency mode is analyzing. */
+  const change = {
+    registry: "npm" as const,
+    dialect: "semver" as const,
+    category: "library" as const,
+    name: "react",
+    section: "dependencies",
+    from: "^18.2.0",
+    to: "^19.0.0",
+    kind: "major" as const,
+    manifest: "package.json",
+  };
+  /** The id the harness assigns to it. */
+  const id = upgradeId(change);
+  /** The profile the dependency mode runs under. */
+  const profile = {
+    kind: "dependency" as const,
+    changes: [change],
+    resolutions: [
+      {
+        id,
+        candidates: [{ id: `${id}-1`, via: "registry-metadata" as const, repo: "facebook/react" }],
+      },
+    ],
+  };
+
+  it("renders the dependency prompt and hands the profile to the tool", async () => {
+    await review({ cwd: "/repo", profile });
+
+    expect(createReviewToolMock).toHaveBeenCalledWith(profile);
+    const prompt = agentState().systemPrompt;
+    expect(prompt).toContain("You are a dependency reviewer");
+    expect(prompt).toContain("<dependency_changes>");
+    expect(prompt).toContain("facebook/react");
+    expect(prompt).not.toContain("You are a code reviewer");
+  });
+
+  it("carries the research dispositions on a none decision", async () => {
+    createReviewToolMock.mockReturnValue({
+      tool: {
+        name: "submit_review",
+        label: "submit_review",
+        description: "test",
+        parameters: reviewSchema,
+        execute: vi.fn(),
+      },
+      getResult: () => ({
+        action: "none",
+        research: [{ id, status: "researched", source: `candidate:${id}-1` }],
+      }),
+    });
+
+    await review({ cwd: "/repo" });
+
+    expect(sendOutputMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        none: true,
+        research: [{ id, status: "researched", source: `candidate:${id}-1` }],
+      }),
+    );
+  });
+
+  it("asks for the research dispositions when the model has to be re-asked", async () => {
+    const agent = makeFakeAgent("");
+    AgentMock.mockImplementation(function () {
+      return agent as never;
+    });
+    let decisionReads = 0;
+    createReviewToolMock.mockReturnValue({
+      tool: {
+        name: "submit_review",
+        label: "submit_review",
+        description: "test",
+        parameters: reviewSchema,
+        execute: vi.fn(),
+      },
+      // The first run produces nothing; the retry produces the decision.
+      getResult: () => (decisionReads++ === 0 ? undefined : { action: "none" }),
+    });
+
+    await review({ cwd: "/repo", profile });
+
+    // The nudge names the field the dependency mode's contract requires.
+    expect(String(agent.prompt.mock.calls[1]?.[0])).toContain(
+      "one research disposition for every upgrade",
+    );
   });
 });
 

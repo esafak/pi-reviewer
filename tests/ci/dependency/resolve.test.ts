@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from "vite-plus/test";
 import type { DependencyChange } from "../../../src/core/dependency/types.js";
+import { upgradeId } from "../../../src/core/dependency/upgrade-id.js";
 import {
   resolveUpstreams,
-  upgradeId,
   validateResearch,
   type UpgradeResearch,
 } from "../../../src/ci/dependency/resolve.js";
@@ -28,16 +28,6 @@ const urlOnly = { github: false, url: true };
 const both = { github: true, url: true };
 
 describe("upstream resolution", () => {
-  it("gives every upgrade a stable id that distinguishes the section", () => {
-    const dependencies = change();
-    const devDependencies = change({ section: "devDependencies" });
-    expect(upgradeId(dependencies)).toBe(upgradeId(change()));
-    expect(upgradeId(dependencies)).not.toBe(upgradeId(devDependencies));
-    expect(upgradeId(dependencies)).not.toBe(
-      upgradeId(change({ manifest: "apps/web/package.json" })),
-    );
-  });
-
   it("reads the current metadata rather than the upgrade's target version", async () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
       json({
@@ -710,6 +700,21 @@ describe("research report validation", () => {
     );
     expect(result.accepted).toEqual([]);
     expect(result.gaps).toEqual(upgrades);
+    expect(result.diagnostics[0]).toContain("not one of the qualifying upgrades");
+  });
+
+  it("discards an unknown upgrade id without invalidating complete accounting", () => {
+    const report: UpgradeResearch[] = [
+      { id: upgradeId(react), status: "researched", source: `candidate:${upgradeId(react)}-1` },
+      { id: upgradeId(other), status: "researched", source: `candidate:${upgradeId(other)}-1` },
+      { id: "u-unknown", status: "researched", source: "candidate:whatever" },
+    ];
+
+    const result = validateResearch(report, resolutions, upgrades);
+
+    expect(result.accepted).toHaveLength(2);
+    expect(result.gaps).toEqual([]);
+    expect(result.diagnostics).toHaveLength(1);
     expect(result.diagnostics[0]).toContain("not one of the qualifying upgrades");
   });
 

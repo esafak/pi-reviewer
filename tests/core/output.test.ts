@@ -7,6 +7,7 @@ import {
   parseAgentResponse,
   parseAgentResponseWithStatus,
   normalizeFinding,
+  normalizeReviewResult,
   reconcileFindingUpdates,
   renderPrSummary,
   stripPrSummaryBlock,
@@ -4195,5 +4196,114 @@ describe("sendOutput skipped-diff notice", () => {
     const body = JSON.parse((fetchMock.mock.calls[0][1] as { body: string }).body).body as string;
     expect(body).toContain("> [!WARNING]");
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/reactions"))).toBe(false);
+  });
+});
+
+describe("normalizeReviewResult — the research dispositions", () => {
+  it("carries the dispositions through", () => {
+    const research = [
+      { id: "u-abc123", status: "researched" as const, source: "candidate:u-abc123-1" },
+    ];
+
+    const normalized = normalizeReviewResult(
+      { summary: "React 19 removes the legacy render API.", comments: [], research },
+      { minSeverity: "INFO" },
+      false,
+    );
+
+    expect(normalized.research).toEqual(research);
+  });
+
+  it("leaves a review without dispositions alone", () => {
+    const normalized = normalizeReviewResult(
+      { summary: "LGTM", comments: [] },
+      { minSeverity: "INFO" },
+      false,
+    );
+
+    expect(normalized.research).toBeUndefined();
+  });
+});
+
+describe("sendOutput — the research dispositions", () => {
+  it("carries the dispositions a review reported", async () => {
+    const research = [
+      { id: "u-abc123", status: "researched" as const, source: "candidate:u-abc123-1" },
+    ];
+
+    const metadata = await sendOutput({
+      target: "terminal",
+      structuredResult: {
+        summary: "React 19 removes the legacy render API.",
+        comments: [],
+        research,
+      },
+    });
+
+    expect(metadata.research).toEqual(research);
+  });
+
+  it("carries the dispositions a none decision reported", async () => {
+    const research = [
+      { id: "u-abc123", status: "unverified" as const, reason: "the notes were gone" },
+    ];
+
+    const metadata = await sendOutput({ target: "terminal", none: true, research });
+
+    expect(metadata.research).toEqual(research);
+  });
+
+  it("bounds the dispositions it publishes", () => {
+    const normalized = normalizeReviewResult(
+      {
+        summary: "React 19 removes the legacy render API.",
+        comments: [],
+        research: [{ id: "  u-abc123  ", status: "unverified", reason: `  ${"x".repeat(5000)}  ` }],
+      },
+      { minSeverity: "INFO" },
+      false,
+    );
+
+    expect(normalized.research?.[0]?.id).toBe("u-abc123");
+    expect(normalized.research?.[0]?.status).toBe("unverified");
+    const reason = normalized.research?.[0];
+    expect(reason && "reason" in reason ? reason.reason.length : 0).toBe(2000);
+  });
+
+  it("publishes the bounded dispositions, not the raw ones", async () => {
+    // The copy that leaves the layer is the bounded one: the harness
+    // matches an upgrade id exactly, so a padded id would be a gap.
+    const metadata = await sendOutput({
+      target: "terminal",
+      structuredResult: {
+        summary: "React 19 removes the legacy render API.",
+        comments: [],
+        research: [{ id: "  u-abc123  ", status: "unverified", reason: `  ${"x".repeat(5000)}  ` }],
+      },
+    });
+
+    const entry = metadata.research?.[0];
+    expect(entry?.id).toBe("u-abc123");
+    expect(entry && "reason" in entry ? entry.reason.length : 0).toBe(2000);
+  });
+
+  it("drops a disposition that names no upgrade", async () => {
+    const metadata = await sendOutput({
+      target: "terminal",
+      none: true,
+      research: [{ id: "   ", status: "unverified", reason: "the notes were gone" }],
+    });
+
+    expect(metadata.research).toBeUndefined();
+  });
+
+  it("drops a disposition whose source is empty", async () => {
+    const metadata = await sendOutput({
+      target: "terminal",
+      none: true,
+      research: [{ id: "u-abc123", status: "researched", source: "   " }],
+    });
+
+    expect(metadata.research).toBeUndefined();
   });
 });

@@ -1,6 +1,5 @@
-import { createHash } from "node:crypto";
-
 import type { DependencyChange } from "../../core/dependency/types.js";
+import { upgradeId } from "../../core/dependency/upgrade-id.js";
 import { fetchPackageSource } from "../registry/source.js";
 import { isGitHubRepository } from "../github-research/repository.js";
 import { prepareResearch, type ReaderCapabilities } from "../research-preparation.js";
@@ -150,20 +149,6 @@ interface GitHubRepository {
   repo: string;
   /** The path within the repository, when the source names one. */
   path?: string;
-}
-
-/**
- * The harness-assigned id for an upgrade.
- *
- * The id names one upgrade in one manifest and one section: the same package
- * can be upgraded in several sections and in several workspace manifests,
- * and a name alone cannot tell them apart. It is derived from the manifest
- * path, the registry, the package name, and the section, so the same
- * upgrade receives the same id on every run.
- */
-export function upgradeId(change: DependencyChange): string {
-  const identity = JSON.stringify([change.manifest, change.registry, change.name, change.section]);
-  return `u-${createHash("sha256").update(identity).digest("hex").slice(0, 12)}`;
 }
 
 /** The run-scoped budget the resolver spends its lookups under. */

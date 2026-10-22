@@ -6,7 +6,8 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { detectDependencyChanges } from "../../../src/ci/dependency/detect.js";
-import { resolveUpstreams, upgradeId } from "../../../src/ci/dependency/resolve.js";
+import { resolveUpstreams } from "../../../src/ci/dependency/resolve.js";
+import { upgradeId } from "../../../src/core/dependency/upgrade-id.js";
 import { isBreakingRelevant } from "../../../src/core/dependency/threshold.js";
 import { gitEnv } from "../../../src/core/git-env.js";
 

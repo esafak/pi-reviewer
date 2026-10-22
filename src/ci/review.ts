@@ -39,6 +39,7 @@ import {
   type ResolvedFindingContext,
 } from "../core/prompt-builder.js";
 import { createReviewTool, type ReviewDecision } from "../core/review-tool.js";
+import type { ReviewProfile } from "../core/review-profile.js";
 import { ALLOWED_REACTIONS, createReplyTool, type ReplyAction } from "../core/reply-tool.js";
 import { normalizeMarkdownText } from "../core/ai-fix-footer.js";
 import { PROMPTS } from "../core/prompts.js";
@@ -102,12 +103,15 @@ function isUnindexedRejection(failure: McpFailureEntry): boolean {
  */
 function decisionToOutput(
   decision: ReviewDecision,
-): Pick<OutputOptions, "structuredResult" | "none"> {
+): Pick<OutputOptions, "structuredResult" | "none" | "research"> {
   switch (decision.action) {
     case "review":
       return { structuredResult: decision.result };
     case "none":
-      return { none: true };
+      // The `none` action drops every other field, and the research
+      // dispositions are the one field a run that found nothing still has to
+      // carry.
+      return { none: true, ...(decision.research ? { research: decision.research } : {}) };
     default: {
       const unexpected: never = decision;
       throw new Error(
@@ -121,9 +125,16 @@ function decisionToOutput(
  * Re-ask used when the model stops without calling `submit_review`. The nudge
  * itself needs nothing provider-specific, which is what makes it the part that
  * always applies.
+ *
+ * The nudge is profile-aware for the same reason the tool's description is:
+ * a nudge that asks for "none" would contradict a profile whose contract
+ * requires a disposition for every upgrade.
  */
-const SUBMIT_NUDGE =
-  'Submit your decision now by calling submit_review: action "review" with your findings, or "none" when there is nothing that needs changing.';
+const SUBMIT_NUDGE: Record<ReviewProfile["kind"], string> = {
+  code: 'Submit your decision now by calling submit_review: action "review" with your findings, or "none" when there is nothing that needs changing.',
+  dependency:
+    'Submit your decision now by calling submit_review: action "review" with your findings, and one research disposition for every upgrade in the <dependency_changes> section.',
+};
 
 /**
  * Pinned tool choice for the retry — best-effort enrichment on top of the
@@ -193,6 +204,14 @@ export interface ReviewOptions {
    * return the normalized result to the caller, and post nothing.
    */
   summaryOnly?: boolean;
+  /**
+   * What the reviewer is being asked to do. Defaults to the code profile.
+   *
+   * The dependency profile selects the dependency instructions, the resolved
+   * upstream locations the model reads, and the research field the model
+   * reports its dispositions in.
+   */
+  profile?: ReviewProfile;
 }
 
 /** Normalized overview returned by a summary-only pass; findings are discarded. */
@@ -949,7 +968,12 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
     options.priorSummary,
     resolvedFindings,
     prTitle || prBody ? { title: prTitle, body: prBody } : undefined,
-    { summaryEnabled, skills: skillContext ?? undefined, extraInstructions },
+    {
+      summaryEnabled,
+      skills: skillContext ?? undefined,
+      extraInstructions,
+      ...(options.profile ? { profile: options.profile } : {}),
+    },
   );
   // Search is deliberately CI-comment-only. Local terminal/file runs must not
   // receive network tools merely because CI configuration leaked into env.
@@ -1120,7 +1144,9 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
   }
   logger.info("review.agent.started", "Running agent", { model: resolvedModel.api });
 
-  const { tool: reviewTool, getResult } = createReviewTool();
+  const { tool: reviewTool, getResult } = createReviewTool(options.profile);
+  const submitNudge =
+    options.profile?.kind === "dependency" ? SUBMIT_NUDGE.dependency : SUBMIT_NUDGE.code;
   const models = builtinModels();
 
   const readOnlyTools = createReadOnlyTools(cwd);
@@ -1737,7 +1763,7 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
         // an identical third call would not differ.
         try {
           forceSubmit = true;
-          await runAgent(SUBMIT_NUDGE);
+          await runAgent(submitNudge);
         } catch (error) {
           // Only the pinned attempt's failure is anticipated: the pinned value
           // is a documented type-lie whose support varies by provider, so it
@@ -1750,7 +1776,7 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
             { error: error instanceof Error ? error.message : String(error) },
           );
           forceSubmit = false;
-          await runAgent(SUBMIT_NUDGE);
+          await runAgent(submitNudge);
         } finally {
           forceSubmit = false;
         }

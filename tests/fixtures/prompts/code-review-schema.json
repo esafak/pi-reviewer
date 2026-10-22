@@ -1,0 +1,167 @@
+{
+  "type": "object",
+  "required": [
+    "action"
+  ],
+  "properties": {
+    "action": {
+      "anyOf": [
+        {
+          "type": "string",
+          "const": "review"
+        },
+        {
+          "type": "string",
+          "const": "none"
+        }
+      ],
+      "description": "\"review\" to publish comments, finding_updates, and/or the PR overview; \"none\" when there is nothing to publish (no comments, no updates, no overview — never file a no-findings review)."
+    },
+    "summary": {
+      "type": "string",
+      "description": "Overall review written in Markdown. Required for action \"review\"; omit for \"none\". Use bullet points and bold for clarity. In JSON, encode each Markdown newline once as \\n; never double-escape formatting newlines as \\\\n."
+    },
+    "pr_summary": {
+      "type": "string",
+      "maxLength": 2000,
+      "description": "What/Why/Risk overview of the shown diff for the PR summary block. What: bulleted file/feature changes. Why: inferred intent, labeled as inference. Risks: edge cases and follow-ups. Structure the overview with `### What`, `### Why`, and `### Risks` Markdown headings — never bold text. Markdown with single-escaped newlines; at most 2000 characters. Omit entirely for follow-up batches or when summary output is disabled."
+    },
+    "pr_diagram": {
+      "type": "string",
+      "maxLength": 1500,
+      "description": "Raw Mermaid source (no fences) for the PR summary block, at most 1500 characters. Emit only when the diff introduces or alters a multi-component interaction (new subsystem, cross-file flow, changed state machine); prefer flowchart TD for structure and sequenceDiagram for call order. Omit for localized changes."
+    },
+    "comments": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "file",
+          "line",
+          "side",
+          "severity",
+          "body"
+        ],
+        "properties": {
+          "file": {
+            "type": "string",
+            "description": "Relative path from repo root."
+          },
+          "line": {
+            "type": "number",
+            "minimum": 1,
+            "multipleOf": 1,
+            "description": "Positive integer line number of a changed or context line within a diff hunk. Only lines that appear in the diff can receive comments — do not comment on arbitrary lines outside the diff."
+          },
+          "side": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "LEFT"
+              },
+              {
+                "type": "string",
+                "const": "RIGHT"
+              }
+            ],
+            "description": "\"RIGHT\" for added/context lines, \"LEFT\" for removed lines."
+          },
+          "severity": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "CRITICAL"
+              },
+              {
+                "type": "string",
+                "const": "WARN"
+              },
+              {
+                "type": "string",
+                "const": "INFO"
+              }
+            ],
+            "description": "Issue severity tier."
+          },
+          "body": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^(?![\\s😀🧪\\u200D\\u20E3\\uFE0F\\uD83C-\\uD83E\\uDC00-\\uDFFF\\u00A9\\u00AE\\u203C\\u2049\\u2122\\u2139\\u2190-\\u21FF\\u2300-\\u23FF\\u25A0-\\u27BF\\u2B00-\\u2BFF\\u3030\\u303D\\u3297\\u3299]+$)[\\s\\S]+$",
+            "description": "Non-empty inline comment text containing meaningful prose, may use Markdown."
+          },
+          "suggestion": {
+            "type": "string",
+            "description": "Optional replacement code for this finding. Provide only when a concrete replacement is useful; an empty string intentionally deletes the anchored line. Applies to one RIGHT-side line, though replacement code may span multiple lines."
+          },
+          "resolved_finding_id": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "re_raise_reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "REINTRODUCED"
+              },
+              {
+                "type": "string",
+                "const": "MATERIALLY_CHANGED"
+              },
+              {
+                "type": "string",
+                "const": "CONTRADICTORY_EVIDENCE"
+              }
+            ]
+          },
+          "re_raise_evidence": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          }
+        },
+        "additionalProperties": false
+      },
+      "description": "Inline comments attached to specific diff lines. May be an empty array when finding_updates or the PR overview carries the review; otherwise prefer \"none\" over an empty review. Omit for \"none\"."
+    },
+    "finding_updates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "comment_id",
+          "status",
+          "explanation"
+        ],
+        "properties": {
+          "comment_id": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "ID of an existing finding supplied in the prompt."
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "RESOLVED"
+              },
+              {
+                "type": "string",
+                "const": "PARTIALLY_RESOLVED"
+              },
+              {
+                "type": "string",
+                "const": "STILL_OPEN"
+              }
+            ]
+          },
+          "explanation": {
+            "type": "string",
+            "maxLength": 2000
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}
