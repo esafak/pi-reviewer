@@ -5,12 +5,14 @@ import {
   CHECK_OUTPUT_TITLE,
   CHECK_RUN_NAME,
   MAX_ANNOTATION_MESSAGE_BYTES,
+  CHECK_FAILED_SUMMARY,
   MAX_CHECK_SUMMARY_BYTES,
   annotationLevel,
   concludeDependencyCheckRun,
   conclusionFor,
   createDependencyCheckRun,
   toAnnotations,
+  withDependencyCheckRun,
 } from "../../src/ci/check-run.js";
 import { GitHubClient } from "../../src/ci/github.js";
 import type { PublishedFinding } from "../../src/core/output.js";
@@ -449,5 +451,76 @@ describe("concludeDependencyCheckRun", () => {
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("Could not conclude the check run"));
     // The first chunk was published before the second one failed.
     expect(requests(fetchMock)).toHaveLength(2);
+  });
+});
+
+describe("withDependencyCheckRun", () => {
+  it("creates the run before the analysis and concludes it from the findings", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(response({ id: 5, status: "completed" }));
+    vi.stubGlobal("fetch", fetchMock);
+    const analysis = {
+      findings: [finding({ severity: "CRITICAL" })],
+      diff: DIFF,
+      summary: "1 breaking change.",
+    };
+
+    await expect(
+      withDependencyCheckRun(new GitHubClient("token"), {
+        repo: "owner/repo",
+        headSha: "head-sha",
+        run: async () => analysis,
+      }),
+    ).resolves.toBe(analysis);
+
+    const [created, concluded] = requests(fetchMock);
+    expect(created.method).toBe("POST");
+    expect(created.body.status).toBe("in_progress");
+    expect(created.body.head_sha).toBe("head-sha");
+    // The run is created before the analysis runs, so a failure in the
+    // analysis still leaves a terminal conclusion.
+    expect(concluded.method).toBe("PATCH");
+    expect(concluded.body.conclusion).toBe("failure");
+    expect(concluded.body.output.annotations).toHaveLength(1);
+  });
+
+  it("concludes failure and rethrows when the analysis throws", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(response({ id: 5, status: "completed" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      withDependencyCheckRun(new GitHubClient("token"), {
+        repo: "owner/repo",
+        headSha: "head-sha",
+        run: async () => {
+          throw new Error("the analysis failed");
+        },
+      }),
+    ).rejects.toThrow("the analysis failed");
+
+    const [, concluded] = requests(fetchMock);
+    expect(concluded.body.conclusion).toBe("failure");
+    expect(concluded.body.output.summary).toBe(CHECK_FAILED_SUMMARY);
+  });
+
+  it("still runs the analysis when the run cannot be created", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          response({ message: "Resource not accessible by integration" }, false, 403),
+        ),
+    );
+
+    await expect(
+      withDependencyCheckRun(new GitHubClient("token"), {
+        repo: "owner/repo",
+        headSha: "head-sha",
+        run: async () => ({ findings: [], diff: "", summary: "nothing to report" }),
+      }),
+    ).resolves.toEqual({ findings: [], diff: "", summary: "nothing to report" });
+    // The review is the deliverable; the check run is the gate.
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("Could not create the check run"));
   });
 });

@@ -23,8 +23,8 @@ describe("GitHub Action Vite+ setup", () => {
     expect(action).not.toContain("Ensure review history");
     expect(action).not.toContain("fetch --unshallow");
     expect(entry).toContain("ensureCommit(latest.toSha, undefined)");
-    expect(entry).toContain("ensureCommit(head, `refs/pull/${event.pr}/head`)");
-    expect(entry).toContain("ensureCommit(pr.base.sha, undefined)");
+    expect(entry).toContain("ensureCommit(head, `refs/pull/${pullRequestNumber}/head`)");
+    expect(entry).toContain("ensureCommit(pullRequest.base.sha, undefined)");
     expect(entry).toContain("--is-shallow-repository");
     expect(entry).toContain("if (isShallowRepository())");
     expect(entry).toContain("review.marker_history.unavailable");
@@ -177,5 +177,108 @@ describe("GitHub Action Vite+ setup", () => {
 
     expect(entry).not.toMatch(/\bprocess\.exit\(/);
     expect(entry).toContain("process.exitCode");
+  });
+});
+
+/**
+ * The action entry's ordering.
+ *
+ * The two modes share most of the entry point, and the order of the branches
+ * is what keeps them apart: a reply never creates a check run, the dependency
+ * mode is the only path that creates one, and the Renovate skip belongs to the
+ * review mode. The unit tests below the entry point cannot see that order, so
+ * it is asserted on the source itself.
+ */
+describe("action entry mode dispatch", () => {
+  const read = async () => readFile(path.join(process.cwd(), "src/ci/action-entry.ts"), "utf8");
+
+  it("dispatches to one mode or the other after the shared guards", async () => {
+    const entry = await read();
+    expect(entry).toContain('if (mode === "dependency") await runDependencyMode(context);');
+    expect(entry).toContain("else await runReviewMode(context);");
+  });
+
+  it("handles a reply before the mode branch", async () => {
+    const entry = await read();
+    const reply = entry.indexOf('if (event.kind === "reply")');
+    const dispatch = entry.indexOf('if (mode === "dependency") await runDependencyMode');
+    expect(reply).toBeGreaterThan(0);
+    expect(dispatch).toBeGreaterThan(reply);
+    // The reply branch returns, so no analysis and no check run follows it.
+    expect(entry.slice(reply, dispatch)).toContain("return;");
+  });
+
+  it("skips Renovate PRs in the review mode only", async () => {
+    const entry = await read();
+    expect(entry).toContain('if (mode === "review" && isRenovatePullRequest(pullRequest))');
+    expect(entry).not.toContain("if (isRenovatePullRequest(pullRequest)) {");
+  });
+
+  it("treats a missing pull request number as an error in the dependency mode", async () => {
+    const entry = await read();
+    const missing = entry.indexOf("if (!isSafePullRequestNumber(event.pr))");
+    expect(entry.slice(missing, entry.indexOf("if (event.fork)", missing))).toContain(
+      "The dependency mode requires a pull request number",
+    );
+  });
+
+  it("rejects target-head in the dependency mode", async () => {
+    const entry = await read();
+    expect(entry).toContain("target-head is not supported in dependency mode");
+  });
+
+  it("creates a check run on the dependency path alone", async () => {
+    const entry = await read();
+    const dependencyMode = entry.slice(
+      entry.indexOf("async function runDependencyMode"),
+      entry.indexOf("async function runReviewMode"),
+    );
+    expect(dependencyMode).toContain("withDependencyCheckRun(");
+    const reviewMode = entry.slice(entry.indexOf("async function runReviewMode"));
+    expect(reviewMode).not.toContain("withDependencyCheckRun(");
+    expect(reviewMode).not.toContain("createDependencyCheckRun(");
+  });
+
+  it("prepares the same worktree for both modes", async () => {
+    const entry = await read();
+    expect(entry.match(/await prepareWorktree\(/g)).toHaveLength(2);
+    const dependencyMode = entry.slice(
+      entry.indexOf("async function runDependencyMode"),
+      entry.indexOf("async function runReviewMode"),
+    );
+    expect(dependencyMode).toContain("prepareCommits(");
+    expect(dependencyMode).toContain("prepareWorktree(");
+  });
+
+  it("fetches the analyzed commits before any ancestry or merge decision", async () => {
+    const entry = await read();
+    const reviewMode = entry.slice(entry.indexOf("async function runReviewMode"));
+    const commits = reviewMode.indexOf("prepareCommits(");
+    expect(commits).toBeGreaterThan(-1);
+    // A head that is not local makes every ancestry and merge answer describe
+    // the wrong range, so the fetch precedes them all.
+    for (const decision of ["isMergeCommit(head)", "rangeContainsMerge(", "selectBatchRange("])
+      expect(reviewMode.indexOf(decision)).toBeGreaterThan(commits);
+    // The worktree is created only for a range that will be reviewed.
+    expect(reviewMode.indexOf("await prepareWorktree(")).toBeGreaterThan(
+      reviewMode.indexOf("review.skipped.already_reviewed"),
+    );
+  });
+
+  it("uses the authenticated head for the review's commit", async () => {
+    const entry = await read();
+    const flow = await readFile(path.join(process.cwd(), "src/ci/dependency-check.ts"), "utf8");
+    // The head is captured once: the check run is created for it, and the
+    // review is posted against it.
+    expect(entry).toContain("const head = pullRequest.head.sha;");
+    expect(entry).toContain("headSha: head,");
+    expect(flow).toContain("commitId: options.headSha");
+  });
+
+  it("no longer calls the dependency mode unavailable", async () => {
+    const action = await readFile(path.join(process.cwd(), "action.yml"), "utf8");
+    const docs = await readFile(path.join(process.cwd(), "CI.md"), "utf8");
+    expect(action).not.toContain("not available in this build yet");
+    expect(docs).not.toContain("not available in this build yet");
   });
 });

@@ -175,6 +175,23 @@ export interface OutputOptions {
    * the upgrades it was given.
    */
   research?: UpgradeResearch[];
+  /**
+   * The dependency mode sets it: the analysis itself is the deliverable, so a
+   * review with a body is always posted. The review mode keeps the rule that a
+   * findings-free review is acknowledged with a reaction instead.
+   */
+  requireBody?: boolean;
+  /**
+   * Harness-authored coverage findings from the dependency analysis.
+   *
+   * They are appended immediately after normalization and before
+   * deduplication and partitioning, so they bypass the `min-severity` filter:
+   * a threshold must never hide a coverage gap the mode exists to report.
+   * A warning with a position is published inline when the position is on the
+   * diff and in the review body otherwise; one without a position is always
+   * published in the body.
+   */
+  coverageWarnings?: readonly PublishedFinding[];
 }
 
 /**
@@ -228,6 +245,15 @@ export interface OutputMetadata {
   reviewId?: number;
   commentIds: number[];
   fallback: boolean;
+  /**
+   * The findings the output path published, in the order they were posted.
+   *
+   * The list is what a reviewer sees, not what the model claimed: findings
+   * that could not be positioned on the diff are still published in the
+   * review body, so they are included. The dependency mode's gate and check
+   * summary are computed from it.
+   */
+  findings: PublishedFinding[];
   /**
    * The research dispositions the model reported.
    *
@@ -1276,6 +1302,7 @@ function formatForGitHub(
       OutputOptions,
       "repo" | "baseCommitId" | "evidence" | "summaryEnabled" | "isFirstReview" | "skippedDiff"
     >,
+  coverage: readonly PublishedFinding[] = [],
 ): string {
   const lines = ["## Pi Reviewer", ""];
   // Footer advertises regeneration, so it renders iff the block does (see buildReviewBody).
@@ -1306,6 +1333,11 @@ function formatForGitHub(
     })),
   );
   if (prompt) lines.push("", prompt);
+
+  // The issue-comment fallback carries the coverage warnings the review body
+  // would have carried: the annotations are on the check run, which may not
+  // exist, and a coverage gap must never depend on it.
+  if (coverage.length > 0) lines.push("", renderCoverageSection(coverage));
 
   if (result.comments.length > 0) {
     lines.push("", "### Inline Comments");
@@ -1497,6 +1529,59 @@ function renderExternalSources(
 }
 
 /**
+ * Splits the harness's coverage findings into the ones the inline path can
+ * carry and the ones only the review body can.
+ *
+ * A coverage finding is harness-authored, so the prose is not the model's,
+ * but the values it names came from a manifest and are sanitized here anyway:
+ * a comment body is the one place a `-->` or a details tag would change the
+ * document around it.
+ */
+function splitCoverageWarnings(warnings: readonly PublishedFinding[]): {
+  positioned: ReviewComment[];
+  bodyOnly: PublishedFinding[];
+} {
+  const positioned: ReviewComment[] = [];
+  const bodyOnly: PublishedFinding[] = [];
+  for (const warning of warnings) {
+    const body = sanitizeVisibleReviewText(warning.body);
+    if (warning.file === undefined || warning.line === undefined) {
+      bodyOnly.push({ ...warning, body });
+      continue;
+    }
+    positioned.push({
+      file: warning.file,
+      line: warning.line,
+      side: warning.side ?? "RIGHT",
+      severity: warning.severity,
+      body,
+    });
+  }
+  return { positioned, bodyOnly };
+}
+
+/**
+ * The coverage findings a reader sees in the review body.
+ *
+ * The position-independent ones have nowhere else to go, and the ones whose
+ * position is not on the diff are published here too by the partition. The
+ * section is harness-owned, so it is never model prose and never filtered.
+ */
+function renderCoverageSection(warnings: readonly PublishedFinding[]): string {
+  const lines = [
+    "### Coverage warnings",
+    "",
+    "These upgrades were not verified. They are reported by the harness, not by the model:",
+    "",
+  ];
+  for (const warning of warnings) {
+    const excerpt = warning.body.split("\n")[0]?.trim() ?? "";
+    lines.push(`- ${SEVERITY_EMOJI[warning.severity]} ${excerpt}`);
+  }
+  return lines.join("\n");
+}
+
+/**
  * Build the review body: the summary plus a clearly-marked section listing
  * comments that could not be attached to a diff line. GitHub shows the body as
  * the review's main text, so moved comments stay visible to the author.
@@ -1510,6 +1595,7 @@ function buildReviewBody(
       OutputOptions,
       "repo" | "baseCommitId" | "evidence" | "summaryEnabled" | "isFirstReview" | "skippedDiff"
     >,
+  coverage: readonly PublishedFinding[] = [],
 ): string {
   const lines: string[] = [];
   // The footer advertises summary regeneration, so it renders if and only if
@@ -1561,6 +1647,7 @@ function buildReviewBody(
       );
     }
   }
+  if (coverage.length > 0) lines.push("", renderCoverageSection(coverage));
   const sources = renderExternalSources(
     `${result.summary}\n${allComments.map((comment) => comment.body).join("\n")}`,
     provenance.evidence,
@@ -1754,7 +1841,7 @@ async function publishOutput(options: OutputOptions): Promise<OutputMetadata> {
     } else {
       console.log("[pi-reviewer] no findings to report");
     }
-    return { commentIds: [], fallback: false };
+    return { commentIds: [], fallback: false, findings: [] };
   }
 
   const structuredResult = options.structuredResult;
@@ -1767,10 +1854,26 @@ async function publishOutput(options: OutputOptions): Promise<OutputMetadata> {
     throw new Error(`Agent output was not a valid structured review: ${rejectionReason}`);
   }
   const result = normalizeReviewResult(structuredResult, options, true);
+  // Coverage findings are appended here — after normalization, before
+  // deduplication and partitioning — so the severity filter cannot hide them.
+  // The partition then decides, as it does for any finding, whether each one
+  // is published inline or in the review body.
+  const coverage = splitCoverageWarnings(options.coverageWarnings ?? []);
+  result.comments.push(...coverage.positioned);
+  const published = (comments: readonly ReviewComment[]): PublishedFinding[] => [
+    ...comments.map((comment) => ({
+      file: comment.file,
+      line: comment.line,
+      side: comment.side,
+      severity: comment.severity,
+      body: comment.body,
+    })),
+    ...coverage.bodyOnly,
+  ];
 
   if (options.target === "terminal") {
     console.log(formatForTerminal(result));
-    return { commentIds: [], fallback: false };
+    return { commentIds: [], fallback: false, findings: published(result.comments) };
   }
 
   if (options.target === "comment") {
@@ -1817,7 +1920,10 @@ async function publishOutput(options: OutputOptions): Promise<OutputMetadata> {
       body: `<!-- pi-reviewer:finding:v1 -->\n${appendGitHubSuggestion(comment, appendFindingFooter(comment, `${reRaiseMetadata(comment, options)}${sanitizeVisibleReviewText(comment.body)}`))}`,
     }));
 
-    const body = [options.batchMarker, buildReviewBody(result, moved, comments, options)]
+    const body = [
+      options.batchMarker,
+      buildReviewBody(result, moved, comments, options, coverage.bodyOnly),
+    ]
       .filter(Boolean)
       .join("\n\n");
 
@@ -1854,10 +1960,11 @@ async function publishOutput(options: OutputOptions): Promise<OutputMetadata> {
       result.comments.length === 0 &&
       outstandingFindings.size === 0 &&
       !postsSummaryBody &&
+      !options.requireBody &&
       !(options.skippedDiff && options.skippedDiff.files.length > 0)
     ) {
       await acknowledgeWithoutReview(options, true);
-      return { commentIds: [], fallback: false };
+      return { commentIds: [], fallback: false, findings: [] };
     }
 
     if (options.commitId && options.batchMarker) {
@@ -1905,7 +2012,10 @@ async function publishOutput(options: OutputOptions): Promise<OutputMetadata> {
                   options.repo,
                   options.prNumber,
                   posted.id,
-                  [finalized, buildReviewBody(result, moved, comments, options)].join("\n\n"),
+                  [
+                    finalized,
+                    buildReviewBody(result, moved, comments, options, coverage.bodyOnly),
+                  ].join("\n\n"),
                 )
                 .catch((error) =>
                   console.warn(
@@ -1938,6 +2048,7 @@ async function publishOutput(options: OutputOptions): Promise<OutputMetadata> {
           reviewId: posted?.id,
           commentIds: posted?.comments?.flatMap((c) => (c.id ? [c.id] : [])) ?? [],
           fallback: false,
+          findings: published(comments),
         };
       }
       let errBody = await reviewResponse.text().catch(() => "");
@@ -1951,7 +2062,7 @@ async function publishOutput(options: OutputOptions): Promise<OutputMetadata> {
       if (reviewResponse.status === 422) {
         const allMovedBody = [
           options.batchMarker,
-          buildReviewBody(result, comments, comments, options),
+          buildReviewBody(result, comments, comments, options, coverage.bodyOnly),
         ]
           .filter(Boolean)
           .join("\n\n");
@@ -2018,6 +2129,7 @@ async function publishOutput(options: OutputOptions): Promise<OutputMetadata> {
             reviewId: posted?.id,
             commentIds: posted?.comments?.flatMap((c) => (c.id ? [c.id] : [])) ?? [],
             fallback: true,
+            findings: published(comments),
           };
         }
         errBody = await reviewResponse.text().catch(() => "");
@@ -2035,7 +2147,7 @@ async function publishOutput(options: OutputOptions): Promise<OutputMetadata> {
         method: "POST",
         headers,
         body: JSON.stringify({
-          body: [options.batchMarker, formatForGitHub(result, options)]
+          body: [options.batchMarker, formatForGitHub(result, options, coverage.bodyOnly)]
             .filter(Boolean)
             .join("\n\n"),
         }),
@@ -2053,12 +2165,16 @@ async function publishOutput(options: OutputOptions): Promise<OutputMetadata> {
     if (comments.length > 0)
       await clearStaleThumbsUp(options.githubToken, options.repo, options.prNumber);
     const posted = await responseJson(issueResponse);
-    return { commentIds: posted?.id ? [posted.id] : [], fallback: true };
+    return {
+      commentIds: posted?.id ? [posted.id] : [],
+      fallback: true,
+      findings: published(comments),
+    };
   }
 
   const cwd = options.cwd ?? process.cwd();
   const filePath = path.join(cwd, "pi-review.md");
   await writeFile(filePath, formatForTerminal(result), "utf-8");
   console.log(`[pi-reviewer] review saved to ${filePath}`);
-  return { commentIds: [], fallback: false };
+  return { commentIds: [], fallback: false, findings: published(result.comments) };
 }

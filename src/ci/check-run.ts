@@ -206,6 +206,75 @@ export interface ConcludeCheckRunOptions {
   failed?: boolean;
 }
 
+/** The summary a check run carries when the analysis itself failed. */
+export const CHECK_FAILED_SUMMARY =
+  "The dependency analysis did not complete. See the action log for the reason.";
+
+/** What a check run's scope needs from the analysis. */
+export interface CheckRunAnalysis {
+  /** The published findings the annotations are built from. */
+  findings: readonly PublishedFinding[];
+  /** The diff the findings were positioned against. */
+  diff: string;
+  /** The summary the check reports. */
+  summary: string;
+}
+
+/** What a check run's scope needs. */
+export interface CheckRunScopeOptions {
+  repo: string;
+  /** The commit the run belongs to: the authenticated pull request head. */
+  headSha: string;
+  /** The analysis the run reports on. */
+  run: () => Promise<CheckRunAnalysis>;
+}
+
+/**
+ * Runs an analysis under a check run's lifecycle.
+ *
+ * The run is created before the analysis and concluded after it, whatever the
+ * analysis did: an error leaves a terminal `failure` rather than a run stuck
+ * `in_progress`. A hard runner termination still leaves the run
+ * `in_progress`, which GitHub marks stale — the guarantee is deliberately
+ * limited to errors the process can observe.
+ *
+ * A failed or missing check run never fails the analysis: a repository whose
+ * workflow grants no `checks: write` still gets its review.
+ */
+export async function withDependencyCheckRun(
+  client: GitHubClient,
+  options: CheckRunScopeOptions,
+): Promise<CheckRunAnalysis> {
+  const checkRun = await createDependencyCheckRun(client, {
+    repo: options.repo,
+    headSha: options.headSha,
+  });
+  let result: CheckRunAnalysis | undefined;
+  let failure: unknown;
+  try {
+    result = await options.run();
+  } catch (error) {
+    failure = error;
+  }
+  if (checkRun) {
+    await concludeDependencyCheckRun(client, {
+      repo: options.repo,
+      id: checkRun.id,
+      findings: result?.findings ?? [],
+      diff: result?.diff ?? "",
+      // The failure's reason is logged, never posted: it can quote whatever
+      // went wrong, and a check summary is public.
+      summary: result?.summary ?? CHECK_FAILED_SUMMARY,
+      failed: failure !== undefined || result === undefined,
+    });
+  }
+  if (failure) throw failure;
+  // A run that produced neither a result nor a failure cannot be reported as
+  // one: every path above either returns or throws.
+  if (result === undefined) throw new Error("The dependency analysis produced no result to report");
+  return result;
+}
+
 /**
  * Concludes the check run with the findings the analysis published.
  *

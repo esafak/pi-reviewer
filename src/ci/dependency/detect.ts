@@ -42,6 +42,15 @@ export interface DependencyDetection {
   unsupported: string[];
   /** Coverage gaps: read failures, parse warnings, unresolvable constraints. */
   warnings: string[];
+  /**
+   * The changed paths could not be read, so nothing is known about the range.
+   *
+   * This is not coverage: the detector saw nothing, which is different from
+   * having seen nothing change, and a caller that reports a passing result
+   * over an unread range would gate a pull request on an analysis that never
+   * happened.
+   */
+  error?: string;
 }
 
 const MAX_MANIFEST_BYTES = 4 * 1024 * 1024;
@@ -166,7 +175,7 @@ export function detectDependencyChanges(
   const diff = changedPaths(cwd, fromRevision, toRevision);
   if (diff.error) {
     warnings.push(diff.error);
-    return { changes, unsupported, warnings };
+    return { changes, unsupported, warnings, error: diff.error };
   }
   for (const changed of diff.paths) {
     const beforePath = changed.oldPath;

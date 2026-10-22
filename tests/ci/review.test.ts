@@ -341,7 +341,7 @@ describe("review", () => {
       conventions: [{ path: "AGENTS.md", content: "- Use strict typing" }],
       reviewRules: [],
     });
-    sendOutputMock.mockResolvedValue({ commentIds: [], fallback: false });
+    sendOutputMock.mockResolvedValue({ commentIds: [], fallback: false, findings: [] });
     createReadOnlyToolsMock.mockReturnValue([]);
     createAgentSessionMock.mockResolvedValue({ session: fakeMcpSession } as never);
     createMcpAdapterMock.mockReturnValue(() => {});
@@ -2133,7 +2133,9 @@ describe("review", () => {
     ];
     const mcpConfig: CiMcpConfig = { mcpServers: { docs: { url: "https://mcp.example/mcp" } } };
 
-    await expect(review({ cwd: "/repo", output: "comment", mcpConfig })).resolves.toBeUndefined();
+    await expect(review({ cwd: "/repo", output: "comment", mcpConfig })).resolves.toMatchObject({
+      kind: "published",
+    });
     expect(sendOutputMock).toHaveBeenCalled();
   });
 
@@ -2870,11 +2872,15 @@ describe("review", () => {
       return makeFakeAgent("") as any;
     });
 
-    const overview = await review({ cwd: "/repo", output: "comment", summaryOnly: true });
+    const outcome = await review({ cwd: "/repo", output: "comment", summaryOnly: true });
 
-    expect(overview).toEqual({
-      pr_summary: "What: x. Why: y. Risks: z.",
-      pr_diagram: "flowchart TD\nA-->B",
+    expect(outcome).toMatchObject({
+      kind: "summary-only",
+      overview: {
+        pr_summary: "What: x. Why: y. Risks: z.",
+        pr_diagram: "flowchart TD\nA-->B",
+      },
+      findings: [],
     });
     expect(sendOutputMock).not.toHaveBeenCalled();
   });
@@ -3362,6 +3368,460 @@ describe("review — the dependency profile", () => {
     expect(String(agent.prompt.mock.calls[1]?.[0])).toContain(
       "one research disposition for every upgrade",
     );
+  });
+
+  /** The anchors the dependency flow prepares for the upgrade above. */
+  const anchors = [
+    { id, manifest: "package.json", file: "package.json", line: 2, side: "RIGHT" as const },
+  ];
+  /** A decision that claims the upgrade was researched from a local changelog. */
+  const researchedLocally = {
+    action: "review" as const,
+    result: {
+      summary: "React 19 removed an API this repository calls.",
+      comments: [
+        {
+          file: "package.json",
+          line: 2,
+          side: "RIGHT" as const,
+          severity: "CRITICAL" as const,
+          body: "React 19 removed an API this repository calls.",
+        },
+      ],
+      research: [{ id, status: "researched" as const, source: "local:CHANGELOG.md" }],
+    },
+  };
+
+  it("warns about an upgrade the harness could not reach, whatever the model claims", async () => {
+    createReviewToolMock.mockReturnValue({
+      tool: {
+        name: "submit_review",
+        label: "submit_review",
+        description: "test",
+        parameters: reviewSchema,
+        execute: vi.fn(),
+      },
+      getResult: () => researchedLocally,
+    });
+    AgentMock.mockImplementation(function () {
+      return makeFakeAgent("") as never;
+    });
+    const unreachable = {
+      kind: "dependency" as const,
+      changes: [change],
+      resolutions: [{ id, candidates: [], unresolved: "the registry did not name a source" }],
+    };
+
+    await review({
+      cwd: "/repo",
+      output: "comment",
+      repo: "owner/repo",
+      githubToken: "token",
+      profile: unreachable,
+      dependencyAnchors: anchors,
+    });
+
+    const call = sendOutputMock.mock.calls.at(-1)![0];
+    expect(call.requireBody).toBe(true);
+    expect(call.coverageWarnings).toEqual([
+      {
+        file: "package.json",
+        line: 2,
+        side: "RIGHT",
+        severity: "WARN",
+        body: expect.stringContaining("could not verify the breaking changes for react"),
+      },
+    ]);
+    expect(call.coverageWarnings![0]!.body).toContain("the registry did not name a source");
+    // The finding that stood on that upgrade's line has no citation to stand
+    // on, so it is dropped and the upgrade is published as unverifiable.
+    expect((call.structuredResult as ReviewResult).comments).toEqual([]);
+  });
+
+  it("publishes no coverage warning for an upgrade researched from a resolved candidate", async () => {
+    createReviewToolMock.mockReturnValue({
+      tool: {
+        name: "submit_review",
+        label: "submit_review",
+        description: "test",
+        parameters: reviewSchema,
+        execute: vi.fn(),
+      },
+      getResult: () => ({
+        ...researchedLocally,
+        result: {
+          ...researchedLocally.result,
+          research: [{ id, status: "researched" as const, source: `candidate:${id}-1` }],
+        },
+      }),
+    });
+    AgentMock.mockImplementation(function () {
+      return makeFakeAgent("") as never;
+    });
+
+    await review({
+      cwd: "/repo",
+      output: "comment",
+      repo: "owner/repo",
+      githubToken: "token",
+      profile,
+      dependencyAnchors: anchors,
+    });
+
+    const call = sendOutputMock.mock.calls.at(-1)![0];
+    expect(call.coverageWarnings).toEqual([]);
+    expect((call.structuredResult as ReviewResult).comments).toHaveLength(1);
+  });
+
+  it("warns about an upgrade the model left out of its report", async () => {
+    createReviewToolMock.mockReturnValue({
+      tool: {
+        name: "submit_review",
+        label: "submit_review",
+        description: "test",
+        parameters: reviewSchema,
+        execute: vi.fn(),
+      },
+      getResult: () => ({
+        action: "review" as const,
+        result: { summary: "No breaking change found.", comments: [] },
+      }),
+    });
+    AgentMock.mockImplementation(function () {
+      return makeFakeAgent("") as never;
+    });
+
+    await review({
+      cwd: "/repo",
+      output: "comment",
+      repo: "owner/repo",
+      githubToken: "token",
+      profile,
+      dependencyAnchors: anchors,
+    });
+
+    const call = sendOutputMock.mock.calls.at(-1)![0];
+    expect(call.coverageWarnings).toEqual([
+      expect.objectContaining({
+        severity: "WARN",
+        body: expect.stringContaining("did not account for this upgrade"),
+      }),
+    ]);
+  });
+
+  it("warns with the reason the model gave for an upgrade it could not verify", async () => {
+    createReviewToolMock.mockReturnValue({
+      tool: {
+        name: "submit_review",
+        label: "submit_review",
+        description: "test",
+        parameters: reviewSchema,
+        execute: vi.fn(),
+      },
+      getResult: () => ({
+        action: "review" as const,
+        result: {
+          summary: "No breaking change determined.",
+          comments: [],
+          research: [{ id, status: "unverified" as const, reason: "the release notes were gone" }],
+        },
+      }),
+    });
+    AgentMock.mockImplementation(function () {
+      return makeFakeAgent("") as never;
+    });
+
+    await review({
+      cwd: "/repo",
+      output: "comment",
+      repo: "owner/repo",
+      githubToken: "token",
+      profile,
+      dependencyAnchors: anchors,
+    });
+
+    const call = sendOutputMock.mock.calls.at(-1)![0];
+    expect(call.coverageWarnings).toEqual([
+      expect.objectContaining({ body: expect.stringContaining("the release notes were gone") }),
+    ]);
+  });
+
+  it("resolves a conflicting duplicate conservatively", async () => {
+    createReviewToolMock.mockReturnValue({
+      tool: {
+        name: "submit_review",
+        label: "submit_review",
+        description: "test",
+        parameters: reviewSchema,
+        execute: vi.fn(),
+      },
+      getResult: () => ({
+        action: "review" as const,
+        result: {
+          summary: "Analyzed the upgrade.",
+          comments: [],
+          research: [
+            { id, status: "researched" as const, source: `candidate:${id}-1` },
+            { id, status: "unverified" as const, reason: "the notes were unreachable" },
+          ],
+        },
+      }),
+    });
+    AgentMock.mockImplementation(function () {
+      return makeFakeAgent("") as never;
+    });
+
+    await review({
+      cwd: "/repo",
+      output: "comment",
+      repo: "owner/repo",
+      githubToken: "token",
+      profile,
+      dependencyAnchors: anchors,
+    });
+
+    const call = sendOutputMock.mock.calls.at(-1)![0];
+    // Two dispositions disagree, so the upgrade is not claimed as researched:
+    // neither entry is published as the answer, and the gap is reported.
+    expect(call.coverageWarnings).toEqual([
+      expect.objectContaining({
+        body: expect.stringContaining("conflicting dispositions"),
+      }),
+    ]);
+  });
+
+  it("warns about a citation that names no resolved candidate", async () => {
+    createReviewToolMock.mockReturnValue({
+      tool: {
+        name: "submit_review",
+        label: "submit_review",
+        description: "test",
+        parameters: reviewSchema,
+        execute: vi.fn(),
+      },
+      getResult: () => ({
+        ...researchedLocally,
+        result: {
+          ...researchedLocally.result,
+          research: [{ id, status: "researched" as const, source: "https://example.com/react-19" }],
+        },
+      }),
+    });
+    AgentMock.mockImplementation(function () {
+      return makeFakeAgent("") as never;
+    });
+
+    await review({
+      cwd: "/repo",
+      output: "comment",
+      repo: "owner/repo",
+      githubToken: "token",
+      profile,
+      dependencyAnchors: anchors,
+    });
+
+    const call = sendOutputMock.mock.calls.at(-1)![0];
+    // The citation is neither a candidate of this upgrade nor a normalized
+    // local path, so it supports nothing: the upgrade is unverifiable.
+    expect(call.coverageWarnings).toHaveLength(1);
+    expect((call.structuredResult as ReviewResult).comments).toEqual([]);
+  });
+
+  it("withholds a body whose overview diagram carries a credential-shaped value", async () => {
+    createReviewToolMock.mockReturnValue({
+      tool: {
+        name: "submit_review",
+        label: "submit_review",
+        description: "test",
+        parameters: reviewSchema,
+        execute: vi.fn(),
+      },
+      getResult: () => ({
+        action: "review" as const,
+        result: {
+          summary: "Analyzed the upgrade.",
+          pr_diagram: 'graph TD\nA["-----BEGIN RSA PRIVATE KEY-----"]-->B',
+          comments: [],
+          research: [{ id, status: "researched" as const, source: `candidate:${id}-1` }],
+        },
+      }),
+    });
+    AgentMock.mockImplementation(function () {
+      return makeFakeAgent("") as never;
+    });
+
+    await review({
+      cwd: "/repo",
+      output: "comment",
+      repo: "owner/repo",
+      githubToken: "token",
+      profile,
+      dependencyAnchors: anchors,
+    });
+
+    const call = sendOutputMock.mock.calls.at(-1)![0];
+    const result = call.structuredResult as ReviewResult;
+    expect(result.summary).toContain("withheld");
+    expect(result.pr_diagram).toBeUndefined();
+  });
+
+  it("replaces a coverage reason that carries a credential instead of withholding the analysis", async () => {
+    createReviewToolMock.mockReturnValue({
+      tool: {
+        name: "submit_review",
+        label: "submit_review",
+        description: "test",
+        parameters: reviewSchema,
+        execute: vi.fn(),
+      },
+      getResult: () => ({
+        action: "review" as const,
+        result: {
+          summary: "Analyzed the upgrade.",
+          comments: [
+            {
+              file: "src/app.ts",
+              line: 3,
+              side: "RIGHT" as const,
+              severity: "WARN" as const,
+              body: "This call site may need updating.",
+            },
+          ],
+          research: [
+            {
+              id,
+              status: "unverified" as const,
+              reason:
+                "the page showed eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U",
+            },
+          ],
+        },
+      }),
+    });
+    AgentMock.mockImplementation(function () {
+      return makeFakeAgent("") as never;
+    });
+
+    await review({
+      cwd: "/repo",
+      output: "comment",
+      repo: "owner/repo",
+      githubToken: "token",
+      profile,
+      dependencyAnchors: anchors,
+    });
+
+    const call = sendOutputMock.mock.calls.at(-1)![0];
+    const result = call.structuredResult as ReviewResult;
+    // The model's own finding is untouched: only the model-authored reason is
+    // replaced, so the analysis the run paid for is still published.
+    expect(result.comments).toHaveLength(1);
+    expect(result.summary).toBe("Analyzed the upgrade.");
+    expect(call.coverageWarnings).toEqual([
+      expect.objectContaining({
+        body: expect.stringContaining("withheld: the text carried a credential-shaped value"),
+      }),
+    ]);
+    expect(call.coverageWarnings![0]!.body).not.toContain("eyJhbGciOiJIUzI1NiJ9");
+  });
+
+  it("turns a none decision into a review the check can report on", async () => {
+    createReviewToolMock.mockReturnValue({
+      tool: {
+        name: "submit_review",
+        label: "submit_review",
+        description: "test",
+        parameters: reviewSchema,
+        execute: vi.fn(),
+      },
+      getResult: () => ({
+        action: "none" as const,
+        research: [{ id, status: "researched" as const, source: `candidate:${id}-1` }],
+      }),
+    });
+    AgentMock.mockImplementation(function () {
+      return makeFakeAgent("") as never;
+    });
+
+    await review({
+      cwd: "/repo",
+      output: "comment",
+      repo: "owner/repo",
+      githubToken: "token",
+      profile,
+      dependencyAnchors: anchors,
+    });
+
+    const call = sendOutputMock.mock.calls.at(-1)![0];
+    expect(call.none).toBeUndefined();
+    const result = call.structuredResult as ReviewResult;
+    // The harness owns the wording: a model that did not follow the contract
+    // must not be recorded as one that found nothing.
+    expect(result.summary).toContain("did not publish a review of its own");
+    expect(result.research).toEqual([{ id, status: "researched", source: `candidate:${id}-1` }]);
+  });
+
+  it("withholds a body that carries a credential-shaped value", async () => {
+    createReviewToolMock.mockReturnValue({
+      tool: {
+        name: "submit_review",
+        label: "submit_review",
+        description: "test",
+        parameters: reviewSchema,
+        execute: vi.fn(),
+      },
+      getResult: () => ({
+        action: "review" as const,
+        result: {
+          summary: "The notes were fetched with AKIAIOSFODNN7EXAMPLE.",
+          comments: [
+            {
+              file: "src/auth.ts",
+              line: 1,
+              side: "RIGHT" as const,
+              severity: "CRITICAL" as const,
+              body: "The migration guide showed this token.",
+            },
+          ],
+          research: [{ id, status: "researched" as const, source: `candidate:${id}-1` }],
+        },
+      }),
+    });
+    AgentMock.mockImplementation(function () {
+      return makeFakeAgent("") as never;
+    });
+
+    const outcome = await review({
+      cwd: "/repo",
+      output: "comment",
+      repo: "owner/repo",
+      githubToken: "token",
+      profile,
+      dependencyAnchors: anchors,
+    });
+
+    const call = sendOutputMock.mock.calls.at(-1)![0];
+    const result = call.structuredResult as ReviewResult;
+    expect(result.summary).toContain("withheld");
+    expect(result.summary).not.toContain("AKIAIOSFODNN7EXAMPLE");
+    expect(result.comments).toEqual([]);
+    // The dispositions survive: the coverage the check reports is the
+    // harness's, not the withheld text.
+    expect(result.research).toEqual([{ id, status: "researched", source: `candidate:${id}-1` }]);
+    expect(outcome.kind).toBe("published");
+  });
+
+  it("states that a resolved candidate is untrusted data, never instructions", async () => {
+    const outcome = await review({ cwd: "/repo", profile });
+
+    expect(outcome.kind).toBe("published");
+    const prompt = agentState().systemPrompt;
+    expect(prompt).toContain("<dependency_policy>");
+    expect(prompt).toContain("untrusted external content");
+    // The code profile carries no dependency policy.
+    AgentMock.mockClear();
+    await review({ cwd: "/repo" });
+    expect(agentState().systemPrompt).not.toContain("<dependency_policy>");
   });
 });
 

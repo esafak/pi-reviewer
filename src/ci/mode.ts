@@ -14,7 +14,7 @@ export const MODES: readonly Mode[] = ["review", "dependency"];
  * implemented is a hard error: silently running a different check than the
  * one that was asked for is worse than failing.
  */
-export const IMPLEMENTED_MODES: readonly Mode[] = ["review"];
+export const IMPLEMENTED_MODES: readonly Mode[] = ["review", "dependency"];
 
 /**
  * Parses the `mode` input. An absent or blank value is the default mode.

@@ -1,7 +1,17 @@
 import { escapeHtmlCommentText } from "../core/html-comment.js";
+import { MODES, type Mode } from "./mode.js";
 
 export type BatchKind = "opened" | "synchronize" | "manual";
 export type EventKind = BatchKind | "reply";
+/**
+ * The mode a marker belongs to.
+ *
+ * `"unknown"` is a marker a future version wrote: it belongs to no mode, so
+ * no mode may read it as its own state. Treating an unrecognized value as
+ * one of the modes we know would let a mode inherit another one's range,
+ * prior summary, or findings.
+ */
+export type MarkerMode = Mode | "unknown";
 export interface BatchMarker {
   version: 1;
   fromSha: string;
@@ -9,7 +19,11 @@ export interface BatchMarker {
   kind: BatchKind;
   actor: string;
   reviewId: number;
+  /** The mode that wrote the marker. */
+  mode: MarkerMode;
 }
+/** A marker a caller writes: the mode is always one this build can run. */
+type BatchMarkerInput = Omit<BatchMarker, "version" | "mode"> & { mode: Mode };
 export interface FindingUpdate {
   comment_id: number;
   status: "RESOLVED" | "PARTIALLY_RESOLVED" | "STILL_OPEN";
@@ -53,8 +67,21 @@ const marker = /<!-- pi-reviewer:batch:v1 (\{[^\n]*\}) -->/;
 const bodyFindingMarker = /<!-- pi-reviewer:body-finding:v1 (\{[^\n]*\}) -->/g;
 const statusMarker = /<!--\s*pi-reviewer:status:v1\s+(\{[^\n]*\})\s*-->/;
 const piReviewerFindingMarker = "<!-- pi-reviewer:finding:v1 -->";
-export function encodeBatchMarker(value: Omit<BatchMarker, "version">) {
+export function encodeBatchMarker(value: BatchMarkerInput) {
   return `<!-- pi-reviewer:batch:v1 ${JSON.stringify({ version: 1, ...value })} -->`;
+}
+/**
+ * The mode a decoded marker belongs to.
+ *
+ * A marker written before the modes existed has no field at all, and it
+ * belongs to the review mode — the only mode those versions ran. A marker
+ * carrying a value this build does not know belongs to no mode.
+ */
+function decodeMarkerMode(value: Record<string, unknown>): MarkerMode {
+  if (!Object.hasOwn(value, "mode") || value.mode === undefined) return "review";
+  const raw = value.mode;
+  if (typeof raw === "string" && (MODES as readonly string[]).includes(raw)) return raw as Mode;
+  return "unknown";
 }
 export function decodeBatchMarker(body: string | null | undefined): BatchMarker | undefined {
   const match = body?.match(marker);
@@ -66,7 +93,7 @@ export function decodeBatchMarker(body: string | null | undefined): BatchMarker 
       typeof value.toSha === "string" &&
       typeof value.actor === "string" &&
       typeof value.reviewId === "number"
-      ? value
+      ? { ...value, mode: decodeMarkerMode(value) }
       : undefined;
   } catch {
     return undefined;
@@ -151,6 +178,12 @@ export function decodeStatusMarker(
     return undefined;
   }
 }
+/** The mode a marker source's findings belong to. */
+function findingMode(marker: BatchMarker | undefined): MarkerMode {
+  // A source with no marker predates the modes, and it belongs to the review
+  // mode: that is the only mode those versions ran.
+  return marker?.mode ?? "review";
+}
 /** Reconstructs active findings and immutable history from one PR snapshot. */
 export function collectFindingHistory(input: {
   reviews: FindingHistorySource[];
@@ -158,6 +191,8 @@ export function collectFindingHistory(input: {
   comments: FindingHistoryComment[];
   threads: FindingHistoryThread[];
   login: string;
+  /** The mode whose findings are collected; the other mode's are invisible. */
+  mode: Mode;
 }) {
   const batchByReview = new Map(input.reviews.map((r) => [r.id, decodeBatchMarker(r.body)]));
   const threadByComment = new Map(
@@ -171,7 +206,15 @@ export function collectFindingHistory(input: {
   // Only the bot's own status replies are authoritative lifecycle state; human
   // replies may quote or spoof marker text and must never influence it.
   const roots = input.comments.filter(
-    (c) => c.user?.login === input.login && c.id > 0 && isPiReviewerRootComment(c),
+    (c) =>
+      c.user?.login === input.login &&
+      c.id > 0 &&
+      isPiReviewerRootComment(c) &&
+      // The review that carried the comment names its mode. A comment whose
+      // review is not in the snapshot keeps the review mode's default.
+      findingMode(
+        c.pull_request_review_id ? batchByReview.get(c.pull_request_review_id) : undefined,
+      ) === input.mode,
   );
   const inline = roots
     .filter((c) => !threadByComment.get(c.id)?.resolved)
@@ -254,7 +297,7 @@ export function collectFindingHistory(input: {
     ...input.issueComments
       .filter((r) => r.user?.login === input.login)
       .map((r) => ({ ...r, reviewId: undefined, issueCommentId: r.id })),
-  ];
+  ].filter((r) => findingMode(decodeBatchMarker(r.body)) === input.mode);
   const body = bodySources.flatMap((r) =>
     decodeBodyFindingMarkers(r.body).map((f) => {
       const batch = decodeBatchMarker(r.body);
@@ -289,26 +332,32 @@ export function collectFindingHistory(input: {
 export function selectAuthenticatedBatchMarkers(
   reviews: Array<{ id: number; body?: string | null; user?: { login?: string } }>,
   login: string,
+  mode: Mode,
 ) {
   return reviews
     .filter((r) => r.user?.login === login)
     .map((r) => decodeBatchMarker(r.body))
-    .filter((m): m is BatchMarker => m !== undefined && m.actor === login);
+    .filter((m): m is BatchMarker => m !== undefined && m.actor === login && m.mode === mode);
 }
 /**
  * Emit-once anchor for PR summaries: true when no prior authenticated marker
  * source carries a visible body. Marker-only reaction-path reviews (body is
  * just the batch marker) and pre-feature reviews (no marker at all) do not
  * consume the first-review slot.
+ *
+ * Only the current mode's sources count: the dependency mode publishes its
+ * own body for the same pull request, and it must not consume the review
+ * mode's one summary slot.
  */
 export function isFirstBodiedReview(
   sources: Array<{ body?: string | null; user?: { login?: string } }>,
   login: string,
+  mode: Mode,
 ): boolean {
   return !sources.some((source) => {
     if (source.user?.login !== login) return false;
     const marker = decodeBatchMarker(source.body);
-    if (!marker || marker.actor !== login) return false;
+    if (!marker || marker.actor !== login || marker.mode !== mode) return false;
     return (source.body ?? "").replace(/<!-- pi-reviewer:batch:v1 [^>]+ -->/, "").trim() !== "";
   });
 }
@@ -576,7 +625,8 @@ export interface FirstBodiedSource {
  * reviews qualify (the insert path adds the block after their marker), as do
  * pre-feature bodies without markers (bot authorship via user login is
  * sufficient — there is no marker to spoof — and the upsert prepends the
- * block). A present marker must still authenticate to the bot login.
+ * block). A present marker must still authenticate to the bot login and
+ * belong to the current mode: another mode's review is not a summary target.
  * Review sources sort before issue comments on equal timestamps, matching
  * the marker-source merge order.
  */
@@ -594,6 +644,7 @@ export function selectFirstBodiedSource(
     created_at?: string;
   }>,
   login: string,
+  mode: Mode,
 ): FirstBodiedSource | undefined {
   const sources = [
     ...reviews.map((source) => ({
@@ -614,6 +665,7 @@ export function selectFirstBodiedSource(
     if (source.user?.login !== login) continue;
     const marker = decodeBatchMarker(source.body);
     if (marker && marker.actor !== login) continue;
+    if (findingMode(marker) !== mode) continue;
     return { kind: source.kind, id: source.id, body: source.body ?? "" };
   }
   return undefined;

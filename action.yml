@@ -42,7 +42,7 @@ inputs:
     default: "info"
 
   mode:
-    description: "Check mode: 'review' (default, review the pull request diff) or 'dependency' (breaking-change analysis of the dependency upgrades in the pull request; not available in this build yet). Which pull requests reach a mode is decided by the calling workflow, not by the action."
+    description: "Check mode: 'review' (default, review the pull request diff) or 'dependency' (breaking-change analysis of the dependency upgrades in the pull request, reported as a review and as the 'pi-reviewer/breaking-changes' check run). Which pull requests reach a mode is decided by the calling workflow, not by the action."
     required: false
     default: "review"
 

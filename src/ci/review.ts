@@ -28,8 +28,13 @@ import {
   normalizeReviewResult,
   type OutputOptions,
   type OutputTarget,
+  type PublishedFinding,
+  type ReviewComment,
   type Severity,
 } from "../core/output.js";
+import { findCredentialShape, publishableText } from "../core/credential-scan.js";
+import { accountForUpgrades, type UpgradeAccount } from "./dependency/accounting.js";
+import type { DependencyAnchor } from "./dependency/anchors.js";
 import {
   buildJSONSystemPrompt,
   buildUserPrompt,
@@ -212,6 +217,15 @@ export interface ReviewOptions {
    * reports its dispositions in.
    */
   profile?: ReviewProfile;
+  /**
+   * Where each qualifying upgrade sits in the diff, for the dependency mode.
+   *
+   * The map is prepared by the dependency flow from the detected changes and
+   * the diff, so it does not depend on what the model reports. It anchors the
+   * coverage warnings the harness writes, and it is how a finding is related
+   * back to the upgrade it is grounded in.
+   */
+  dependencyAnchors?: readonly DependencyAnchor[];
 }
 
 /** Normalized overview returned by a summary-only pass; findings are discarded. */
@@ -219,6 +233,37 @@ export interface SummaryOverview {
   pr_summary?: string;
   pr_diagram?: string;
 }
+
+/**
+ * What a review pass produced.
+ *
+ * The published findings come from the output path, not from the raw model
+ * decision, so the dependency mode's gate and check summary describe exactly
+ * what a reviewer sees. The `/pi-summary` and dry-run paths publish nothing
+ * and therefore carry no findings.
+ */
+export type ReviewOutcome =
+  | {
+      kind: "published";
+      decision: ReviewDecision;
+      findings: PublishedFinding[];
+      /**
+       * The diff the findings were positioned against.
+       *
+       * The check run annotates against the same diff the review partitioned
+       * against: a diff the size filter shortened can move a finding into the
+       * review body, and an annotation on a line the review did not publish
+       * would make the two disagree.
+       */
+      diff: string;
+    }
+  | {
+      kind: "summary-only";
+      decision: ReviewDecision;
+      overview: SummaryOverview;
+      findings: readonly [];
+    }
+  | { kind: "dry-run"; findings: readonly [] };
 
 const MAX_DEBUG_TOOL_ARGS_LENGTH = 3000;
 
@@ -737,7 +782,210 @@ export function defuseReplyMetadata(body: string): string {
     .trim();
 }
 
-export async function review(options: ReviewOptions): Promise<SummaryOverview | undefined> {
+/**
+ * The summary a dependency run publishes when the model declared `none`.
+ *
+ * `none` is a decision the dependency contract does not have: a clean review
+ * is still a review, because the run has to account for the upgrades it was
+ * given. The harness therefore turns it into a review of its own rather than
+ * letting the output layer's `none` branch post nothing — a check that
+ * analyzed the pull request must report.
+ */
+const DEPENDENCY_EMPTY_SUMMARY =
+  "The analysis did not publish a review of its own. The check summary records which upgrades were analyzed and which could not be verified.";
+
+/**
+ * The notice that replaces a body the harness refused to publish.
+ *
+ * It says what happened without repeating any of the text that tripped the
+ * scan, and it points at the check summary, which is harness-owned.
+ */
+const DEPENDENCY_WITHHELD_SUMMARY =
+  "[pi-reviewer] The review body was withheld: it carried a credential-shaped value. The harness does not publish such a body. The check summary records which upgrades the analysis covered.";
+
+/** How much of an unverifiable reason a coverage finding carries. */
+const MAX_COVERAGE_REASON_LENGTH = 500;
+
+/** The dependency mode's own reading of the model's decision. */
+interface DependencyDecisionPreparation {
+  /** The decision as it reaches the output layer and the caller. */
+  decision: ReviewDecision;
+  /** The harness-authored warnings for the upgrades that were not verified. */
+  coverageWarnings: PublishedFinding[];
+}
+
+/** Bounds a harness-written reason, which may quote a registry's answer. */
+function boundedReason(reason: string): string {
+  const value = [...reason]
+    .map((character) => {
+      const code = character.codePointAt(0) ?? 0;
+      return code < 0x20 || code === 0x7f ? " " : character;
+    })
+    .join("")
+    .trim();
+  if (value.length <= MAX_COVERAGE_REASON_LENGTH) return value;
+  return `${value.slice(0, MAX_COVERAGE_REASON_LENGTH - 1)}…`;
+}
+
+/**
+ * The finding the harness publishes for an upgrade it could not verify.
+ *
+ * The wording is the harness's own, so a reader can tell a coverage gap from
+ * a finding the model wrote. It is anchored on the upgrade's line when the
+ * diff has one, and published in the review body otherwise.
+ */
+function coverageFinding(
+  account: UpgradeAccount,
+  anchor: DependencyAnchor | undefined,
+): PublishedFinding {
+  const subject =
+    account.name === undefined
+      ? `upgrade ${account.id}`
+      : `${account.name}${account.manifest ? ` (${account.manifest})` : ""}`;
+  // The reason may quote the model's own disposition or a registry's answer,
+  // so it is held to the same scan as the model's prose: a credential shape
+  // is replaced rather than published, and the warning itself survives.
+  const reason = boundedReason(
+    publishableText(account.unverifiable ?? "the harness could not verify its breaking changes"),
+  );
+  return {
+    ...(anchor?.file !== undefined && anchor.line !== undefined
+      ? { file: anchor.file, line: anchor.line, side: anchor.side ?? ("RIGHT" as const) }
+      : {}),
+    severity: "WARN",
+    body: `The harness could not verify the breaking changes for ${subject}: ${reason}`,
+  };
+}
+
+/**
+ * Whether a finding sits on an upgrade the harness could not verify.
+ *
+ * A finding written on the upgrade's own changed line is grounded in that
+ * upgrade's research: the release notes are what makes the claim, and there
+ * are none the harness could reach. It is therefore dropped rather than
+ * published — a remote location the harness did not resolve cannot become the
+ * basis of a finding, and the upgrade is published as unverifiable instead.
+ */
+function groundedInUnverifiable(
+  comment: Pick<ReviewComment, "file" | "line" | "side">,
+  anchor: DependencyAnchor | undefined,
+  unverifiable: ReadonlySet<string>,
+): boolean {
+  if (!anchor || !unverifiable.has(anchor.id)) return false;
+  if (anchor.file === undefined || anchor.line === undefined) return false;
+  return (
+    anchor.file === comment.file &&
+    anchor.line === comment.line &&
+    (anchor.side ?? "RIGHT") === comment.side
+  );
+}
+
+/**
+ * Prepares the model's decision for publication in the dependency mode.
+ *
+ * This is the one place the harness turns what the model reported into what
+ * the analysis publishes: a disposition for every qualifying upgrade, a
+ * coverage warning for the ones it could not verify, and a body it refuses to
+ * publish when it carries a credential-shaped value. It runs after the
+ * decision is in hand and before `sendOutput`, because the model's
+ * dispositions do not exist before the model has run.
+ */
+function prepareDependencyDecision(
+  decision: ReviewDecision,
+  profile: Extract<ReviewProfile, { kind: "dependency" }>,
+  anchors: readonly DependencyAnchor[],
+): DependencyDecisionPreparation {
+  const reported =
+    decision.action === "review" ? (decision.result.research ?? []) : (decision.research ?? []);
+  const accounting = accountForUpgrades(profile.changes, profile.resolutions, reported);
+  if (accounting.diagnostics.length > 0) {
+    log.warn(
+      "dependency.report.discarded",
+      "Discarded research dispositions the harness could not accept",
+      { diagnostics: accounting.diagnostics.slice(0, 20) },
+    );
+  }
+
+  const anchorById = new Map(anchors.map((anchor) => [anchor.id, anchor]));
+  const unverifiable = new Set(
+    accounting.accounts
+      .filter((account) => account.unverifiable !== undefined)
+      .map((account) => account.id),
+  );
+  const coverageWarnings = accounting.accounts.flatMap((account) =>
+    account.unverifiable === undefined
+      ? []
+      : [coverageFinding(account, anchorById.get(account.id))],
+  );
+
+  // A `none` decision is a model that did not follow the contract. The
+  // dispositions travel with it, so they are kept.
+  const reviewed: ReviewDecision =
+    decision.action === "none"
+      ? {
+          action: "review",
+          result: {
+            summary: DEPENDENCY_EMPTY_SUMMARY,
+            comments: [],
+            ...(decision.research ? { research: decision.research } : {}),
+          },
+        }
+      : decision;
+
+  const comments = reviewed.result.comments.filter(
+    (comment) => !groundedInUnverifiable(comment, findAnchor(anchors, comment), unverifiable),
+  );
+  // Everything the model wrote that would reach a public comment: the
+  // summary, the overview, each finding, and the replacement code a
+  // suggestion would publish inline.
+  const visible = [
+    reviewed.result.summary,
+    reviewed.result.pr_summary ?? "",
+    reviewed.result.pr_diagram ?? "",
+    ...comments.flatMap((comment) => [comment.body, comment.suggestion ?? ""]),
+  ];
+  const withheld = visible.map(findCredentialShape).find((shape) => shape !== undefined);
+  if (withheld) {
+    // The reason is logged rather than posted: the value that tripped the scan
+    // is exactly what must not leave the runner.
+    log.warn(
+      "dependency.body.withheld",
+      "The review body carried a credential-shaped value and was not published",
+      { shape: withheld },
+    );
+    return {
+      decision: {
+        action: "review",
+        result: {
+          summary: DEPENDENCY_WITHHELD_SUMMARY,
+          comments: [],
+          ...(reviewed.result.research ? { research: reviewed.result.research } : {}),
+        },
+      },
+      coverageWarnings,
+    };
+  }
+
+  return {
+    decision: { action: "review", result: { ...reviewed.result, comments } },
+    coverageWarnings,
+  };
+}
+
+/** The anchor a finding sits on, if it sits on one. */
+function findAnchor(
+  anchors: readonly DependencyAnchor[],
+  comment: Pick<ReviewComment, "file" | "line" | "side">,
+): DependencyAnchor | undefined {
+  return anchors.find(
+    (anchor) =>
+      anchor.file === comment.file &&
+      anchor.line === comment.line &&
+      (anchor.side ?? "RIGHT") === comment.side,
+  );
+}
+
+export async function review(options: ReviewOptions): Promise<ReviewOutcome> {
   const logger = options.logger ?? log;
   const cwd = options.cwd ?? process.cwd();
   const githubToken = options.githubToken ?? process.env.GITHUB_TOKEN;
@@ -1072,6 +1320,12 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
           "<summary_only>\nFindings summary: one line; emit no comments and no finding_updates. The overview (pr_summary and optional pr_diagram) is the entire deliverable.\n</summary_only>",
         ]
       : []),
+    // The dependency mode reads upstream release notes, and this is the one
+    // statement about that content the tool policies do not make: what it
+    // reads at a resolved candidate is untrusted data, never instructions.
+    ...(options.profile?.kind === "dependency"
+      ? [`<dependency_policy>\n${PROMPTS.dependencyPolicy.join("\n")}\n</dependency_policy>`]
+      : []),
   ];
   const effectiveSystemPrompt = [
     systemPrompt,
@@ -1114,7 +1368,8 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
     logger.info("review.dry_run.diff_source", "Diff source", { source });
     logger.info("review.dry_run.system_prompt", "System prompt", { prompt: effectiveSystemPrompt });
     logger.info("review.dry_run.user_prompt", "User prompt", { prompt: userPrompt });
-    return;
+    // A dry run publishes nothing and concludes no check run.
+    return { kind: "dry-run", findings: [] };
   }
 
   const modelStr = options.model ?? process.env.PI_REVIEWER_MODEL;
@@ -1866,10 +2121,26 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
       const overview: SummaryOverview = {};
       if (normalized?.pr_summary?.trim()) overview.pr_summary = normalized.pr_summary;
       if (normalized?.pr_diagram?.trim()) overview.pr_diagram = normalized.pr_diagram;
-      return overview;
+      return { kind: "summary-only", decision: reviewDecision, overview, findings: [] };
     }
 
-    await sendOutput({
+    // The dependency mode's own work happens here, after the decision is in
+    // hand and before anything is published: the model's dispositions are
+    // turned into a disposition per upgrade, the coverage warnings are built,
+    // and a body that carries a credential-shaped value is withheld.
+    let coverageWarnings: PublishedFinding[] = [];
+    const profile = options.profile;
+    if (profile?.kind === "dependency") {
+      const prepared = prepareDependencyDecision(
+        reviewDecision,
+        profile,
+        options.dependencyAnchors ?? [],
+      );
+      reviewDecision = prepared.decision;
+      coverageWarnings = prepared.coverageWarnings;
+    }
+
+    const metadata = await sendOutput({
       target,
       ...decisionToOutput(reviewDecision),
       cwd,
@@ -1907,7 +2178,10 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
       summaryEnabled,
       isFirstReview: options.isFirstReview ?? true,
       evidence: searchClient?.snapshot(),
+      requireBody: profile?.kind === "dependency",
+      coverageWarnings,
     });
+    return { kind: "published", decision: reviewDecision, findings: metadata.findings, diff };
   } finally {
     unsubscribe?.();
     await closeExtensionSession?.();
