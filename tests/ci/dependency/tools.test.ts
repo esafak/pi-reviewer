@@ -20,6 +20,9 @@ const githubOnly = { github: true, url: false };
 describe("a tool pin, from detection to resolution", () => {
   let dir: string;
 
+  // Hooks export GIT_DIR/GIT_WORK_TREE; gitEnv() strips them, so every git
+  // invocation here can only reach this fixture and never the developer's
+  // repository (or the one a pre-push hook is running from).
   const git = (args: string[]) =>
     execFileSync("git", args, { cwd: dir, stdio: "ignore", env: gitEnv() });
   const commit = (message: string) =>
@@ -30,9 +33,17 @@ describe("a tool pin, from detection to resolution", () => {
     await writeFile(target, text, "utf-8");
   };
   const head = () =>
-    execFileSync("git", ["rev-parse", "HEAD"], { cwd: dir, encoding: "utf-8" }).trim();
+    execFileSync("git", ["rev-parse", "HEAD"], {
+      cwd: dir,
+      encoding: "utf-8",
+      env: gitEnv(),
+    }).trim();
   const base = () =>
-    execFileSync("git", ["rev-parse", "HEAD~1"], { cwd: dir, encoding: "utf-8" }).trim();
+    execFileSync("git", ["rev-parse", "HEAD~1"], {
+      cwd: dir,
+      encoding: "utf-8",
+      env: gitEnv(),
+    }).trim();
 
   beforeEach(async () => {
     dir = await mkdtemp(path.join(tmpdir(), "pi-reviewer-tools-"));

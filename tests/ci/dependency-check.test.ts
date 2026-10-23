@@ -40,6 +40,9 @@ function published(
 describe("runDependencyCheck", () => {
   let dir: string;
 
+  // Hooks export GIT_DIR/GIT_WORK_TREE; gitEnv() strips them, so every git
+  // invocation here can only reach this fixture and never the developer's
+  // repository (or the one a pre-push hook is running from).
   const git = (args: string[]) =>
     execFileSync("git", args, { cwd: dir, stdio: "ignore", env: gitEnv() });
   const commit = (message: string) =>
@@ -49,7 +52,11 @@ describe("runDependencyCheck", () => {
     git(["add", file]);
   };
   const rev = (ref: string) =>
-    execFileSync("git", ["rev-parse", ref], { cwd: dir, encoding: "utf-8" }).trim();
+    execFileSync("git", ["rev-parse", ref], {
+      cwd: dir,
+      encoding: "utf-8",
+      env: gitEnv(),
+    }).trim();
 
   /** Commits `before`, then `after`, and returns the two revisions. */
   const range = async (file: string, before: string, after: string) => {

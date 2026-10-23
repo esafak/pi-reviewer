@@ -15,6 +15,9 @@ import { gitEnv } from "../../../src/core/git-env.js";
 describe("detectDependencyChanges", () => {
   let dir: string;
 
+  // Hooks export GIT_DIR/GIT_WORK_TREE; gitEnv() strips them, so every git
+  // invocation here can only reach this fixture and never the developer's
+  // repository (or the one a pre-push hook is running from).
   const git = (args: string[]) =>
     execFileSync("git", args, { cwd: dir, stdio: "ignore", env: gitEnv() });
   const commit = (message: string) =>
@@ -25,9 +28,17 @@ describe("detectDependencyChanges", () => {
     await writeFile(target, text, "utf-8");
   };
   const head = () =>
-    execFileSync("git", ["rev-parse", "HEAD"], { cwd: dir, encoding: "utf-8" }).trim();
+    execFileSync("git", ["rev-parse", "HEAD"], {
+      cwd: dir,
+      encoding: "utf-8",
+      env: gitEnv(),
+    }).trim();
   const base = () =>
-    execFileSync("git", ["rev-parse", "HEAD~1"], { cwd: dir, encoding: "utf-8" }).trim();
+    execFileSync("git", ["rev-parse", "HEAD~1"], {
+      cwd: dir,
+      encoding: "utf-8",
+      env: gitEnv(),
+    }).trim();
 
   beforeEach(async () => {
     dir = await mkdtemp(path.join(tmpdir(), "pi-reviewer-deps-"));
@@ -145,10 +156,7 @@ describe("detectDependencyChanges", () => {
     git(["add", "package.json"]);
     commit("init");
     await mkdir(path.join(dir, "packages/app"), { recursive: true });
-    await execFileSync("git", ["mv", "package.json", "packages/app/package.json"], {
-      cwd: dir,
-      stdio: "ignore",
-    });
+    git(["mv", "package.json", "packages/app/package.json"]);
     await write("packages/app/package.json", after);
     git(["add", "-A"]);
     commit("rename and bump");
@@ -192,10 +200,7 @@ describe("detectDependencyChanges", () => {
     git(["add", "package.json"]);
     commit("init");
     await mkdir(path.join(dir, "packages/app"), { recursive: true });
-    await execFileSync("git", ["mv", "package.json", "packages/app/package.json"], {
-      cwd: dir,
-      stdio: "ignore",
-    });
+    git(["mv", "package.json", "packages/app/package.json"]);
     git(["add", "-A"]);
     commit("move");
 
@@ -225,10 +230,7 @@ describe("detectDependencyChanges", () => {
     await write("package.json", content);
     git(["add", "package.json"]);
     commit("init");
-    await execFileSync("git", ["mv", "package.json", "requirements.txt"], {
-      cwd: dir,
-      stdio: "ignore",
-    });
+    git(["mv", "package.json", "requirements.txt"]);
     await write("requirements.txt", `${content}flask==3.0.0\n`);
     git(["add", "-A"]);
     commit("move");
@@ -359,6 +361,7 @@ describe("readFileAtRevision", () => {
     const revision = execFileSync("git", ["rev-parse", "HEAD"], {
       cwd: dir,
       encoding: "utf-8",
+      env: gitEnv(),
     }).trim();
     expect(readFileAtRevision(dir, revision, "a.txt")).toMatchObject({
       text: "hello\n",
@@ -373,6 +376,7 @@ describe("readFileAtRevision", () => {
     const revision = execFileSync("git", ["rev-parse", "HEAD"], {
       cwd: dir,
       encoding: "utf-8",
+      env: gitEnv(),
     }).trim();
     expect(readFileAtRevision(dir, revision, "nope.txt")).toMatchObject({ missing: true });
   });
@@ -411,8 +415,13 @@ describe("changedPaths", () => {
     const from = execFileSync("git", ["rev-parse", "HEAD~1"], {
       cwd: dir,
       encoding: "utf-8",
+      env: gitEnv(),
     }).trim();
-    const to = execFileSync("git", ["rev-parse", "HEAD"], { cwd: dir, encoding: "utf-8" }).trim();
+    const to = execFileSync("git", ["rev-parse", "HEAD"], {
+      cwd: dir,
+      encoding: "utf-8",
+      env: gitEnv(),
+    }).trim();
     expect(changedPaths(dir, from, to).paths).toEqual([
       { status: "renamed", oldPath: "old.txt", newPath: "new.txt" },
     ]);
