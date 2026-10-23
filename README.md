@@ -4,6 +4,7 @@ Model-agnostic AI PR reviewer for GitHub Actions. Works with any provider suppor
 
 - **Inline findings** on the diff, sorted by severity (`critical` / `warn` / `info`)
 - **PR summary** (What / Why / Risks) on the first review — collapsed, out of the way
+- **Dependency breaking-change check**: `mode: dependency` researches the release notes of a PR's upgrades and gates on a `pi-reviewer/breaking-changes` check run
 - **Conversational**: reply to a finding and it answers; `/pi-review` and `/pi-summary` on demand
 - `AGENTS.md` and project skills (`SKILL.md`) support
 - Opt-in MCP servers; best-effort LSP with preinstalled binaries
@@ -67,6 +68,50 @@ See [CI.md](./CI.md) for API keys by provider, everyday settings, and talking to
 
 This repo reviews itself with pi-reviewer — see it in action on [PR #167](https://github.com/esafak/pi-reviewer/pull/167): inline findings, the collapsed summary, and replies in the threads.
 
+## Also: dependency breaking-change check
+
+`mode: dependency` turns the action into a breaking-change gate for dependency
+upgrades: it reads both ends of the changed manifests, researches the release
+notes of major and pre-1.0 minor library upgrades (and tool major and minor
+upgrades), and reports findings plus a `pi-reviewer/breaking-changes` check run.
+
+- Needs `checks: write`; require the check run's name in branch protection, not the job's
+- Does not skip `renovate[bot]` — your workflow's `if:` decides which pull requests run
+- An upgrade it cannot verify is a `WARN`, never a failure
+- `url-reader: 'true'` lets it read non-GitHub upstreams, and is off by default
+
+Add it as a second job to the workflow above:
+
+```yaml
+  dependency:
+    runs-on: ubuntu-latest
+    if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+      checks: write
+    concurrency:
+      group: pi-reviewer-dependency-${{ github.repository }}-${{ github.event.pull_request.number }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: esafak/pi-reviewer@v1
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          pi-api-key: ${{ secrets.PI_API_KEY }}
+          model: openai/gpt-6-luna
+          mode: dependency
+          url-reader: 'true'
+```
+
+Thresholds, supported manifests, the gate, and the limits of a research-based
+check: [CI.md](./CI.md#dependency-breaking-change-check).
+
 ## Basic configuration
 
 For the full list of settings see [CI.md](./CI.md).
@@ -76,6 +121,7 @@ For the full list of settings see [CI.md](./CI.md).
 | `model` | Model in `provider/modelId` format | _(required)_ |
 | `pi-api-key` | Explicit key for the model provider. Or set `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` / `ZAI_API_KEY` in `env:` | `PI_API_KEY` fallback |
 | `min-severity` | `info` reports everything, `warn` skips nits, `critical` only blockers | `info` |
+| `mode` | `review` reviews the diff; `dependency` checks the PR's dependency upgrades for breaking changes | `review` |
 | `summary` | Post the collapsed PR summary on the first review | `true` |
 | `review-drafts` | Review draft PRs | `false` |
 | `doc-dirs` | Inject matching project docs (`.md` with `description` frontmatter) | off |

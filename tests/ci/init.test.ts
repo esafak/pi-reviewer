@@ -2,6 +2,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import YAML from "yaml";
 
 import { init } from "../../src/ci/init.js";
 
@@ -11,6 +12,31 @@ async function createTempDir(): Promise<string> {
   const dir = await mkdtemp(path.join(tmpdir(), "pi-reviewer-init-"));
   createdDirs.push(dir);
   return dir;
+}
+
+/** A parsed YAML mapping, or a failure naming what was not one. */
+function asMapping(value: unknown, label: string): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    throw new Error(`${label} is not a mapping`);
+  return value as Record<string, unknown>;
+}
+
+/**
+ * The generated dependency job, as it parses once its comment markers are
+ * removed.
+ *
+ * The job ships commented so it cannot run until a user enables it; the point
+ * of parsing the uncommented form is that a wrong indentation, a moved key, or
+ * an input on the wrong step still has to be a valid workflow.
+ */
+function dependencyJobOf(content: string): Record<string, unknown> {
+  const lines = content.split("\n");
+  const start = lines.findIndex((line) => line === "#   dependency:");
+  if (start === -1) throw new Error("the generated workflow has no dependency job");
+  const job = lines.slice(start);
+  const uncommented = [...lines.slice(0, start), ...job.map((line) => line.replace(/^# ?/, ""))];
+  const document = asMapping(YAML.parse(uncommented.join("\n")) as unknown, "the workflow");
+  return asMapping(asMapping(document.jobs, "jobs").dependency, "jobs.dependency");
 }
 
 describe("init", () => {
@@ -52,6 +78,51 @@ describe("init", () => {
     expect(content).not.toContain("reactions: write");
     expect(content).not.toContain("react-on-no-findings");
     expect(content).toContain("review-drafts: 'false'");
+    expect(content).toContain("# mode: 'dependency'");
+    expect(content).toContain("# url-reader: 'true'");
+  });
+
+  it("generates the commented dependency job without the renovate exclusion", async () => {
+    const dir = await createTempDir();
+
+    await init({ cwd: dir });
+
+    const workflowPath = path.join(dir, ".github", "workflows", "pi-review.yml");
+    const content = await readFile(workflowPath, "utf-8");
+    // Inert: every line from the job key on is a comment, so the job cannot run
+    // until the indented lines are uncommented.
+    const block = content.slice(content.indexOf("\n#   dependency:") + 1).split("\n");
+    expect(block.length).toBeGreaterThan(1);
+    expect(
+      block.filter((line) => line.trim().length > 0).every((line) => line.startsWith("#")),
+    ).toBe(true);
+
+    const job = dependencyJobOf(content);
+    expect(job.if).toBeTypeOf("string");
+    // The dependency job exists for Renovate bumps, so its condition must not
+    // exclude them the way the review job's does — but it does still require a
+    // same-repository pull request head.
+    expect(job.if).toContain("pull_request");
+    expect(job.if).toContain("github.repository");
+    expect(job.if).not.toContain("renovate");
+
+    const permissions = asMapping(job.permissions, "jobs.dependency.permissions");
+    expect(permissions["checks"]).toBe("write");
+    expect(permissions["pull-requests"]).toBe("write");
+    expect(permissions["contents"]).toBe("read");
+
+    const concurrency = asMapping(job.concurrency, "jobs.dependency.concurrency");
+    expect(concurrency["group"]).toMatch(/^pi-reviewer-dependency-/);
+    expect(concurrency["cancel-in-progress"]).toBe(false);
+
+    const steps = job.steps;
+    expect(Array.isArray(steps)).toBe(true);
+    const stepList = steps as unknown[];
+    expect(stepList).toHaveLength(2);
+    const reviewStep = asMapping(stepList[1], "jobs.dependency.steps[1]");
+    const inputs = asMapping(reviewStep.with, "jobs.dependency.steps[1].with");
+    expect(inputs["mode"]).toBe("dependency");
+    expect(inputs["url-reader"]).toBe("true");
   });
 
   it("creates intermediate directories when missing", async () => {

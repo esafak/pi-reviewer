@@ -3,13 +3,20 @@ import { chmodSync } from "node:fs";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
+import type { ExtensionToolContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it } from "vite-plus/test";
 
 import { withIsolatedAgentDir, writeTrustedLspConfig } from "../../src/core/lsp/config.js";
 import { loadPiLspExtension } from "../../src/core/lsp/extension.js";
 
 const STUB_SOURCE = path.resolve("tests/fixtures/lsp-stub-server.mjs");
+
+/** The text of one tool result block. */
+function blockText(block: TextContent | ImageContent): string {
+  if (block.type !== "text") throw new Error("expected a text block");
+  return block.text;
+}
 
 /**
  * Process presence without a shell: execSync(`pgrep -f ${path}`) spawns
@@ -55,7 +62,7 @@ describe("pi-lsp stock lifecycle", () => {
       const mainFile = path.join(dir, "main.stub");
       await writeFile(mainFile, "hello\n");
 
-      const tools = new Map<string, { execute: (...args: never[]) => Promise<unknown> }>();
+      const tools = new Map<string, ToolDefinition>();
       await withIsolatedAgentDir(agentDir, async () => {
         await writeTrustedLspConfig(agentDir, [
           {
@@ -76,8 +83,8 @@ describe("pi-lsp stock lifecycle", () => {
         const extension = await loadPiLspExtension();
         extension({
           registerMessageRenderer: () => {},
-          registerTool: (def: { name: string }) => {
-            tools.set(def.name, def as never);
+          registerTool: (def: ToolDefinition) => {
+            tools.set(def.name, def);
           },
           on: (event: string, fn: (...args: never[]) => Promise<unknown>) => {
             const list = handlers.get(event) ?? [];
@@ -86,7 +93,11 @@ describe("pi-lsp stock lifecycle", () => {
           },
           sendMessage: () => {},
         } as never);
-        const ctx = { cwd: dir, hasUI: false, signal: undefined } as unknown as ExtensionContext;
+        const ctx = {
+          cwd: dir,
+          hasUI: false,
+          signal: undefined,
+        } as unknown as ExtensionToolContext;
         const hover = tools.get("lsp_hover");
         const diagnostics = tools.get("lsp_diagnostics");
 
@@ -107,26 +118,28 @@ describe("pi-lsp stock lifecycle", () => {
         // fixed target: the requested document URI at line 3.
         const definition = tools.get("lsp_definition");
         expect(definition).toBeDefined();
-        const defResult = (await definition?.execute(
+        const defResult = await definition?.execute(
           "t3",
           { path: mainFile, line: 0, character: 1 },
           undefined,
           undefined,
           ctx,
-        )) as { content: { text: string }[] };
-        const defText = defResult.content[0]?.text ?? "";
+        );
+        if (!defResult) throw new Error("the definition tool returned nothing");
+        const defText = blockText(defResult.content[0]);
         expect(defText).toContain("main.stub");
         expect(defText).toContain('"line": 3');
 
         // Absolute path after an open document: the cached read path.
-        const result = (await diagnostics?.execute(
+        const result = await diagnostics?.execute(
           "t2",
           { path: mainFile },
           undefined,
           undefined,
           ctx,
-        )) as { content: { text: string }[] };
-        expect(result.content[0]?.text).toContain("stub diagnostic");
+        );
+        if (!result) throw new Error("the diagnostics tool returned nothing");
+        expect(blockText(result.content[0])).toContain("stub diagnostic");
         expect(await stubRunning(stubPath)).toBe(true);
 
         // Shutdown must reap the stub: the session_shutdown handlers run the

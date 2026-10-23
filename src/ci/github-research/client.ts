@@ -1,9 +1,11 @@
 import { hasControlCharacters, truncateUtf8WithMarker } from "../registry/helpers.js";
 import { defaultCacheDir, MAX_RANGE_LINES, saveCachedFile } from "./cache.js";
+import { RELEASE_JQ_EXPRESSION } from "./gh-allowlist.js";
+import { isGitHubRepository } from "./repository.js";
 import {
   createGhRunner,
   GH_TIMEOUT_MS,
-  GH_WALL_MS,
+  GH_WAIT_MS,
   MAX_GH_REQUESTS,
   MAX_GH_RESULT_BYTES,
   MAX_GH_TOTAL_BYTES,
@@ -28,6 +30,12 @@ export type GitHubReadKind =
   | "release"
   | "repository"
   | "diff"
+  /**
+   * The CI state of a pull request is read with this kind, which takes the
+   * pull request's number. `gh pr status` cannot answer it: that command
+   * reports the authenticated user's pull-request groups, not the state of
+   * the pull request being reviewed.
+   */
   | "checks";
 /** Options a read kind may accept beyond the common owner and repo fields. */
 export type ReadOption =
@@ -98,7 +106,7 @@ export const MAX_GITHUB_RESULT_BYTES = MAX_GH_RESULT_BYTES,
   MAX_GITHUB_TOTAL_BYTES = MAX_GH_TOTAL_BYTES,
   MAX_GITHUB_REQUESTS = MAX_GH_REQUESTS,
   GITHUB_REQUEST_TIMEOUT_MS = GH_TIMEOUT_MS,
-  GITHUB_WAIT_TIME_MS = GH_WALL_MS;
+  GITHUB_WAIT_TIME_MS = GH_WAIT_MS;
 const listFields: Record<GitHubSearchKind, string> = {
   // Search JSON uses fullName/defaultBranch; repo view uses nameWithOwner/defaultBranchRef below.
   repositories: "name,fullName,description,url,visibility,defaultBranch",
@@ -531,7 +539,7 @@ export function createGitHubResearchClient(
       return result;
     },
     async read(p) {
-      if (!/^[A-Za-z0-9-]{1,39}$/.test(p.owner) || !/^[A-Za-z0-9_.-]{1,100}$/.test(p.repo))
+      if (!isGitHubRepository(p.owner, p.repo))
         throw new Error("GitHub repository identifier is invalid");
       const repo = `${p.owner}/${p.repo}`;
       // Value validation, not shape: which fields belong to which kind is
@@ -707,7 +715,8 @@ export function createGitHubResearchClient(
           `repos/${repo}/releases/${p.number}`,
           "--jq",
           // A single release payload has no reliable latest-release indicator, so omit isLatest.
-          "{tagName:.tag_name,name,isDraft:.draft,url:.html_url,publishedAt:.published_at}",
+          // The projection carries the release's notes, bounded inside itself.
+          RELEASE_JQ_EXPRESSION,
         ]);
       else if (p.kind === "discussion") {
         result = await bounded([
@@ -747,4 +756,15 @@ export function createGitHubResearchClient(
     },
   };
 }
+/**
+ * The release body bound, in characters.
+ *
+ * The bound is applied inside the projection, so the projected result is
+ * what the transport receives, and it has to fit the transport's per-result
+ * byte cap. A character costs up to six bytes once JSON escapes it, and the
+ * release's metadata takes the rest of the room, so the bound is the largest
+ * one whose worst case still fits.
+ */
+export { MAX_RELEASE_BODY_CHARS, RELEASE_METADATA_CHARS } from "./gh-allowlist.js";
+
 export { safeFailure };

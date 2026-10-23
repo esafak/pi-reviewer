@@ -1,4 +1,7 @@
 import { describe, expect, it, vi } from "vite-plus/test";
+
+import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
+
 import { createRegistryClient } from "../../src/ci/registry/client.js";
 import {
   DEFAULT_WALL_TIME_BUDGET_MS,
@@ -15,6 +18,12 @@ import {
 import { createRegistryTools, lookupSchema } from "../../src/ci/registry/tool.js";
 
 const json = (value: unknown) => new Response(JSON.stringify(value), { status: 200 });
+
+/** The text of one tool result block. */
+function blockText(block: TextContent | ImageContent): string {
+  if (block.type !== "text") throw new Error("expected a text block");
+  return block.text;
+}
 
 describe("registry providers", () => {
   it("uses PyPI's release endpoint and drops unbounded and unknown fields", async () => {
@@ -203,6 +212,33 @@ describe("registry providers", () => {
     vi.unstubAllGlobals();
   });
 
+  it("requests the npm version document in full and projects the repository and homepage", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      json({
+        name: "react",
+        version: "19.3.1",
+        repository: { type: "git", url: "git+https://github.com/facebook/react.git" },
+        homepage: "https://react.dev/",
+        readme: "omit",
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await createRegistryProvider("javascript").lookup(
+      { ecosystem: "javascript", name: "react", version: "19.3.1" },
+      AbortSignal.timeout(1000),
+    );
+    // The abbreviated packument omits the repository and the homepage, so a
+    // version document is requested in full.
+    expect(fetchMock.mock.calls[0]![1]).toMatchObject({
+      headers: { accept: "application/json" },
+    });
+    expect(result).toMatchObject({
+      repository: "git+https://github.com/facebook/react.git",
+      homepage: "https://react.dev/",
+    });
+    vi.unstubAllGlobals();
+  });
+
   it("applies Go uppercase escaping before path encoding", async () => {
     const fetchMock = vi
       .fn<typeof fetch>()
@@ -387,7 +423,9 @@ describe("registry client and tool", () => {
     } as any);
     const result = await tool.execute("id", { ecosystem: "python", name: "example" } as any);
     expect(result.content[0]).toMatchObject({ text: expect.stringContaining("byte limit") });
-    expect(new TextEncoder().encode(result.content[0].text).byteLength).toBeLessThan(8 * 1024);
+    expect(new TextEncoder().encode(blockText(result.content[0])).byteLength).toBeLessThan(
+      8 * 1024,
+    );
   });
   it("truncates UTF-8 on a codepoint boundary and stays within the byte cap", () => {
     const input = "a".repeat(3) + "😀" + "tail".repeat(10);

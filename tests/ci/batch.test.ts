@@ -26,6 +26,7 @@ import {
 describe("batch markers", () => {
   it("round trips a versioned authenticated marker", () => {
     const encoded = encodeBatchMarker({
+      mode: "review",
       fromSha: "base",
       toSha: "head",
       kind: "synchronize",
@@ -39,6 +40,7 @@ describe("batch markers", () => {
       kind: "synchronize",
       actor: "github-actions[bot]",
       reviewId: 4,
+      mode: "review",
     });
     expect(decodeBatchMarker('<!-- pi-reviewer:batch:v1 {"toSha":"head"} -->')).toBeUndefined();
   });
@@ -55,6 +57,7 @@ describe("batch markers", () => {
       kind: "opened" as const,
       actor: "bot",
       reviewId: 1,
+      mode: "review" as const,
     };
     expect(selectBatchRange("base", "head", marker, () => true)).toEqual({
       fromSha: "old",
@@ -85,6 +88,7 @@ describe("batch markers", () => {
       ),
     ).toBe(false);
     const marker = encodeBatchMarker({
+      mode: "review",
       fromSha: "a",
       toSha: "b",
       kind: "opened",
@@ -99,6 +103,7 @@ describe("batch markers", () => {
             id: 1,
             user: { login: "human" },
             body: encodeBatchMarker({
+              mode: "review",
               fromSha: "a",
               toSha: "b",
               kind: "opened",
@@ -110,6 +115,7 @@ describe("batch markers", () => {
             id: 2,
             user: { login: "github-actions[bot]" },
             body: encodeBatchMarker({
+              mode: "review",
               fromSha: "a",
               toSha: "b",
               kind: "opened",
@@ -119,6 +125,7 @@ describe("batch markers", () => {
           },
         ],
         "github-actions[bot]",
+        "review",
       ).map((m) => m.reviewId),
     ).toEqual([2]);
   });
@@ -130,6 +137,7 @@ describe("batch markers", () => {
       kind: "synchronize" as const,
       actor: "app[bot]",
       reviewId: 9,
+      mode: "review" as const,
     };
     expect(selectBatchRange("base", "third", marker, () => true)).toMatchObject({
       fromSha: "first",
@@ -162,6 +170,7 @@ describe("batch markers", () => {
       kind: "synchronize" as const,
       actor: "app[bot]",
       reviewId: 9,
+      mode: "review" as const,
     };
     expect(selectBatchRange("current-base", "merge-head", marker, () => true, true)).toEqual({
       fromSha: "current-base",
@@ -177,6 +186,7 @@ describe("batch markers", () => {
       kind: "synchronize" as const,
       actor: "app[bot]",
       reviewId: 9,
+      mode: "review" as const,
     };
     expect(selectBatchRange("current-base", "merge-head", marker, () => false, true)).toEqual({
       fromSha: "current-base",
@@ -190,6 +200,7 @@ describe("batch markers", () => {
         id: 10,
         user: { login: "bot" },
         body: encodeBatchMarker({
+          mode: "review",
           fromSha: "base",
           toSha: "old",
           kind: "opened",
@@ -201,6 +212,7 @@ describe("batch markers", () => {
         id: 11,
         user: { login: "bot" },
         body: encodeBatchMarker({
+          mode: "review",
           fromSha: "old",
           toSha: "new",
           kind: "synchronize",
@@ -209,10 +221,11 @@ describe("batch markers", () => {
         }),
       },
     ];
-    expect(selectAuthenticatedBatchMarkers(reviews, "bot").at(-1)?.toSha).toBe("new");
+    expect(selectAuthenticatedBatchMarkers(reviews, "bot", "review").at(-1)?.toSha).toBe("new");
   });
   it("accepts authenticated markers from issue-comment-shaped sources", () => {
     const marker = encodeBatchMarker({
+      mode: "review",
       fromSha: "base",
       toSha: "new",
       kind: "synchronize",
@@ -220,9 +233,11 @@ describe("batch markers", () => {
       reviewId: 0,
     });
     expect(
-      selectAuthenticatedBatchMarkers([{ id: 99, user: { login: "bot" }, body: marker }], "bot").at(
-        -1,
-      )?.toSha,
+      selectAuthenticatedBatchMarkers(
+        [{ id: 99, user: { login: "bot" }, body: marker }],
+        "bot",
+        "review",
+      ).at(-1)?.toSha,
     ).toBe("new");
   });
   it("gates /pi-summary with the same contract as /pi-review", () => {
@@ -262,7 +277,14 @@ describe("batch markers", () => {
   it("locates the earliest bodied marker source for summary regeneration", () => {
     const bot = "bot";
     const marker = (fromSha: string, toSha: string, reviewId: number) =>
-      encodeBatchMarker({ fromSha, toSha, kind: "synchronize", actor: bot, reviewId });
+      encodeBatchMarker({
+        mode: "review",
+        fromSha,
+        toSha,
+        kind: "synchronize",
+        actor: bot,
+        reviewId,
+      });
     const bodiedReview = {
       id: 10,
       user: { login: bot },
@@ -275,14 +297,14 @@ describe("batch markers", () => {
       body: marker("old", "new", 0),
       created_at: "2026-01-02T00:00:00Z",
     };
-    expect(selectFirstBodiedSource([], [], bot)).toBeUndefined();
+    expect(selectFirstBodiedSource([], [], bot, "review")).toBeUndefined();
     // Marker-only reaction reviews qualify for the insert path.
-    expect(selectFirstBodiedSource([], [markerOnlyIssue], bot)).toEqual({
+    expect(selectFirstBodiedSource([], [markerOnlyIssue], bot, "review")).toEqual({
       kind: "issue",
       id: 99,
       body: markerOnlyIssue.body,
     });
-    expect(selectFirstBodiedSource([bodiedReview], [markerOnlyIssue], bot)).toEqual({
+    expect(selectFirstBodiedSource([bodiedReview], [markerOnlyIssue], bot, "review")).toEqual({
       kind: "review",
       id: 10,
       body: bodiedReview.body,
@@ -294,7 +316,7 @@ describe("batch markers", () => {
       body: `${marker("base", "old", 0)}\n\nFallback prose`,
       created_at: "2025-12-31T00:00:00Z",
     };
-    expect(selectFirstBodiedSource([bodiedReview], [bodiedIssue], bot)).toEqual({
+    expect(selectFirstBodiedSource([bodiedReview], [bodiedIssue], bot, "review")).toEqual({
       kind: "issue",
       id: 7,
       body: bodiedIssue.body,
@@ -305,20 +327,29 @@ describe("batch markers", () => {
         [{ ...bodiedReview, user: { login: "human" } }],
         [{ ...bodiedIssue, user: { login: "human" } }],
         bot,
+        "review",
       ),
     ).toBeUndefined();
     const spoofed = {
       id: 12,
       user: { login: bot },
-      body: `${encodeBatchMarker({ fromSha: "a", toSha: "b", kind: "opened", actor: "attacker", reviewId: 1 })}\n\nProse`,
+      body: `${encodeBatchMarker({
+        mode: "review",
+        fromSha: "a",
+        toSha: "b",
+        kind: "opened",
+        actor: "attacker",
+        reviewId: 1,
+      })}\n\nProse`,
     };
-    expect(selectFirstBodiedSource([spoofed], [], bot)).toBeUndefined();
+    expect(selectFirstBodiedSource([spoofed], [], bot, "review")).toBeUndefined();
     // Pre-feature bot bodies without markers qualify for the prepend path.
     expect(
       selectFirstBodiedSource(
         [{ id: 11, user: { login: bot }, body: "pre-feature prose" }],
         [],
         bot,
+        "review",
       ),
     ).toEqual({ kind: "review", id: 11, body: "pre-feature prose" });
   });
@@ -332,6 +363,7 @@ describe("batch markers", () => {
     const markerOnly = {
       user: { login: "bot" },
       body: encodeBatchMarker({
+        mode: "review",
         fromSha: "base",
         toSha: "old",
         kind: "opened",
@@ -341,20 +373,28 @@ describe("batch markers", () => {
     };
     const bodied = {
       user: { login: "bot" },
-      body: `${encodeBatchMarker({ fromSha: "old", toSha: "new", kind: "synchronize", actor: "bot", reviewId: 2 })}\n\nFindings prose`,
+      body: `${encodeBatchMarker({
+        mode: "review",
+        fromSha: "old",
+        toSha: "new",
+        kind: "synchronize",
+        actor: "bot",
+        reviewId: 2,
+      })}\n\nFindings prose`,
     };
-    expect(isFirstBodiedReview([], "bot")).toBe(true);
-    expect(isFirstBodiedReview([markerOnly], "bot")).toBe(true);
+    expect(isFirstBodiedReview([], "bot", "review")).toBe(true);
+    expect(isFirstBodiedReview([markerOnly], "bot", "review")).toBe(true);
     expect(
-      isFirstBodiedReview([{ user: { login: "bot" }, body: "pre-feature prose" }], "bot"),
+      isFirstBodiedReview([{ user: { login: "bot" }, body: "pre-feature prose" }], "bot", "review"),
     ).toBe(true);
-    expect(isFirstBodiedReview([bodied], "bot")).toBe(false);
-    expect(isFirstBodiedReview([bodied, markerOnly], "bot")).toBe(false);
-    expect(isFirstBodiedReview([markerOnly, bodied], "bot")).toBe(false);
+    expect(isFirstBodiedReview([bodied], "bot", "review")).toBe(false);
+    expect(isFirstBodiedReview([bodied, markerOnly], "bot", "review")).toBe(false);
+    expect(isFirstBodiedReview([markerOnly, bodied], "bot", "review")).toBe(false);
     expect(
       isFirstBodiedReview(
         [{ user: { login: "human" }, body: `${markerOnly.body}\n\nProse` }],
         "bot",
+        "review",
       ),
     ).toBe(true);
   });
@@ -387,10 +427,18 @@ describe("resolved finding history", () => {
     };
     const result = collectFindingHistory({
       login: "review-bot",
+      mode: "review",
       reviews: [
         {
           id: 5078197836,
-          body: `${encodeBatchMarker({ fromSha: "base", toSha: "old", kind: "opened", actor: "review-bot", reviewId: 5078197836 })}\n${encodeBodyFindingMarker(bodyFinding)}`,
+          body: `${encodeBatchMarker({
+            mode: "review",
+            fromSha: "base",
+            toSha: "old",
+            kind: "opened",
+            actor: "review-bot",
+            reviewId: 5078197836,
+          })}\n${encodeBodyFindingMarker(bodyFinding)}`,
           user: { login: "review-bot" },
         },
       ],
@@ -451,6 +499,7 @@ describe("resolved finding history", () => {
   it("uses thread structure instead of quoted marker text to identify roots", () => {
     const result = collectFindingHistory({
       login: "review-bot",
+      mode: "review",
       reviews: [],
       issueComments: [],
       comments: [
@@ -489,6 +538,7 @@ describe("resolved finding history", () => {
     }));
     const result = collectFindingHistory({
       login: "bot",
+      mode: "review",
       reviews: [],
       issueComments: [],
       comments,
@@ -506,6 +556,7 @@ describe("resolved finding history", () => {
   it("keeps bot-authored lifecycle metadata authoritative across revisions", () => {
     const result = collectFindingHistory({
       login: "review-bot",
+      mode: "review",
       reviews: [],
       issueComments: [],
       comments: [
@@ -576,6 +627,7 @@ describe("resolved finding history", () => {
   it("keeps the latest bot status reply authoritative over later non-status bot replies", () => {
     const result = collectFindingHistory({
       login: "review-bot",
+      mode: "review",
       reviews: [],
       issueComments: [],
       comments: [
@@ -612,6 +664,7 @@ describe("resolved finding history", () => {
   it("decodes status metadata regardless of JSON key order", () => {
     const result = collectFindingHistory({
       login: "review-bot",
+      mode: "review",
       reviews: [],
       issueComments: [],
       comments: [
@@ -702,6 +755,7 @@ describe("resolved finding history", () => {
   it("imports legacy active body markers and ignores malformed markers", () => {
     const result = collectFindingHistory({
       login: "bot",
+      mode: "review",
       reviews: [
         {
           id: 1,
@@ -866,5 +920,218 @@ describe("event normalization", () => {
     expect(isRenovatePullRequest({ user: { login: "renovate[bot]" } })).toBe(true);
     expect(isRenovatePullRequest({ user: { login: "dependabot[bot]" } })).toBe(false);
     expect(isRenovatePullRequest({})).toBe(false);
+  });
+});
+
+/**
+ * The two modes share a pull request, not their state.
+ *
+ * The batch marker names the mode that wrote it, and every mode-scoped
+ * selection reads that name. A marker that names a mode this build does not
+ * know belongs to no mode: it must never become another mode's range, prior
+ * summary, first-review slot, or finding.
+ */
+describe("mode-scoped batch state", () => {
+  const reviewMarker = (fromSha: string, toSha: string, reviewId = 0) =>
+    encodeBatchMarker({
+      mode: "review",
+      fromSha,
+      toSha,
+      kind: "synchronize",
+      actor: "bot",
+      reviewId,
+    });
+  const dependencyMarker = (fromSha: string, toSha: string, reviewId = 0) =>
+    encodeBatchMarker({
+      mode: "dependency",
+      fromSha,
+      toSha,
+      kind: "synchronize",
+      actor: "bot",
+      reviewId,
+    });
+
+  it("decodes a marker written before the modes as the review mode", () => {
+    const legacy = `<!-- pi-reviewer:batch:v1 ${JSON.stringify({
+      version: 1,
+      fromSha: "base",
+      toSha: "head",
+      kind: "opened",
+      actor: "bot",
+      reviewId: 4,
+    })} -->`;
+
+    expect(decodeBatchMarker(legacy)?.mode).toBe("review");
+  });
+
+  it("decodes a mode this build does not know as belonging to no mode", () => {
+    const future = `<!-- pi-reviewer:batch:v1 ${JSON.stringify({
+      version: 1,
+      fromSha: "base",
+      toSha: "head",
+      kind: "opened",
+      actor: "bot",
+      reviewId: 4,
+      mode: "ledger",
+    })} -->`;
+
+    expect(decodeBatchMarker(future)?.mode).toBe("unknown");
+  });
+
+  it("filters the authenticated markers by mode", () => {
+    const sources = [
+      { id: 1, user: { login: "bot" }, body: reviewMarker("base", "one") },
+      { id: 2, user: { login: "bot" }, body: dependencyMarker("base", "two") },
+    ];
+
+    expect(selectAuthenticatedBatchMarkers(sources, "bot", "review").map((m) => m.toSha)).toEqual([
+      "one",
+    ]);
+    expect(
+      selectAuthenticatedBatchMarkers(sources, "bot", "dependency").map((m) => m.toSha),
+    ).toEqual(["two"]);
+  });
+
+  it("never selects an unknown mode's marker as either mode's latest", () => {
+    const future = `<!-- pi-reviewer:batch:v1 ${JSON.stringify({
+      version: 1,
+      fromSha: "base",
+      toSha: "future",
+      kind: "opened",
+      actor: "bot",
+      reviewId: 1,
+      mode: "ledger",
+    })} -->`;
+
+    expect(
+      selectAuthenticatedBatchMarkers(
+        [{ id: 1, user: { login: "bot" }, body: future }],
+        "bot",
+        "review",
+      ),
+    ).toEqual([]);
+    expect(
+      selectAuthenticatedBatchMarkers(
+        [{ id: 1, user: { login: "bot" }, body: future }],
+        "bot",
+        "dependency",
+      ),
+    ).toEqual([]);
+  });
+
+  it("keeps the other mode's body out of the first-review slot", () => {
+    const dependencyBody = `${dependencyMarker("base", "head")}\n\nDependency analysis`;
+
+    expect(
+      isFirstBodiedReview([{ user: { login: "bot" }, body: dependencyBody }], "bot", "review"),
+    ).toBe(true);
+    expect(
+      isFirstBodiedReview([{ user: { login: "bot" }, body: dependencyBody }], "bot", "dependency"),
+    ).toBe(false);
+  });
+
+  it("keeps the other mode's body out of the summary target", () => {
+    const dependencyBody = `${dependencyMarker("base", "head")}\n\nDependency analysis`;
+
+    expect(
+      selectFirstBodiedSource(
+        [{ id: 5, user: { login: "bot" }, body: dependencyBody }],
+        [],
+        "bot",
+        "review",
+      ),
+    ).toBeUndefined();
+    expect(
+      selectFirstBodiedSource(
+        [{ id: 5, user: { login: "bot" }, body: dependencyBody }],
+        [],
+        "bot",
+        "dependency",
+      ),
+    ).toMatchObject({ kind: "review", id: 5 });
+  });
+
+  it("keeps one mode's findings out of the other mode's history", () => {
+    const finding = "<!-- pi-reviewer:finding:v1 -->\nissue";
+    const input = {
+      issueComments: [],
+      threads: [],
+      login: "bot",
+    };
+    const comments = [
+      {
+        id: 1,
+        body: finding,
+        user: { login: "bot" },
+        path: "src/a.ts",
+        line: 1,
+        side: "RIGHT",
+        pull_request_review_id: 10,
+        created_at: "2026-01-01",
+      },
+      {
+        id: 2,
+        body: finding.replace("issue", "dependency issue"),
+        user: { login: "bot" },
+        path: "package.json",
+        line: 2,
+        side: "RIGHT",
+        pull_request_review_id: 20,
+        created_at: "2026-01-02",
+      },
+    ];
+    const reviews = [
+      { id: 10, user: { login: "bot" }, body: reviewMarker("base", "head", 10) },
+      { id: 20, user: { login: "bot" }, body: dependencyMarker("base", "head", 20) },
+    ];
+
+    const review = collectFindingHistory({ ...input, reviews, comments, mode: "review" });
+    expect(review.activeFindings.map((f) => f.commentId)).toEqual([1]);
+
+    const dependency = collectFindingHistory({ ...input, reviews, comments, mode: "dependency" });
+    expect(dependency.activeFindings.map((f) => f.commentId)).toEqual([2]);
+  });
+
+  it("keeps one mode's body findings out of the other mode's history", () => {
+    const finding = encodeBodyFindingMarker({
+      findingId: 7,
+      file: "package.json",
+      line: 2,
+      side: "RIGHT",
+      severity: "WARN",
+      body: "dependency finding",
+    });
+
+    const dependency = collectFindingHistory({
+      login: "bot",
+      mode: "dependency",
+      reviews: [
+        {
+          id: 20,
+          user: { login: "bot" },
+          body: `${dependencyMarker("base", "head", 20)}\n${finding}`,
+        },
+      ],
+      issueComments: [],
+      comments: [],
+      threads: [],
+    });
+    expect(dependency.activeFindings).toHaveLength(1);
+
+    const review = collectFindingHistory({
+      login: "bot",
+      mode: "review",
+      reviews: [
+        {
+          id: 20,
+          user: { login: "bot" },
+          body: `${dependencyMarker("base", "head", 20)}\n${finding}`,
+        },
+      ],
+      issueComments: [],
+      comments: [],
+      threads: [],
+    });
+    expect(review.activeFindings).toEqual([]);
   });
 });

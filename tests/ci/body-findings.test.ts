@@ -40,6 +40,7 @@ describe("body finding markers", () => {
       comments: [],
       threads: [],
       login: "bot",
+      mode: "review",
     });
     expect(result.activeFindings).toEqual([
       expect.objectContaining({

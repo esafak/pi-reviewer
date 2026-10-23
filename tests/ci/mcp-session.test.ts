@@ -2,7 +2,16 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vite-plus/test";
-import { EventStream, getCurrentTools, Type } from "@earendil-works/pi-ai";
+import {
+  EventStream,
+  getCurrentTools,
+  Type,
+  type Api,
+  type AssistantMessage,
+  type AssistantMessageEvent,
+  type Model,
+  type TranscriptContext,
+} from "@earendil-works/pi-ai";
 import {
   createAgentSession,
   DefaultResourceLoader,
@@ -83,7 +92,7 @@ describe("MCP session host integration", () => {
       // The system prompt is seeded via the resource loader above;
       // state.systemPrompt replays the transcript and is read-only.
       const requests: string[][] = [];
-      session.agent.streamFunction = ((_model, context) => {
+      session.agent.streamFunction = ((_model: Model<Api>, context: TranscriptContext) => {
         requests.push(getCurrentTools(context.messages).map((tool) => tool.name));
         const message = {
           role: "assistant" as const,
@@ -102,9 +111,14 @@ describe("MCP session host integration", () => {
           stopReason: "stop" as const,
           timestamp: Date.now(),
         };
-        const stream = new EventStream(
+        const stream = new EventStream<AssistantMessageEvent, AssistantMessage>(
           (event) => event.type === "done" || event.type === "error",
-          (event) => (event.type === "done" ? event.message : event.error),
+          (event) => {
+            if (event.type !== "done" && event.type !== "error") {
+              throw new Error("the stream ended with a partial event");
+            }
+            return event.type === "done" ? event.message : event.error;
+          },
         );
         stream.push({ type: "start", partial: message });
         stream.push({ type: "done", reason: "stop", message });
@@ -150,7 +164,7 @@ describe("MCP session host integration", () => {
       session.agent.state.model = model as never;
       const requests: string[][] = [];
       let calls = 0;
-      session.agent.streamFunction = ((_model, context) => {
+      session.agent.streamFunction = ((_model: Model<Api>, context: TranscriptContext) => {
         requests.push(getCurrentTools(context.messages).map((tool) => tool.name));
         calls += 1;
         const content =
@@ -174,14 +188,19 @@ describe("MCP session host integration", () => {
           stopReason: (calls === 1 ? "toolUse" : "stop") as never,
           timestamp: Date.now(),
         };
-        const stream = new EventStream(
+        const stream = new EventStream<AssistantMessageEvent, AssistantMessage>(
           (event) => event.type === "done" || event.type === "error",
-          (event) => (event.type === "done" ? event.message : event.error),
+          (event) => {
+            if (event.type !== "done" && event.type !== "error") {
+              throw new Error("the stream ended with a partial event");
+            }
+            return event.type === "done" ? event.message : event.error;
+          },
         );
         stream.push({ type: "start", partial: message });
         stream.push({
           type: "done",
-          reason: calls === 1 ? "tool_calls" : "stop",
+          reason: calls === 1 ? "toolUse" : "stop",
           message,
         });
         return stream;

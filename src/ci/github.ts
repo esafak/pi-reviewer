@@ -44,6 +44,89 @@ export interface Reaction {
   user?: { login?: string };
 }
 
+/**
+ * The conclusions a client may assign to a check run.
+ *
+ * The API can also report `stale` for a run it gave up on, but a client
+ * cannot assign it, so it is not in the writable set.
+ */
+export type CheckRunConclusion =
+  | "action_required"
+  | "cancelled"
+  | "failure"
+  | "neutral"
+  | "success"
+  | "skipped"
+  | "timed_out";
+
+export type CheckRunStatus = "queued" | "in_progress" | "completed";
+
+/**
+ * The statuses the API reports for a run.
+ *
+ * A client can only assign the three writable statuses, but a run created
+ * elsewhere — by GitHub Actions, say — reports one of the others.
+ */
+export type CheckRunReportedStatus = CheckRunStatus | "waiting" | "requested" | "pending";
+
+/**
+ * An annotation on a check run.
+ *
+ * The field names are the REST field names, so there is no camelCase-to-
+ * snake_case mapping layer to get wrong. An annotation has no side: it always
+ * refers to the head file of the commit the run belongs to.
+ */
+export interface CheckRunAnnotation {
+  path: string;
+  start_line: number;
+  end_line: number;
+  annotation_level: "notice" | "warning" | "failure";
+  message: string;
+  title?: string;
+}
+
+export interface CheckRunOutput {
+  title: string;
+  summary: string;
+  annotations?: CheckRunAnnotation[];
+}
+
+/**
+ * A run is created `in_progress` and concluded later, so the create input
+ * carries no conclusion.
+ */
+export interface CreateCheckRunInput {
+  head_sha: string;
+  name: string;
+  status: CheckRunStatus;
+  output?: CheckRunOutput;
+}
+
+/**
+ * The conclusion is optional so an in-progress update can carry annotations
+ * alone. A `completed` update must carry one.
+ */
+export interface UpdateCheckRunInput {
+  status: CheckRunStatus;
+  conclusion?: CheckRunConclusion;
+  output?: CheckRunOutput;
+}
+
+export interface CheckRun {
+  id: number;
+  name: string;
+  head_sha: string;
+  status: CheckRunReportedStatus;
+  /** The API reports `null` for a run that has no conclusion yet, and `stale` for one it gave up on. */
+  conclusion: CheckRunConclusion | "stale" | null;
+}
+
+/** The list endpoint answers with an envelope, not a bare array. */
+export interface ListCheckRunsResult {
+  total_count: number;
+  check_runs: CheckRun[];
+}
+
 export class GitHubError extends Error {
   constructor(
     public status: number,
@@ -72,6 +155,9 @@ type GitHubPathRegistry = {
   collaboratorPermission: (repo: string, login: string) => string;
   issueReactions: (repo: string, number: number) => string;
   issueReaction: (repo: string, number: number, reaction: number) => string;
+  checkRuns: (repo: string) => string;
+  checkRun: (repo: string, id: number) => string;
+  commitCheckRuns: (repo: string, ref: string) => string;
 };
 
 export const githubPaths = {
@@ -91,6 +177,10 @@ export const githubPaths = {
   issueReactions: (repo, number) => githubPath("repos", repo, "issues", number, "reactions"),
   issueReaction: (repo, number, reaction) =>
     githubPath("repos", repo, "issues", number, "reactions", reaction),
+  checkRuns: (repo) => githubPath("repos", repo, "check-runs"),
+  checkRun: (repo, id) => githubPath("repos", repo, "check-runs", id),
+  commitCheckRuns: (repo, ref) =>
+    githubPath("repos", repo, "commits", encodeURIComponent(ref), "check-runs"),
 } as const satisfies GitHubPathRegistry;
 
 /**
@@ -355,6 +445,42 @@ export class GitHubClient {
   }
   listReactions(repo: string, number: number) {
     return this.list<Reaction>(githubPaths.issueReactions(repo, number));
+  }
+  createCheckRun(repo: string, input: CreateCheckRunInput) {
+    return this.request<CheckRun>(githubPaths.checkRuns(repo), {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  }
+  async updateCheckRun(repo: string, id: number, input: UpdateCheckRunInput) {
+    if (input.status === "completed" && !input.conclusion)
+      throw new Error("A completed check run update must carry a conclusion");
+    return this.request<CheckRun>(githubPaths.checkRun(repo, id), {
+      method: "PATCH",
+      body: JSON.stringify(input),
+    });
+  }
+  /**
+   * Lists the check runs of a commit.
+   *
+   * The endpoint answers with an envelope rather than a bare array, so it
+   * does not use the `list<T>()` array helper: it paginates `check_runs`
+   * itself. It answers with the latest run per check name, which is the run
+   * branch protection evaluates.
+   *
+   * The `ref` is the commit the runs belong to — a commit SHA. It is
+   * encoded, so a value that is not a commit cannot address another route.
+   */
+  async listCheckRuns(repo: string, ref: string): Promise<CheckRun[]> {
+    const all: CheckRun[] = [];
+    for (let page = 1; ; page++) {
+      const pageUrl = new URL(this.resolveUrl(githubPaths.commitCheckRuns(repo, ref)));
+      pageUrl.searchParams.set("per_page", "100");
+      pageUrl.searchParams.set("page", String(page));
+      const result = await this.request<ListCheckRunsResult>(pageUrl.toString());
+      all.push(...result.check_runs);
+      if (result.check_runs.length < 100) return all;
+    }
   }
   deleteReaction(repo: string, number: number, reaction: number) {
     return this.request<void>(githubPaths.issueReaction(repo, number, reaction), {

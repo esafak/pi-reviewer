@@ -3,8 +3,11 @@ import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
+
 import { parseCodeExecMaxCalls, resolveCodeExecConfig } from "../../src/ci/code-exec/config.js";
 import { isSecretEnvName, pickEnv } from "../../src/ci/code-exec/env.js";
+import { isRecord } from "../../src/ci/registry/helpers.js";
 import {
   AppleContainerBackend,
   BubblewrapBackend,
@@ -41,12 +44,12 @@ type FakeChild = {
   stderr: { on: ReturnType<typeof vi.fn> };
   kill: ReturnType<typeof vi.fn>;
   unref: ReturnType<typeof vi.fn>;
-  on: (event: string, cb: (...args: never[]) => void) => FakeChild;
-  emit: (event: string, ...args: never[]) => void;
+  on: (event: "close", cb: (code: number | null) => void) => FakeChild;
+  emit: (event: "close", code: number | null) => void;
 };
 
 function fakeChild(): FakeChild {
-  const handlers = new Map<string, ((...args: never[]) => void)[]>();
+  const handlers = new Map<"close", ((code: number | null) => void)[]>();
   const child: FakeChild = {
     stdout: { on: vi.fn() },
     stderr: { on: vi.fn() },
@@ -69,6 +72,12 @@ function autoClosingChild(code: number | null = 0): FakeChild {
   const child = fakeChild();
   queueMicrotask(() => child.emit("close", code));
   return child;
+}
+
+/** The text of one tool result block. */
+function blockText(block: TextContent | ImageContent): string {
+  if (block.type !== "text") throw new Error("expected a text block");
+  return block.text;
 }
 
 describe("code-exec config", () => {
@@ -216,13 +225,13 @@ describe("code-exec tool", () => {
     // Trusted status lines stay in their own block so command output cannot
     // spoof the exit line or the remaining-calls counter.
     expect(result.content).toHaveLength(3);
-    expect(result.content[0].text).toContain("exit 1");
-    expect(result.content[0].text).toContain("Remaining code_exec calls");
-    expect(result.content[0].text).not.toContain("3 passed");
-    expect(result.content[1].text).toContain("[stdout");
-    expect(result.content[1].text).toContain("3 passed");
-    expect(result.content[2].text).toContain("[stderr");
-    expect(result.content[2].text).toContain("FAILED test_x");
+    expect(blockText(result.content[0])).toContain("exit 1");
+    expect(blockText(result.content[0])).toContain("Remaining code_exec calls");
+    expect(blockText(result.content[0])).not.toContain("3 passed");
+    expect(blockText(result.content[1])).toContain("[stdout");
+    expect(blockText(result.content[1])).toContain("3 passed");
+    expect(blockText(result.content[2])).toContain("[stderr");
+    expect(blockText(result.content[2])).toContain("FAILED test_x");
     expect(result.details).toMatchObject({
       stdout: "3 passed",
       stderr: "FAILED test_x",
@@ -616,9 +625,13 @@ describe("confined-runtime diagnosis", () => {
     });
     const result = await tool.execute("id", { command: "echo hi" } as any);
     expect(result.content).toHaveLength(3);
-    expect(result.content[0].text).toContain("pod-level AppArmor profile");
-    expect(result.content[1].text).toBe("[stdout]\n(empty)");
-    expect(result.details.diagnosis.kind).toBe("apparmor-confined");
+    expect(blockText(result.content[0])).toContain("pod-level AppArmor profile");
+    expect(blockText(result.content[1])).toBe("[stdout]\n(empty)");
+    const details = result.details;
+    if (!isRecord(details) || !isRecord(details.diagnosis)) {
+      throw new Error("expected a diagnosis in the result details");
+    }
+    expect(details.diagnosis.kind).toBe("apparmor-confined");
   });
 });
 

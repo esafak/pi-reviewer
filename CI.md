@@ -130,6 +130,137 @@ To switch models without editing the workflow, put the full model name in a `MOD
 
 One review per eligible event, covering everything since the last marker. Markers are authenticated and stored in the review itself — not in a cache or LLM session — so a burst of pushes collapses into one correct range on the next run. Resolved findings get a `Resolved by <sha>` reply and are resolved; partially fixed ones explain what's left and stay open.
 
+## Dependency breaking-change check
+
+`mode: dependency` checks whether the upgrades a PR makes break this repository.
+Instead of reviewing the diff, it reads both ends of every changed dependency
+manifest, works out where each upgrade's release notes live, and asks the model
+what changed upstream. It posts a review — findings inline where the diff
+allows, coverage warnings on the upgrade's own line where it has one — and
+publishes a check run named `pi-reviewer/breaking-changes`.
+
+Which pull requests it checks is your workflow's `if:`. The action never
+chooses, and the review mode's `renovate[bot]` skip does not apply here: a
+Renovate bump is the point.
+
+### Setup
+
+It needs `checks: write`; `GITHUB_TOKEN` gets it from the job's `permissions:`
+block. A classic personal access token cannot write check runs — use
+`GITHUB_TOKEN` or a fine-grained token with **Checks: write**. Without the
+permission the review still posts; only the gate is missing.
+
+```yaml
+name: Pi dependency check
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+jobs:
+  dependency:
+    runs-on: ubuntu-latest
+    # The action does not choose its pull requests; this is the whole trigger.
+    if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write # Fallback when a review cannot be posted.
+      checks: write
+    concurrency:
+      # Its own group: the review job's is pi-reviewer-<repo>-<pr>.
+      group: pi-reviewer-dependency-${{ github.repository }}-${{ github.event.pull_request.number }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: esafak/pi-reviewer@v1
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          pi-api-key: ${{ secrets.PI_API_KEY }}
+          model: openai/gpt-6-luna
+          mode: dependency
+          url-reader: 'true'
+```
+
+The generated `pi-review.yml` carries an equivalent commented job. A
+`workflow_dispatch` trigger also needs a `pr-number` input and an `if:` that
+admits it; a `/pi-review` comment works if you also trigger on `issue_comment`
+and widen the `if:`. Drafts are skipped before the mode runs, so a required
+check waits on the draft until it is marked ready — or set
+`review-drafts: 'true'`.
+
+### The gate
+
+`failure` when a `CRITICAL` finding is published, `success` otherwise: `WARN`
+and `INFO` annotate the diff without failing it. An analysis that cannot
+complete fails too, rather than passing over work that did not happen. Coverage
+warnings survive `min-severity`, so `min-severity: critical` cannot hide an
+upgrade that could not be verified.
+
+**Require the check run's name, `pi-reviewer/breaking-changes`, not the job's.**
+The job succeeds whenever the action exits cleanly — even when a breaking change
+was found — so requiring the job would never gate on the analysis.
+
+### What is analyzed
+
+| Kind | Analyzed on |
+|---|---|
+| Libraries (imported by the code) | major, pre-1.0 minor (`0.x` → `0.y`) |
+| Tools and runtimes | major **and** minor (`3.11` → `3.12`) |
+
+Patch bumps, library minors past 1.0, additions, removals, downgrades and
+uncomparable constraints are listed in the check summary with a reason, never
+analyzed. So are manifests it does not read: `Podfile`, `pubspec.yaml`,
+`mix.exs`, `Package.swift`, `conanfile.*`, `MODULE.bazel`, `WORKSPACE`.
+
+Formats it does read: npm `package.json` (including `devEngines.runtime` and
+`packageManager`); PyPI `requirements*.txt` and `pyproject.toml`; Maven
+`pom.xml` and Gradle `build.gradle[.kts]`; crates `Cargo.toml`; Go `go.mod`;
+NuGet `*.csproj`, `*.fsproj`, `Directory.Packages.props`, `packages.config`;
+RubyGems `Gemfile`; Packagist `composer.json`; mise (`mise.toml` and
+`.mise.toml` at any depth, plus the `mise.local.toml` and `.config/mise/`
+variants); asdf `.tool-versions`; aqua `aqua.yaml`; and GitHub Actions
+workflows and actions.
+
+### What "researched" means
+
+Every qualifying upgrade gets a published disposition. The summary lists them
+with the accepted citation — a checkout path for a `local:` citation, the
+candidate id the analysis handed the model for a remote one — plus the
+researched and unverifiable totals. The harness checks which upgrade a
+disposition belongs to, that a cited remote location is one it resolved, and
+that none is missing; it cannot verify the notes were read, so *researched* is
+the model's claim.
+
+The prompt carries at most 100 upgrades (and a byte budget). Anything past that
+is reported as not carried, not as the model's omission, so a very large bump
+PR does not look like a model that ignored its instructions.
+
+This is research, not a build: an upgrade whose notes cannot be found or reached
+is a `WARN`, never a failure. A finding on that upgrade's own line is withdrawn,
+since the notes were what would ground it; a finding elsewhere cannot be related
+to an upgrade at all.
+
+GitHub upstreams are read with `github_read`, and a release read returns at
+most 750 characters of notes with a truncation flag — enough to judge the
+headline change, and the model reads `CHANGELOG.md` for detail. Everything else
+needs `url-reader: 'true'` — off by default because it is the only tool that can
+reach an arbitrary host. Without it, non-GitHub upgrades report as unverifiable.
+
+The harness withholds the whole review body if it carries a credential-shaped
+value (an API key, a token, a private key, a JWT): the dispositions survive —
+the check summary still reports every upgrade, and the unverifiable ones remain
+coverage warnings — and its coverage section records what was analyzed. The
+scan is narrow and reduces the risk of a fetched page's text reaching a public
+comment; it does not eliminate it.
+
+Each run analyzes the whole pull request and creates a fresh check run; there is
+no incremental range and no reconciliation of earlier findings. `/pi-summary` is
+ignored here, and `target-head` is rejected.
+
 ## Advanced
 
 **MCP.** Prefer remote HTTP servers. Local stdio commands run from a temporary checkout of the trusted default-branch revision with no ambient env inheritance — provide only required variables in the server's explicit `env` mapping. Example config (`.github/mcp.json`):
@@ -155,6 +286,8 @@ Authenticated servers use `auth: bearer` with a `bearerTokenEnv` variable mapped
 **Search budgets.** Regular search: 3 queries, 5 results each, 8s per request. AI search: 1 query, 5 sources, 15s. Package registry lookup (PyPI, Maven Central, crates.io, npm, Go proxy) is default-on in CI comment reviews with no opt-out: 5 lookups per review, 8s each, 15s total. GitHub research (`gh`-backed, also default-on; `gh: 'false'` disables) is bounded to 8 dispatched `gh` subprocesses and 15s of cumulative `gh` wait time, defaulting to public scope (`github-scope: token-accessible` allows token-readable resources). The request budget counts dispatched subprocesses, not GitHub API calls: a repository visibility probe and a failed attempt each cost one, and the three research tools share the budget. The time budget measures time spent waiting on `gh`, so the time the model spends thinking does not consume it. All external results are untrusted.
 
 **GitHub research reads.** `github_read` covers `file`, `pull_request`, `issue`, `discussion`, `run`, `workflow`, `release`, `repository`, `diff`, and `checks` — `checks` is the kind that reports a pull request's CI. A file read takes an optional `ref` (branch, tag, or commit SHA) and returns a bounded preview; a diff and a run log are truncated the same way. A read that fails is reported as an error result, not as a successful one carrying an error message.
+
+**URL reader.** `url_read` fetches one public https page and returns its text. It is off by default and enabled with `url-reader: 'true'`; it is the only tool that can reach an arbitrary host, so the switch is deliberate. It is a reader, not a browser: it opens no link the page contains, runs no script, and never authenticates. It sends a fixed header set and no credential — the action's GitHub token is never attached, and no cookie jar exists — so a fetched page cannot read the action's credentials. The location must be https, carry no credentials, and resolve to a public address; private, loopback, link-local, unique-local, and reserved ranges are refused, including the transition mechanisms that carry an IPv4 address in their prefix (the IPv4-compatible `::a.b.c.d` form, 6to4, Teredo, and both standardized NAT64 prefixes). A network-specific NAT64 prefix is operator-defined and cannot be enumerated, so a runner whose network resolves names through DNS64 needs an egress policy of its own. The socket is bound to the address the reader checked rather than resolving the hostname a second time, so a host that answers one address publicly and another privately cannot slip through. Redirects are followed by hand, at most three hops, each re-checked against the same rules before it is contacted. Only text content types are returned, and the byte cap applies to the decoded content so an encoding cannot smuggle a document past it. Budgets: 8 requests per run (a redirect hop counts as one), 128KiB of decoded content in total, 64KiB per document, 16KiB handed to the model, 10s per fetch, 2 concurrent fetches. A refused or failed read is an error the model recovers from, never a run failure. Everything it returns is untrusted content.
 
 **Code execution.** Backends: `bubblewrap` (Linux), Apple Container (macOS arm64, needs a pre-pulled `code-exec-image` with your toolchains), MXC process containers (Windows 11); anywhere else fails closed. Budgets: 5 calls per review, 2min per command, 6min total. Two self-hosted failure signatures: `bwrap: Failed to make / slave` means the container's security profile denies mounts (needs a pod-level AppArmor/seccomp profile); `bwrap: loopback: Failed RTM_NEWADDR` means unprivileged user namespaces are restricted (relax `kernel.apparmor_restrict_unprivileged_userns` or load the `bwrap-userns-restrict` profile). GitHub-hosted runners are handled automatically.
 
@@ -188,6 +321,7 @@ Mirrors [`action.yml`](./action.yml) — the action is source of truth if they d
 | `thinking` | `off` | Thinking budget: `off`, `minimal`, `low`, `medium`, `high`, `xhigh` |
 | `debug` | `false` | Log tool calls; upload thinking trace as a 1-day artifact |
 | `min-severity` | `info` | `info` reports everything, `warn` skips nits, `critical` only blockers |
+| `mode` | `review` | `review` reviews the diff; `dependency` analyzes the pull request's dependency upgrades |
 | `max-diff-chars` | model-derived (100k floor) | Explicit diff cap; whole file sections drop, never mid-hunk |
 | `summary` | `true` | Collapsed What/Why/Risks on the first review |
 | `doc-dirs` | off | Comma-separated dirs for matching project docs |
@@ -201,6 +335,7 @@ Mirrors [`action.yml`](./action.yml) — the action is source of truth if they d
 | `ai-search` | `false` | Provider-grounded AI search |
 | `ai-search-provider` | — | `exa` or `brave` |
 | `github-scope` | `public` | Or `token-accessible` for token-readable resources |
+| `url-reader` | `false` | Bounded URL reader (`url_read`): reads one public https page and returns its text |
 | `gh` | `true` | Read-only `gh`-backed GitHub research tools |
 | `setup-gh` | `true` | Install GitHub CLI on Linux when absent |
 | `search-max-queries` | `3` | Regular query budget (1–10) |

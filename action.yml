@@ -41,6 +41,11 @@ inputs:
     required: false
     default: "info"
 
+  mode:
+    description: "Check mode: 'review' (default, review the pull request diff) or 'dependency' (breaking-change analysis of the dependency upgrades in the pull request, reported as a review and as the 'pi-reviewer/breaking-changes' check run). Which pull requests reach a mode is decided by the calling workflow, not by the action."
+    required: false
+    default: "review"
+
   max-diff-chars:
     description: "Explicit diff cap in chars. Unset means the cap is derived from the model's context window (default: 100k minimum)."
     required: false
@@ -93,6 +98,11 @@ inputs:
     description: "GitHub research repository scope: public or token-accessible (default: public)."
     required: false
     default: ""
+
+  url-reader:
+    description: "Enable the bounded URL reader tool in CI comment mode (default: false). It reads one public https page and returns its text; it is the only tool that can reach an arbitrary host."
+    required: false
+    default: "false"
 
   search-max-queries:
     description: "Maximum regular searches per review run (1-10, default: 3)."
@@ -487,6 +497,7 @@ runs:
         PI_REVIEWER_DEBUG: ${{ inputs.debug }}
         PI_REVIEWER_THINKING_ARTIFACT: ${{ runner.temp }}/pi-reviewer-thinking.jsonl
         MIN_SEVERITY: ${{ inputs.min-severity }}
+        PI_REVIEWER_MODE: ${{ inputs.mode }}
         PI_REVIEWER_MAX_DIFF_CHARS: ${{ inputs.max-diff-chars || env.PI_REVIEWER_MAX_DIFF_CHARS }}
         PI_REVIEWER_SUMMARY: ${{ inputs.summary }}
         PI_REVIEWER_DOC_DIRS: ${{ inputs.doc-dirs }}
@@ -500,6 +511,7 @@ runs:
         PI_REVIEWER_AI_SEARCH_PROVIDER: ${{ inputs.ai-search-provider || env.PI_REVIEWER_AI_SEARCH_PROVIDER }}
         PI_REVIEWER_GITHUB_SCOPE: ${{ inputs.github-scope || env.PI_REVIEWER_GITHUB_SCOPE }}
         PI_REVIEWER_GH: ${{ inputs.gh }}
+        PI_REVIEWER_URL_READER: ${{ inputs.url-reader }}
         PI_REVIEWER_SEARCH_MAX_QUERIES: ${{ inputs.search-max-queries }}
         PI_REVIEWER_AI_SEARCH_MAX_QUERIES: ${{ inputs.ai-search-max-queries }}
         PI_REVIEWER_SEARCH_MAX_RESULTS: ${{ inputs.search-max-results }}

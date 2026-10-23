@@ -7,11 +7,20 @@ import {
   unavailableGitHubResearchWarnings,
 } from "../../src/ci/github-research/config.js";
 import { createGitHubResearchClient } from "../../src/ci/github-research/client.js";
+import { MAX_RELEASE_BODY_CHARS } from "../../src/ci/github-research/client.js";
+import {
+  MAX_RELEASE_NAME_CHARS,
+  MAX_RELEASE_PUBLISHED_CHARS,
+  MAX_RELEASE_TAG_CHARS,
+  MAX_RELEASE_URL_CHARS,
+  RELEASE_JQ_EXPRESSION,
+  RELEASE_METADATA_CHARS,
+} from "../../src/ci/github-research/gh-allowlist.js";
 import type { GitHubResearchClient } from "../../src/ci/github-research/client.js";
 import { createGitHubResearchTools } from "../../src/ci/github-research/tool.js";
 import { githubReadSchema } from "../../src/ci/github-research/tool.js";
 import { validateGhArgs } from "../../src/ci/github-research/gh-allowlist.js";
-import { createGhRunner } from "../../src/ci/github-research/gh-runner.js";
+import { createGhRunner, MAX_GH_RESULT_BYTES } from "../../src/ci/github-research/gh-runner.js";
 import { readCachedRange, saveCachedFile } from "../../src/ci/github-research/cache.js";
 describe("gh-backed GitHub research", () => {
   it("enables with a token by default and supports opt-out", () => {
@@ -126,10 +135,12 @@ describe("gh-backed GitHub research", () => {
     const timeoutsOf = (run: TimedRun) => run.mock.calls.map((call) => call[2]?.timeout);
     it("does not spend the allowance on time between calls", async () => {
       let now = 0;
-      const run = vi.fn(async () => {
-        now += 1;
-        return { stdout: "ok" };
-      });
+      const run = vi.fn(
+        async (_command: string, _args: string[], _options: { timeout?: number }) => {
+          now += 1;
+          return { stdout: "ok" };
+        },
+      );
       const gh = createGhRunner("t", run as never, { now: () => now });
       for (let i = 0; i < 8; i++) {
         now += 60_000;
@@ -139,11 +150,13 @@ describe("gh-backed GitHub research", () => {
     });
     it("fails without dispatching once the allowance is spent", async () => {
       let now = 0;
-      const run = vi.fn(async () => {
-        now += 100;
-        return { stdout: "ok" };
-      });
-      const gh = createGhRunner("t", run as never, { now: () => now, wallMs: 500, timeoutMs: 500 });
+      const run = vi.fn(
+        async (_command: string, _args: string[], _options: { timeout?: number }) => {
+          now += 100;
+          return { stdout: "ok" };
+        },
+      );
+      const gh = createGhRunner("t", run as never, { now: () => now, waitMs: 500, timeoutMs: 500 });
       for (let i = 0; i < 5; i++) await gh(["repo", "view"]);
       await expect(gh(["repo", "view"])).rejects.toThrow("time budget exhausted");
       expect(run).toHaveBeenCalledTimes(5);
@@ -152,13 +165,15 @@ describe("gh-backed GitHub research", () => {
     });
     it("shrinks the subprocess timeout as the allowance is consumed", async () => {
       let now = 0;
-      const run = vi.fn(async () => {
-        now += 400;
-        return { stdout: "ok" };
-      });
+      const run = vi.fn(
+        async (_command: string, _args: string[], _options: { timeout?: number }) => {
+          now += 400;
+          return { stdout: "ok" };
+        },
+      );
       const gh = createGhRunner("t", run as never, {
         now: () => now,
-        wallMs: 1000,
+        waitMs: 1000,
         timeoutMs: 300,
       });
       await gh(["repo", "view"]);
@@ -176,7 +191,7 @@ describe("gh-backed GitHub research", () => {
       });
       const gh = createGhRunner("t", run as never, {
         now: () => now,
-        wallMs: 250,
+        waitMs: 250,
         timeoutMs: 5000,
       });
       await expect(gh(["repo", "view"])).rejects.toThrow("boom");
@@ -209,7 +224,7 @@ describe("gh-backed GitHub research", () => {
       });
       const gh = createGhRunner("t", run as never, {
         now: () => now,
-        wallMs: 1000,
+        waitMs: 1000,
         timeoutMs: 5000,
       });
       const results = await Promise.all([
@@ -222,13 +237,15 @@ describe("gh-backed GitHub research", () => {
     });
     it("passes an integer timeout for a fractional clock", async () => {
       let now = 0;
-      const run = vi.fn(async () => {
-        now += 5.25;
-        return { stdout: "ok" };
-      });
+      const run = vi.fn(
+        async (_command: string, _args: string[], _options: { timeout?: number }) => {
+          now += 5.25;
+          return { stdout: "ok" };
+        },
+      );
       const gh = createGhRunner("t", run as never, {
         now: () => now,
-        wallMs: 100,
+        waitMs: 100,
         timeoutMs: 5000,
       });
       await gh(["repo", "view"]);
@@ -245,7 +262,7 @@ describe("gh-backed GitHub research", () => {
       });
       const barelyGh = createGhRunner("t", barelyRun as never, {
         now: () => barely,
-        wallMs: 10,
+        waitMs: 10,
         timeoutMs: 5000,
       });
       await barelyGh(["repo", "view"]);
@@ -254,7 +271,7 @@ describe("gh-backed GitHub research", () => {
     });
     it("rejects a limit that is not a finite positive number", () => {
       const run = vi.fn().mockResolvedValue({ stdout: "ok" });
-      expect(() => createGhRunner("t", run as never, { wallMs: Number.NaN })).toThrow(
+      expect(() => createGhRunner("t", run as never, { waitMs: Number.NaN })).toThrow(
         "Invalid gh limit",
       );
       expect(() => createGhRunner("t", run as never, { timeoutMs: 0 })).toThrow("Invalid gh limit");
@@ -1302,12 +1319,7 @@ describe("gh-backed GitHub research", () => {
       ],
       [
         { kind: "release", owner: "o", repo: "r", number: 13 },
-        [
-          "api",
-          "repos/o/r/releases/13",
-          "--jq",
-          "{tagName:.tag_name,name,isDraft:.draft,url:.html_url,publishedAt:.published_at}",
-        ],
+        ["api", "repos/o/r/releases/13", "--jq", RELEASE_JQ_EXPRESSION],
       ],
       [{ kind: "diff", owner: "o", repo: "r", number: 14 }, ["pr", "diff", "14", "--repo", "o/r"]],
       [
@@ -1404,9 +1416,82 @@ describe("gh-backed GitHub research", () => {
       "api",
       "repos/o/r/releases/1",
       "--jq",
-      "{tagName:.tag_name,name,isDraft:.draft,url:.html_url,publishedAt:.published_at}",
+      RELEASE_JQ_EXPRESSION,
     ]);
     expect(result.result).toMatchObject({ isDraft: true, publishedAt: null });
+  });
+
+  it("delivers the release notes with the release, and says when they are truncated", async () => {
+    const run = vi.fn().mockResolvedValue({
+      stdout: JSON.stringify({
+        tagName: "v2.0.0",
+        name: "Breaking release",
+        isDraft: false,
+        url: "https://github.com/o/r/releases/2",
+        publishedAt: "2026-10-20T04:13:50Z",
+        body: "## Breaking\n- the removed API",
+        bodyTruncated: false,
+      }),
+    });
+    const result = await createGitHubResearchClient("t", "token-accessible", run as never).read({
+      kind: "release",
+      owner: "o",
+      repo: "r",
+      number: 2,
+    });
+    expect(result.result).toMatchObject({
+      body: "## Breaking\n- the removed API",
+      bodyTruncated: false,
+    });
+  });
+
+  it("keeps the release search metadata-only", async () => {
+    const run = vi.fn().mockResolvedValue({
+      stdout: JSON.stringify([{ name: "October release", tagName: "v2.1" }]),
+    });
+    await createGitHubResearchClient("t", "token-accessible", run as never).search(
+      "releases",
+      "October",
+      5,
+    );
+    const argv = run.mock.calls[0]![1] as string[];
+    expect(argv).toContain("release");
+    expect(argv).toContain("list");
+    // The search lists the releases it finds; it never carries the notes,
+    // because `gh release list` has no field for them.
+    expect(argv.join(" ")).not.toContain("body");
+  });
+
+  it("keeps the projected release inside the transport's per-result cap", () => {
+    // The bound is applied inside the projection, so the projected result is
+    // what the transport receives. A character costs up to six bytes once
+    // JSON escapes it, and the release's metadata takes the rest of the room.
+    // The structure is measured, not assumed: it is the projection with
+    // every value empty.
+    const structure = Buffer.byteLength(
+      '{"body":"","bodyTruncated":false,"isDraft":false,"name":null,"publishedAt":null,"tagName":null,"url":null}',
+    );
+    expect((MAX_RELEASE_BODY_CHARS + RELEASE_METADATA_CHARS) * 6 + structure).toBeLessThanOrEqual(
+      MAX_GH_RESULT_BYTES,
+    );
+  });
+
+  it("sends the release projection the allowlist accepts", () => {
+    const run = vi.fn().mockResolvedValue({ stdout: "{}" });
+    const client = createGitHubResearchClient("t", "token-accessible", run as never);
+    return client.read({ kind: "release", owner: "o", repo: "r", number: 1 }).then(() => {
+      const argv = run.mock.calls[0]![1] as string[];
+      expect(validateGhArgs(argv)).toBeUndefined();
+      const expression = argv[argv.indexOf("--jq") + 1]!;
+      expect(expression).toBe(RELEASE_JQ_EXPRESSION);
+      // Every field the projection carries is bounded, so the worst case
+      // fits the transport's cap.
+      expect(expression).toContain(`[0:${MAX_RELEASE_BODY_CHARS}]`);
+      expect(expression).toContain(`[0:${MAX_RELEASE_TAG_CHARS}]`);
+      expect(expression).toContain(`[0:${MAX_RELEASE_NAME_CHARS}]`);
+      expect(expression).toContain(`[0:${MAX_RELEASE_URL_CHARS}]`);
+      expect(expression).toContain(`[0:${MAX_RELEASE_PUBLISHED_CHARS}]`);
+    });
   });
 });
 

@@ -2,6 +2,18 @@ import { useState } from "react";
 import { ReviewComment } from "../types";
 import { renderMarkdown } from "../utils/renderMarkdown";
 import { renderAiFixPromptText } from "../../../src/core/ai-fix-footer.js";
+import type { Severity } from "../../../src/core/severity.js";
+
+/**
+ * The severity the badge and the copied prompt carry.
+ *
+ * A severity the harness does not define has no badge, so it is dropped
+ * rather than passed through as a name the badge table does not know.
+ */
+function toSeverity(value: string | undefined): Severity | undefined {
+  const upper = (value || "info").toUpperCase();
+  return upper === "CRITICAL" || upper === "WARN" || upper === "INFO" ? upper : undefined;
+}
 
 interface Props {
   comment: ReviewComment;
@@ -30,7 +42,7 @@ export function CommentCard({
       file: comment.file,
       line: comment.line,
       side: comment.side,
-      severity: (comment.severity || "info").toUpperCase(),
+      severity: toSeverity(comment.severity),
     },
     comment.body,
   );

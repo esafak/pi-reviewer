@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { validateToolArguments } from "@earendil-works/pi-ai";
+import { validateToolArguments, type JsonObject } from "@earendil-works/pi-ai";
 
 import { ALLOWED_REACTIONS, createReplyTool } from "../../src/core/reply-tool.js";
 
-function toolCall(args: Record<string, unknown>) {
+function toolCall(args: JsonObject) {
   return { type: "toolCall" as const, id: "tc-1", name: "submit_reply", arguments: args };
 }
 
@@ -67,7 +67,7 @@ describe("createReplyTool", () => {
     { action: "resolve", body: "   " },
     { action: "reply", body: "Answer", extra: true },
     { action: "unknown", body: "Answer" },
-  ])("rejects invalid tool arguments: %j", (args) => {
+  ] as JsonObject[])("rejects invalid tool arguments: %j", (args) => {
     const { tool } = createReplyTool();
     expect(() => validateToolArguments(tool, toolCall(args))).toThrow(/Validation failed/);
   });

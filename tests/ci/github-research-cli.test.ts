@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vite-plus/test";
 import { execFile, execFileSync } from "node:child_process";
+import { createServer } from "node:http";
 import { promisify } from "node:util";
-import { ghCommandProfiles } from "../../src/ci/github-research/gh-allowlist.js";
+import {
+  ghCommandProfiles,
+  MAX_RELEASE_BODY_CHARS,
+  MAX_RELEASE_NAME_CHARS,
+  RELEASE_JQ_EXPRESSION,
+} from "../../src/ci/github-research/gh-allowlist.js";
 
 /**
  * The transport's contract with the `gh` binary, checked against the binary's
@@ -25,6 +31,17 @@ import { ghCommandProfiles } from "../../src/ci/github-research/gh-allowlist.js"
 const GH_TIMEOUT_MS = 10_000;
 const UNKNOWN_FLAG = "--zzz-not-a-real-flag";
 
+/**
+ * The token the probes hand the binary.
+ *
+ * `gh` refuses to run at all inside a GitHub Actions workflow without
+ * `GH_TOKEN`, even for the local document these probes read. A placeholder
+ * keeps the contract check about the binary's projection rather than about
+ * the runner's credentials, and the probes assert that no credential reaches
+ * the local server, so the placeholder cannot leak into the request.
+ */
+const GH_PROBE_TOKEN = "gh-contract-probe";
+
 const execFileAsync = promisify(execFile);
 
 const ghAvailable = (() => {
@@ -46,7 +63,10 @@ interface Outcome {
 }
 const runGh = async (args: string[]): Promise<Outcome> => {
   try {
-    const { stdout, stderr } = await execFileAsync("gh", args, { timeout: GH_TIMEOUT_MS });
+    const { stdout, stderr } = await execFileAsync("gh", args, {
+      timeout: GH_TIMEOUT_MS,
+      env: { ...process.env, GH_TOKEN: process.env.GH_TOKEN ?? GH_PROBE_TOKEN },
+    });
     return { output: `${stdout}${stderr}`, exitCode: 0, unresponsive: false };
   } catch (error) {
     const failure = error as {
@@ -228,10 +248,11 @@ describe("gh CLI contract", () => {
         // unknown flag, so the premise is checked rather than assumed.
         expect(await probeFlag(command, UNKNOWN_FLAG)).toBe("rejected");
       });
-      if (!profile.json) continue;
+      const jsonFields = profile.json;
+      if (!jsonFields) continue;
       it(`${command} still supports the fields the transport requests`, async () => {
         const fields = await supportedFields(command);
-        for (const list of profile.json)
+        for (const list of jsonFields)
           for (const field of list.split(","))
             expect(fields.has(field), `${command} no longer supports the field ${field}`).toBe(
               true,
@@ -243,6 +264,84 @@ describe("gh CLI contract", () => {
     });
     it("the api group rejects a flag it does not have", async () => {
       expect(await probeFlag("api", UNKNOWN_FLAG)).toBe("rejected");
+    });
+
+    it("the release projection runs in the installed binary", async () => {
+      // The projection is the transport's contract with the binary's own jq,
+      // so it is checked against that jq rather than against an assumption
+      // about it. The document comes from a local server, so the check needs
+      // no token and no network.
+      const long = "x".repeat(MAX_RELEASE_BODY_CHARS + 10);
+      const payload = {
+        tag_name: "v1.0",
+        name: "Release",
+        draft: false,
+        html_url: "https://github.com/o/r/releases/tag/v1.0",
+        published_at: "2026-10-20T04:13:50Z",
+        body: long,
+      };
+      const headers: string[] = [];
+      const server = createServer((request, response) => {
+        headers.push(request.headers.authorization ?? "");
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify(payload));
+      });
+      await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+      const address = server.address();
+      const port = typeof address === "object" && address ? address.port : 0;
+      try {
+        const outcome = await runGh([
+          "api",
+          `http://127.0.0.1:${port}/releases/1`,
+          "--jq",
+          RELEASE_JQ_EXPRESSION,
+        ]);
+        expect(outcome.exitCode, outcome.output).toBe(0);
+        const result = JSON.parse(outcome.output) as Record<string, unknown>;
+        expect(result.tagName).toBe("v1.0");
+        expect(result.name).toBe("Release");
+        expect(result.bodyTruncated).toBe(true);
+        expect((result.body as string).length).toBe(MAX_RELEASE_BODY_CHARS);
+        // The binary is asked for a local document, and it sends no
+        // credentials to it.
+        expect(headers).toEqual([""]);
+      } finally {
+        server.close();
+      }
+    });
+
+    it("the release projection drops metadata it cannot fit", async () => {
+      const payload = {
+        tag_name: "v1.0",
+        name: "N".repeat(MAX_RELEASE_NAME_CHARS + 1),
+        draft: false,
+        html_url: "https://github.com/o/r/releases/tag/v1.0",
+        published_at: "2026-10-20T04:13:50Z",
+        body: "notes",
+      };
+      const server = createServer((_request, response) => {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify(payload));
+      });
+      await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+      const address = server.address();
+      const port = typeof address === "object" && address ? address.port : 0;
+      try {
+        const outcome = await runGh([
+          "api",
+          `http://127.0.0.1:${port}/releases/1`,
+          "--jq",
+          RELEASE_JQ_EXPRESSION,
+        ]);
+        expect(outcome.exitCode, outcome.output).toBe(0);
+        const result = JSON.parse(outcome.output) as Record<string, unknown>;
+        // A field that does not fit is unknown, not shortened.
+        expect(result.name).toBeNull();
+        expect(result.tagName).toBe("v1.0");
+        expect(result.bodyTruncated).toBe(false);
+      } finally {
+        server.close();
+      }
     });
   });
 });

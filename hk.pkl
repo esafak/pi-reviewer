@@ -21,6 +21,12 @@ local prepush = new Mapping<String, Step> {
   ["test-suite"] {
     check = "mise run test"
   }
+  ["typecheck"] {
+    check = "mise run typecheck"
+  }
+  ["typecheck:tests"] {
+    check = "mise run typecheck:tests"
+  }
   ["vite-plus-lint"] {
     glob = List("**/*.js", "**/*.jsx", "**/*.ts", "**/*.tsx")
     exclude = List("dist/**", "dist-ui/**")

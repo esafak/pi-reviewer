@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { beforeEach, describe, expect, it, vi, type Mock } from "vite-plus/test";
 import { access, chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -50,36 +50,56 @@ vi.mock("@earendil-works/pi-coding-agent", () => ({
   SessionManager: { inMemory: vi.fn(() => ({})) },
 }));
 
+/**
+ * The MCP adapter factory the review path loads.
+ *
+ * The adapter ships TypeScript sources, so the test takes the factory's type
+ * from the call the review path makes instead of importing the package: a
+ * static import would pull those sources into the test program and typecheck
+ * them along with the tests.
+ */
+const { createMcpAdapterMock } = vi.hoisted(() => ({
+  createMcpAdapterMock: vi.fn<(options: McpAdapterOptions) => unknown>(() => () => {}),
+}));
+
 vi.mock("pi-mcp-adapter", () => ({
-  createMcpAdapter: vi.fn(() => () => {}),
+  createMcpAdapter: createMcpAdapterMock,
 }));
 
-vi.mock("../../src/core/review-tool.js", () => ({
-  createReviewTool: vi.fn(() => ({
-    tool: {
-      name: "submit_review",
-      label: "submit_review",
-      description: "test",
-      parameters: {},
-      execute: vi.fn(),
-    },
-    getResult: () => undefined,
-  })),
-}));
+vi.mock("../../src/core/review-tool.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/core/review-tool.js")>();
+  return {
+    ...actual,
+    createReviewTool: vi.fn(() => ({
+      tool: {
+        name: "submit_review",
+        label: "submit_review",
+        description: "test",
+        parameters: reviewSchema,
+        execute: vi.fn(),
+      },
+      getResult: () => undefined,
+    })),
+  };
+});
 
-vi.mock("../../src/core/reply-tool.js", () => ({
-  ALLOWED_REACTIONS: ["+1", "-1", "laugh", "confused", "heart", "hooray", "rocket", "eyes"],
-  createReplyTool: vi.fn(() => ({
-    tool: {
-      name: "submit_reply",
-      label: "submit_reply",
-      description: "test",
-      parameters: {},
-      execute: vi.fn(),
-    },
-    getResult: () => undefined,
-  })),
-}));
+vi.mock("../../src/core/reply-tool.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/core/reply-tool.js")>();
+  return {
+    ...actual,
+    ALLOWED_REACTIONS: ["+1", "-1", "laugh", "confused", "heart", "hooray", "rocket", "eyes"],
+    createReplyTool: vi.fn(() => ({
+      tool: {
+        name: "submit_reply",
+        label: "submit_reply",
+        description: "test",
+        parameters: replySchema,
+        execute: vi.fn(),
+      },
+      getResult: () => undefined,
+    })),
+  };
+});
 
 import { Agent } from "@earendil-works/pi-agent-core";
 import {
@@ -87,14 +107,14 @@ import {
   createReadOnlyTools,
   DefaultResourceLoader,
 } from "@earendil-works/pi-coding-agent";
-import { createMcpAdapter } from "pi-mcp-adapter";
 import { loadContext } from "../../src/core/context.js";
 import { extractDiffFiles, resolveRawDiff } from "../../src/core/diff-resolver.js";
 import { loadDocContext } from "../../src/core/doc-context.js";
 import { loadSkillContext, resolveSkillDirs } from "../../src/core/skill-context.js";
-import { sendOutput } from "../../src/core/output.js";
-import { createReviewTool } from "../../src/core/review-tool.js";
-import { createReplyTool } from "../../src/core/reply-tool.js";
+import { sendOutput, type ReviewResult } from "../../src/core/output.js";
+import { createReviewTool, reviewSchema } from "../../src/core/review-tool.js";
+import { upgradeId } from "../../src/core/dependency/upgrade-id.js";
+import { createReplyTool, replySchema } from "../../src/core/reply-tool.js";
 import type { CiMcpConfig } from "../../src/ci/mcp-config.js";
 import { LSP_TOOL_NAMES } from "../../src/ci/tool-names.js";
 import {
@@ -115,6 +135,7 @@ import {
   REPLY_INPUT_LIMITS,
   truncateReplyInput,
 } from "../../src/ci/review.js";
+import type { McpAdapterOptions } from "../../src/ci/review.js";
 
 describe("reply prompt limits", () => {
   it("truncates untrusted reply inputs with an explicit marker", () => {
@@ -202,7 +223,6 @@ const AgentMock = vi.mocked(Agent);
 const createReadOnlyToolsMock = vi.mocked(createReadOnlyTools);
 const createAgentSessionMock = vi.mocked(createAgentSession);
 const DefaultResourceLoaderMock = vi.mocked(DefaultResourceLoader);
-const createMcpAdapterMock = vi.mocked(createMcpAdapter);
 const createReviewToolMock = vi.mocked(createReviewTool);
 const createReplyToolMock = vi.mocked(createReplyTool);
 
@@ -214,16 +234,23 @@ let fakeToolExecutions: Array<{ toolName: string; toolCallId: string; args: unkn
 let fakeMcpSession: ReturnType<typeof makeFakeMcpSession>;
 
 interface FakeAgent {
-  subscribe: ReturnType<typeof vi.fn>;
-  prompt: ReturnType<typeof vi.fn>;
+  subscribe: Mock<(cb: (event: unknown) => void) => unknown>;
+  prompt: Mock<(message: string) => Promise<unknown>>;
   state: { tools: unknown[] };
-  streamFunction: ReturnType<typeof vi.fn>;
+  streamFunction: Mock<(...args: never[]) => void>;
+}
+
+/** The state the first agent run was given. */
+function agentState() {
+  const state = AgentMock.mock.calls[0]?.[0]?.initialState;
+  if (!state) throw new Error("the agent run was not observed");
+  return state;
 }
 
 function makeFakeAgent(text = "LGTM"): FakeAgent {
   let listener: ((event: unknown) => void) | undefined;
   const agent: FakeAgent = {
-    subscribe: vi.fn((cb: (event: unknown) => void) => {
+    subscribe: vi.fn<(cb: (event: unknown) => void) => unknown>((cb) => {
       listener = cb;
       return vi.fn();
     }),
@@ -232,7 +259,7 @@ function makeFakeAgent(text = "LGTM"): FakeAgent {
     // agent_end. The prompt also calls the *installed* stream function — the
     // review wrapper once review() has run — so a test can observe the request
     // the run would have sent.
-    prompt: vi.fn(async () => {
+    prompt: vi.fn<(message: string) => Promise<unknown>>(async () => {
       agent.streamFunction({} as never, {} as never, {} as never);
       for (const event of fakeAgentEvents) listener?.(event);
       for (const call of fakeToolExecutions) {
@@ -253,7 +280,7 @@ function makeFakeAgent(text = "LGTM"): FakeAgent {
       });
     }),
     state: { tools: [] },
-    streamFunction: vi.fn(),
+    streamFunction: vi.fn<(...args: never[]) => void>(),
   };
   return agent;
 }
@@ -308,21 +335,22 @@ describe("review", () => {
     resolveRawDiffMock.mockResolvedValue({
       raw: "diff --git a/a.ts b/a.ts",
       source: "git diff origin/main...HEAD",
+      changedFiles: [],
     });
     loadContextMock.mockResolvedValue({
       conventions: [{ path: "AGENTS.md", content: "- Use strict typing" }],
       reviewRules: [],
     });
-    sendOutputMock.mockResolvedValue(undefined);
+    sendOutputMock.mockResolvedValue({ commentIds: [], fallback: false, findings: [] });
     createReadOnlyToolsMock.mockReturnValue([]);
     createAgentSessionMock.mockResolvedValue({ session: fakeMcpSession } as never);
-    createMcpAdapterMock.mockReturnValue((() => {}) as never);
+    createMcpAdapterMock.mockReturnValue(() => {});
     createReviewToolMock.mockReturnValue({
       tool: {
         name: "submit_review",
         label: "submit_review",
         description: "test",
-        parameters: {},
+        parameters: reviewSchema,
         execute: vi.fn(),
       },
       getResult: () => ({ action: "review", result: { summary: "LGTM", comments: [] } }),
@@ -332,7 +360,7 @@ describe("review", () => {
         name: "submit_reply",
         label: "submit_reply",
         description: "test",
-        parameters: {},
+        parameters: replySchema,
         execute: vi.fn(),
       },
       getResult: () => undefined,
@@ -369,6 +397,7 @@ describe("review", () => {
     delete process.env.PI_REVIEWER_CODE_EXEC_MAX_CALLS;
     delete process.env.PI_REVIEWER_CODE_EXEC_WALL_BUDGET_MS;
     delete process.env.PI_REVIEWER_CODE_EXEC_MAX_STREAM_BYTES;
+    delete process.env.PI_REVIEWER_URL_READER;
     delete process.env.PI_REVIEWER_EXTRA_INSTRUCTIONS;
     // model is mandatory — provide a default for tests that don't exercise it
     process.env.PI_REVIEWER_MODEL = "anthropic/claude-opus-4-6";
@@ -438,6 +467,37 @@ describe("review", () => {
     expect(prompt).toContain("drop.ts");
   });
 
+  it("drops dependency lockfiles from the dependency mode's diff only", async () => {
+    const manifest =
+      'diff --git a/package.json b/package.json\n--- a/package.json\n+++ b/package.json\n@@ -1 +1 @@\n-"react": "^18.0.0"\n+"react": "^19.0.0"\n';
+    const lockfile =
+      "diff --git a/uv.lock b/uv.lock\n--- a/uv.lock\n+++ b/uv.lock\n@@ -1 +1 @@\n+version = 1\n";
+    resolveRawDiffMock.mockResolvedValue({
+      raw: manifest + lockfile,
+      source: "s",
+      changedFiles: [],
+    });
+    const dependency = createMemorySink();
+    await review({
+      cwd: "/repo",
+      dryRun: true,
+      profile: { kind: "dependency", changes: [], resolutions: [] },
+      logger: createLogger({ sink: dependency.sink }),
+    });
+    const dependencyPrompt = dependency.records.find(
+      ({ event }) => event === "review.dry_run.user_prompt",
+    )?.fields.prompt as string;
+    expect(dependencyPrompt).toContain("package.json");
+    expect(dependencyPrompt).not.toContain("uv.lock");
+
+    // The review mode's own list is unchanged: the same lockfile is reviewed.
+    const code = createMemorySink();
+    await review({ cwd: "/repo", dryRun: true, logger: createLogger({ sink: code.sink }) });
+    const codePrompt = code.records.find(({ event }) => event === "review.dry_run.user_prompt")
+      ?.fields.prompt as string;
+    expect(codePrompt).toContain("uv.lock");
+  });
+
   it("loads default skills into the dry-run system prompt", async () => {
     const { sink, records } = createMemorySink();
     resolveRawDiffMock.mockResolvedValue({
@@ -485,10 +545,10 @@ describe("review", () => {
         }),
       }),
     );
-    expect(AgentMock.mock.calls[0][0].initialState.tools).not.toEqual(
+    expect(agentState().tools).not.toEqual(
       expect.arrayContaining([expect.objectContaining({ name: "web_search" })]),
     );
-    expect(AgentMock.mock.calls[0][0].initialState.tools).not.toEqual(
+    expect(agentState().tools).not.toEqual(
       expect.arrayContaining([expect.objectContaining({ name: "package_lookup" })]),
     );
     expect(sendOutputMock).toHaveBeenCalledWith(
@@ -503,7 +563,7 @@ describe("review", () => {
   it("registers code_exec only for enabled CI comment reviews", async () => {
     process.env.PI_REVIEWER_CODE_EXEC = "true";
     await review({ cwd: "/repo", output: "comment", lspServers: "none" });
-    expect(AgentMock.mock.calls[0][0].initialState.tools).toEqual(
+    expect(agentState().tools).toEqual(
       expect.arrayContaining([expect.objectContaining({ name: "code_exec" })]),
     );
   });
@@ -511,14 +571,14 @@ describe("review", () => {
   it("withholds code_exec for non-comment output even when enabled", async () => {
     process.env.PI_REVIEWER_CODE_EXEC = "true";
     await review({ cwd: "/repo", output: "terminal" });
-    expect(AgentMock.mock.calls[0][0].initialState.tools).not.toEqual(
+    expect(agentState().tools).not.toEqual(
       expect.arrayContaining([expect.objectContaining({ name: "code_exec" })]),
     );
   });
 
   it("withholds code_exec for comment output when not enabled", async () => {
     await review({ cwd: "/repo", output: "comment", lspServers: "none" });
-    expect(AgentMock.mock.calls[0][0].initialState.tools).not.toEqual(
+    expect(agentState().tools).not.toEqual(
       expect.arrayContaining([expect.objectContaining({ name: "code_exec" })]),
     );
   });
@@ -1146,7 +1206,7 @@ describe("review", () => {
         name: "submit_review",
         label: "submit_review",
         description: "test",
-        parameters: {},
+        parameters: reviewSchema,
         execute: vi.fn(),
       },
       getResult: () => undefined,
@@ -2104,7 +2164,9 @@ describe("review", () => {
     ];
     const mcpConfig: CiMcpConfig = { mcpServers: { docs: { url: "https://mcp.example/mcp" } } };
 
-    await expect(review({ cwd: "/repo", output: "comment", mcpConfig })).resolves.toBeUndefined();
+    await expect(review({ cwd: "/repo", output: "comment", mcpConfig })).resolves.toMatchObject({
+      kind: "published",
+    });
     expect(sendOutputMock).toHaveBeenCalled();
   });
 
@@ -2184,7 +2246,7 @@ describe("review", () => {
       lspServers: "none",
     });
 
-    const state = AgentMock.mock.calls[0][0].initialState;
+    const state = agentState();
     expect(state.tools).toEqual(
       expect.arrayContaining([expect.objectContaining({ name: "package_lookup" })]),
     );
@@ -2239,6 +2301,7 @@ describe("review", () => {
     process.env.PI_REVIEWER_AI_SEARCH_PROVIDER = "exa";
     process.env.EXA_API_KEY = "test-key";
     process.env.PI_REVIEWER_CODE_EXEC = "true";
+    process.env.PI_REVIEWER_URL_READER = "true";
     const { sink, records } = createMemorySink();
 
     await review({
@@ -2259,11 +2322,62 @@ describe("review", () => {
         "package_lookup",
         "github_search",
         "github_read",
+        "url_read",
         "code_exec",
         "mcp",
       ]),
     );
     expect(status?.fields.unavailable).toEqual([]);
+  });
+
+  it("registers the URL reader only when its input is on", async () => {
+    process.env.GITHUB_ACTIONS = "true";
+    const { sink, records } = createMemorySink();
+
+    await review({
+      cwd: "/repo",
+      pr: 42,
+      githubToken: "token",
+      repo: "owner/repo",
+      output: "comment",
+      lspServers: "none",
+      logger: createLogger({ sink }),
+    });
+
+    const status = records.find(({ event }) => event === "review.tools.status");
+    expect(status?.fields.available).not.toEqual(expect.arrayContaining(["url_read"]));
+    expect(status?.fields.unavailable).toEqual(expect.arrayContaining(["url_read"]));
+
+    const state = agentState();
+    expect(state.tools).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: "url_read" })]),
+    );
+    expect(state.systemPrompt).not.toContain("<url_reader_policy>");
+  });
+
+  it("registers the URL reader and its policy when its input is on", async () => {
+    process.env.GITHUB_ACTIONS = "true";
+    process.env.PI_REVIEWER_URL_READER = "true";
+    const { sink, records } = createMemorySink();
+
+    await review({
+      cwd: "/repo",
+      pr: 42,
+      githubToken: "token",
+      repo: "owner/repo",
+      output: "comment",
+      lspServers: "none",
+      logger: createLogger({ sink }),
+    });
+
+    const status = records.find(({ event }) => event === "review.tools.status");
+    expect(status?.fields.available).toEqual(expect.arrayContaining(["url_read"]));
+
+    const state = agentState();
+    expect(state.tools).toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: "url_read" })]),
+    );
+    expect(state.systemPrompt).toContain("<url_reader_policy>");
   });
 
   it("does not log tool availability for local output", async () => {
@@ -2287,7 +2401,7 @@ describe("review", () => {
       lspServers: "none",
     });
 
-    const state = AgentMock.mock.calls[0][0].initialState;
+    const state = agentState();
     expect(state.tools).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ name: "github_search" }),
@@ -2303,7 +2417,7 @@ describe("review", () => {
 
     await review({ cwd: "/repo", githubToken: "token" });
 
-    const state = AgentMock.mock.calls[0][0].initialState;
+    const state = agentState();
     expect(state.tools).not.toEqual(
       expect.arrayContaining([expect.objectContaining({ name: "github_search" })]),
     );
@@ -2363,7 +2477,11 @@ describe("review", () => {
   it("passes the resolved diff to sendOutput for position validation", async () => {
     const diff =
       "diff --git a/src/a.ts b/src/a.ts\n--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1,3 +1,3 @@\n";
-    resolveRawDiffMock.mockResolvedValue({ raw: diff, source: "git diff origin/main...HEAD" });
+    resolveRawDiffMock.mockResolvedValue({
+      raw: diff,
+      source: "git diff origin/main...HEAD",
+      changedFiles: [],
+    });
 
     await review({ cwd: "/repo" });
 
@@ -2655,7 +2773,7 @@ describe("review", () => {
         name: "submit_reply",
         label: "submit_reply",
         description: "test",
-        parameters: {},
+        parameters: replySchema,
         execute: vi.fn(),
       },
       getResult: () => toolAction,
@@ -2685,7 +2803,7 @@ describe("review", () => {
         name: "submit_reply",
         label: "submit_reply",
         description: "test",
-        parameters: {},
+        parameters: replySchema,
         execute: vi.fn(),
       },
       getResult: () => ({ action: "invalid" }) as any,
@@ -2733,7 +2851,7 @@ describe("review", () => {
   });
 
   it("uses submit_review tool result when the model called the tool", async () => {
-    const toolReview = {
+    const toolReview: ReviewResult = {
       summary: "Tool-based review",
       comments: [
         { file: "src/a.ts", line: 7, side: "RIGHT", severity: "WARN", body: "Handle undefined" },
@@ -2744,7 +2862,7 @@ describe("review", () => {
         name: "submit_review",
         label: "submit_review",
         description: "test",
-        parameters: {},
+        parameters: reviewSchema,
         execute: vi.fn(),
       },
       getResult: () => ({ action: "review", result: toolReview }),
@@ -2763,7 +2881,7 @@ describe("review", () => {
   });
 
   it("returns only the overview without posting in summary-only mode", async () => {
-    const toolReview = {
+    const toolReview: ReviewResult = {
       summary: "One line",
       pr_summary: "What: x. Why: y. Risks: z.",
       pr_diagram: "flowchart TD\nA-->B",
@@ -2776,7 +2894,7 @@ describe("review", () => {
         name: "submit_review",
         label: "submit_review",
         description: "test",
-        parameters: {},
+        parameters: reviewSchema,
         execute: vi.fn(),
       },
       getResult: () => ({ action: "review", result: toolReview }),
@@ -2785,11 +2903,15 @@ describe("review", () => {
       return makeFakeAgent("") as any;
     });
 
-    const overview = await review({ cwd: "/repo", output: "comment", summaryOnly: true });
+    const outcome = await review({ cwd: "/repo", output: "comment", summaryOnly: true });
 
-    expect(overview).toEqual({
-      pr_summary: "What: x. Why: y. Risks: z.",
-      pr_diagram: "flowchart TD\nA-->B",
+    expect(outcome).toMatchObject({
+      kind: "summary-only",
+      overview: {
+        pr_summary: "What: x. Why: y. Risks: z.",
+        pr_diagram: "flowchart TD\nA-->B",
+      },
+      findings: [],
     });
     expect(sendOutputMock).not.toHaveBeenCalled();
   });
@@ -2806,7 +2928,7 @@ describe("review", () => {
       side: "RIGHT",
       body: "body finding",
     };
-    const toolReview = {
+    const toolReview: ReviewResult = {
       summary: "Updated body finding",
       comments: [],
       finding_updates: [
@@ -2818,7 +2940,7 @@ describe("review", () => {
         name: "submit_review",
         label: "submit_review",
         description: "test",
-        parameters: {},
+        parameters: reviewSchema,
         execute: vi.fn(),
       },
       getResult: () => ({ action: "review", result: toolReview }),
@@ -2871,7 +2993,7 @@ describe("review", () => {
         name: "submit_review",
         label: "submit_review",
         description: "test",
-        parameters: {},
+        parameters: reviewSchema,
         execute: vi.fn(),
       },
       getResult: () => ({
@@ -2894,7 +3016,7 @@ describe("review", () => {
         name: "submit_review",
         label: "submit_review",
         description: "test",
-        parameters: {},
+        parameters: reviewSchema,
         execute: vi.fn(),
       },
       getResult: () => undefined,
@@ -2916,7 +3038,7 @@ describe("review", () => {
         name: "submit_review",
         label: "submit_review",
         description: "test",
-        parameters: {},
+        parameters: reviewSchema,
         execute: vi.fn(),
       },
       getResult: () => undefined,
@@ -2958,7 +3080,7 @@ describe("review", () => {
         name: "submit_review",
         label: "submit_review",
         description: "test",
-        parameters: {},
+        parameters: reviewSchema,
         execute: vi.fn(),
       },
       // The first run produces nothing; the retry produces the decision.
@@ -3001,7 +3123,7 @@ describe("review", () => {
         name: "submit_review",
         label: "submit_review",
         description: "test",
-        parameters: {},
+        parameters: reviewSchema,
         execute: vi.fn(),
       },
       getResult: () => (decisionReads++ === 0 ? undefined : { action: "none" }),
@@ -3039,7 +3161,7 @@ describe("review", () => {
         name: "submit_review",
         label: "submit_review",
         description: "test",
-        parameters: {},
+        parameters: reviewSchema,
         execute: vi.fn(),
       },
       getResult: () => undefined,
@@ -3120,7 +3242,7 @@ describe("review", () => {
         name: "submit_review",
         label: "submit_review",
         description: "test",
-        parameters: {},
+        parameters: reviewSchema,
         execute: vi.fn(),
       },
       getResult: () => (decisionReads++ === 0 ? undefined : { action: "none" }),
@@ -3161,7 +3283,7 @@ describe("review", () => {
         name: "submit_review",
         label: "submit_review",
         description: "test",
-        parameters: {},
+        parameters: reviewSchema,
         execute: vi.fn(),
       },
       getResult: () => (decisionReads++ === 0 ? undefined : { action: "none" }),
@@ -3187,6 +3309,550 @@ describe("review", () => {
     await review({ cwd: "/repo" });
 
     expect(agent!.prompt).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("review — the dependency profile", () => {
+  /** The upgrade the dependency mode is analyzing. */
+  const change = {
+    registry: "npm" as const,
+    dialect: "semver" as const,
+    category: "library" as const,
+    name: "react",
+    section: "dependencies",
+    from: "^18.2.0",
+    to: "^19.0.0",
+    kind: "major" as const,
+    manifest: "package.json",
+  };
+  /** The id the harness assigns to it. */
+  const id = upgradeId(change);
+  /** The profile the dependency mode runs under. */
+  const profile = {
+    kind: "dependency" as const,
+    changes: [change],
+    resolutions: [
+      {
+        id,
+        candidates: [{ id: `${id}-1`, via: "registry-metadata" as const, repo: "facebook/react" }],
+      },
+    ],
+  };
+
+  it("renders the dependency prompt and hands the profile to the tool", async () => {
+    await review({ cwd: "/repo", profile });
+
+    expect(createReviewToolMock).toHaveBeenCalledWith(profile);
+    const prompt = agentState().systemPrompt;
+    expect(prompt).toContain("You are a dependency reviewer");
+    expect(prompt).toContain("<dependency_changes>");
+    expect(prompt).toContain("facebook/react");
+    expect(prompt).not.toContain("You are a code reviewer");
+  });
+
+  it("carries the research dispositions on a none decision", async () => {
+    createReviewToolMock.mockReturnValue({
+      tool: {
+        name: "submit_review",
+        label: "submit_review",
+        description: "test",
+        parameters: reviewSchema,
+        execute: vi.fn(),
+      },
+      getResult: () => ({
+        action: "none",
+        research: [{ id, status: "researched", source: `candidate:${id}-1` }],
+      }),
+    });
+
+    await review({ cwd: "/repo" });
+
+    expect(sendOutputMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        none: true,
+        research: [{ id, status: "researched", source: `candidate:${id}-1` }],
+      }),
+    );
+  });
+
+  it("asks for the research dispositions when the model has to be re-asked", async () => {
+    const agent = makeFakeAgent("");
+    AgentMock.mockImplementation(function () {
+      return agent as never;
+    });
+    let decisionReads = 0;
+    createReviewToolMock.mockReturnValue({
+      tool: {
+        name: "submit_review",
+        label: "submit_review",
+        description: "test",
+        parameters: reviewSchema,
+        execute: vi.fn(),
+      },
+      // The first run produces nothing; the retry produces the decision.
+      getResult: () => (decisionReads++ === 0 ? undefined : { action: "none" }),
+    });
+
+    await review({ cwd: "/repo", profile });
+
+    // The nudge names the field the dependency mode's contract requires.
+    expect(String(agent.prompt.mock.calls[1]?.[0])).toContain(
+      "one research disposition for every upgrade",
+    );
+  });
+
+  /** The anchors the dependency flow prepares for the upgrade above. */
+  const anchors = [
+    { id, manifest: "package.json", file: "package.json", line: 2, side: "RIGHT" as const },
+  ];
+  /** A decision that claims the upgrade was researched from a local changelog. */
+  const researchedLocally = {
+    action: "review" as const,
+    result: {
+      summary: "React 19 removed an API this repository calls.",
+      comments: [
+        {
+          file: "package.json",
+          line: 2,
+          side: "RIGHT" as const,
+          severity: "CRITICAL" as const,
+          body: "React 19 removed an API this repository calls.",
+        },
+      ],
+      research: [{ id, status: "researched" as const, source: "local:CHANGELOG.md" }],
+    },
+  };
+
+  it("warns about an upgrade the harness could not reach, whatever the model claims", async () => {
+    createReviewToolMock.mockReturnValue({
+      tool: {
+        name: "submit_review",
+        label: "submit_review",
+        description: "test",
+        parameters: reviewSchema,
+        execute: vi.fn(),
+      },
+      getResult: () => researchedLocally,
+    });
+    AgentMock.mockImplementation(function () {
+      return makeFakeAgent("") as never;
+    });
+    const unreachable = {
+      kind: "dependency" as const,
+      changes: [change],
+      resolutions: [{ id, candidates: [], unresolved: "the registry did not name a source" }],
+    };
+
+    await review({
+      cwd: "/repo",
+      output: "comment",
+      repo: "owner/repo",
+      githubToken: "token",
+      profile: unreachable,
+      dependencyAnchors: anchors,
+    });
+
+    const call = sendOutputMock.mock.calls.at(-1)![0];
+    expect(call.requireBody).toBe(true);
+    expect(call.coverageWarnings).toEqual([
+      {
+        file: "package.json",
+        line: 2,
+        side: "RIGHT",
+        severity: "WARN",
+        body: expect.stringContaining("could not verify the breaking changes for react"),
+      },
+    ]);
+    expect(call.coverageWarnings![0]!.body).toContain("the registry did not name a source");
+    // The finding that stood on that upgrade's line has no citation to stand
+    // on, so it is dropped and the upgrade is published as unverifiable.
+    expect((call.structuredResult as ReviewResult).comments).toEqual([]);
+  });
+
+  it("publishes no coverage warning for an upgrade researched from a resolved candidate", async () => {
+    createReviewToolMock.mockReturnValue({
+      tool: {
+        name: "submit_review",
+        label: "submit_review",
+        description: "test",
+        parameters: reviewSchema,
+        execute: vi.fn(),
+      },
+      getResult: () => ({
+        ...researchedLocally,
+        result: {
+          ...researchedLocally.result,
+          research: [{ id, status: "researched" as const, source: `candidate:${id}-1` }],
+        },
+      }),
+    });
+    AgentMock.mockImplementation(function () {
+      return makeFakeAgent("") as never;
+    });
+
+    await review({
+      cwd: "/repo",
+      output: "comment",
+      repo: "owner/repo",
+      githubToken: "token",
+      profile,
+      dependencyAnchors: anchors,
+    });
+
+    const call = sendOutputMock.mock.calls.at(-1)![0];
+    expect(call.coverageWarnings).toEqual([]);
+    expect((call.structuredResult as ReviewResult).comments).toHaveLength(1);
+  });
+
+  it("warns about an upgrade the model left out of its report", async () => {
+    createReviewToolMock.mockReturnValue({
+      tool: {
+        name: "submit_review",
+        label: "submit_review",
+        description: "test",
+        parameters: reviewSchema,
+        execute: vi.fn(),
+      },
+      getResult: () => ({
+        action: "review" as const,
+        result: { summary: "No breaking change found.", comments: [] },
+      }),
+    });
+    AgentMock.mockImplementation(function () {
+      return makeFakeAgent("") as never;
+    });
+
+    await review({
+      cwd: "/repo",
+      output: "comment",
+      repo: "owner/repo",
+      githubToken: "token",
+      profile,
+      dependencyAnchors: anchors,
+    });
+
+    const call = sendOutputMock.mock.calls.at(-1)![0];
+    expect(call.coverageWarnings).toEqual([
+      expect.objectContaining({
+        severity: "WARN",
+        body: expect.stringContaining("did not account for this upgrade"),
+      }),
+    ]);
+  });
+
+  it("warns with the reason the model gave for an upgrade it could not verify", async () => {
+    createReviewToolMock.mockReturnValue({
+      tool: {
+        name: "submit_review",
+        label: "submit_review",
+        description: "test",
+        parameters: reviewSchema,
+        execute: vi.fn(),
+      },
+      getResult: () => ({
+        action: "review" as const,
+        result: {
+          summary: "No breaking change determined.",
+          comments: [],
+          research: [{ id, status: "unverified" as const, reason: "the release notes were gone" }],
+        },
+      }),
+    });
+    AgentMock.mockImplementation(function () {
+      return makeFakeAgent("") as never;
+    });
+
+    await review({
+      cwd: "/repo",
+      output: "comment",
+      repo: "owner/repo",
+      githubToken: "token",
+      profile,
+      dependencyAnchors: anchors,
+    });
+
+    const call = sendOutputMock.mock.calls.at(-1)![0];
+    expect(call.coverageWarnings).toEqual([
+      expect.objectContaining({ body: expect.stringContaining("the release notes were gone") }),
+    ]);
+  });
+
+  it("resolves a conflicting duplicate conservatively", async () => {
+    createReviewToolMock.mockReturnValue({
+      tool: {
+        name: "submit_review",
+        label: "submit_review",
+        description: "test",
+        parameters: reviewSchema,
+        execute: vi.fn(),
+      },
+      getResult: () => ({
+        action: "review" as const,
+        result: {
+          summary: "Analyzed the upgrade.",
+          comments: [],
+          research: [
+            { id, status: "researched" as const, source: `candidate:${id}-1` },
+            { id, status: "unverified" as const, reason: "the notes were unreachable" },
+          ],
+        },
+      }),
+    });
+    AgentMock.mockImplementation(function () {
+      return makeFakeAgent("") as never;
+    });
+
+    await review({
+      cwd: "/repo",
+      output: "comment",
+      repo: "owner/repo",
+      githubToken: "token",
+      profile,
+      dependencyAnchors: anchors,
+    });
+
+    const call = sendOutputMock.mock.calls.at(-1)![0];
+    // Two dispositions disagree, so the upgrade is not claimed as researched:
+    // neither entry is published as the answer, and the gap is reported.
+    expect(call.coverageWarnings).toEqual([
+      expect.objectContaining({
+        body: expect.stringContaining("conflicting dispositions"),
+      }),
+    ]);
+  });
+
+  it("warns about a citation that names no resolved candidate", async () => {
+    createReviewToolMock.mockReturnValue({
+      tool: {
+        name: "submit_review",
+        label: "submit_review",
+        description: "test",
+        parameters: reviewSchema,
+        execute: vi.fn(),
+      },
+      getResult: () => ({
+        ...researchedLocally,
+        result: {
+          ...researchedLocally.result,
+          research: [{ id, status: "researched" as const, source: "https://example.com/react-19" }],
+        },
+      }),
+    });
+    AgentMock.mockImplementation(function () {
+      return makeFakeAgent("") as never;
+    });
+
+    await review({
+      cwd: "/repo",
+      output: "comment",
+      repo: "owner/repo",
+      githubToken: "token",
+      profile,
+      dependencyAnchors: anchors,
+    });
+
+    const call = sendOutputMock.mock.calls.at(-1)![0];
+    // The citation is neither a candidate of this upgrade nor a normalized
+    // local path, so it supports nothing: the upgrade is unverifiable.
+    expect(call.coverageWarnings).toHaveLength(1);
+    expect((call.structuredResult as ReviewResult).comments).toEqual([]);
+  });
+
+  it("withholds a body whose overview diagram carries a credential-shaped value", async () => {
+    createReviewToolMock.mockReturnValue({
+      tool: {
+        name: "submit_review",
+        label: "submit_review",
+        description: "test",
+        parameters: reviewSchema,
+        execute: vi.fn(),
+      },
+      getResult: () => ({
+        action: "review" as const,
+        result: {
+          summary: "Analyzed the upgrade.",
+          pr_diagram: 'graph TD\nA["-----BEGIN RSA PRIVATE KEY-----"]-->B',
+          comments: [],
+          research: [{ id, status: "researched" as const, source: `candidate:${id}-1` }],
+        },
+      }),
+    });
+    AgentMock.mockImplementation(function () {
+      return makeFakeAgent("") as never;
+    });
+
+    await review({
+      cwd: "/repo",
+      output: "comment",
+      repo: "owner/repo",
+      githubToken: "token",
+      profile,
+      dependencyAnchors: anchors,
+    });
+
+    const call = sendOutputMock.mock.calls.at(-1)![0];
+    const result = call.structuredResult as ReviewResult;
+    expect(result.summary).toContain("withheld");
+    expect(result.pr_diagram).toBeUndefined();
+  });
+
+  it("replaces a coverage reason that carries a credential instead of withholding the analysis", async () => {
+    createReviewToolMock.mockReturnValue({
+      tool: {
+        name: "submit_review",
+        label: "submit_review",
+        description: "test",
+        parameters: reviewSchema,
+        execute: vi.fn(),
+      },
+      getResult: () => ({
+        action: "review" as const,
+        result: {
+          summary: "Analyzed the upgrade.",
+          comments: [
+            {
+              file: "src/app.ts",
+              line: 3,
+              side: "RIGHT" as const,
+              severity: "WARN" as const,
+              body: "This call site may need updating.",
+            },
+          ],
+          research: [
+            {
+              id,
+              status: "unverified" as const,
+              reason:
+                "the page showed eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U",
+            },
+          ],
+        },
+      }),
+    });
+    AgentMock.mockImplementation(function () {
+      return makeFakeAgent("") as never;
+    });
+
+    await review({
+      cwd: "/repo",
+      output: "comment",
+      repo: "owner/repo",
+      githubToken: "token",
+      profile,
+      dependencyAnchors: anchors,
+    });
+
+    const call = sendOutputMock.mock.calls.at(-1)![0];
+    const result = call.structuredResult as ReviewResult;
+    // The model's own finding is untouched: only the model-authored reason is
+    // replaced, so the analysis the run paid for is still published.
+    expect(result.comments).toHaveLength(1);
+    expect(result.summary).toBe("Analyzed the upgrade.");
+    expect(call.coverageWarnings).toEqual([
+      expect.objectContaining({
+        body: expect.stringContaining("withheld: the text carried a credential-shaped value"),
+      }),
+    ]);
+    expect(call.coverageWarnings![0]!.body).not.toContain("eyJhbGciOiJIUzI1NiJ9");
+  });
+
+  it("turns a none decision into a review the check can report on", async () => {
+    createReviewToolMock.mockReturnValue({
+      tool: {
+        name: "submit_review",
+        label: "submit_review",
+        description: "test",
+        parameters: reviewSchema,
+        execute: vi.fn(),
+      },
+      getResult: () => ({
+        action: "none" as const,
+        research: [{ id, status: "researched" as const, source: `candidate:${id}-1` }],
+      }),
+    });
+    AgentMock.mockImplementation(function () {
+      return makeFakeAgent("") as never;
+    });
+
+    await review({
+      cwd: "/repo",
+      output: "comment",
+      repo: "owner/repo",
+      githubToken: "token",
+      profile,
+      dependencyAnchors: anchors,
+    });
+
+    const call = sendOutputMock.mock.calls.at(-1)![0];
+    expect(call.none).toBeUndefined();
+    const result = call.structuredResult as ReviewResult;
+    // The harness owns the wording: a model that did not follow the contract
+    // must not be recorded as one that found nothing.
+    expect(result.summary).toContain("did not publish a review of its own");
+    expect(result.research).toEqual([{ id, status: "researched", source: `candidate:${id}-1` }]);
+  });
+
+  it("withholds a body that carries a credential-shaped value", async () => {
+    createReviewToolMock.mockReturnValue({
+      tool: {
+        name: "submit_review",
+        label: "submit_review",
+        description: "test",
+        parameters: reviewSchema,
+        execute: vi.fn(),
+      },
+      getResult: () => ({
+        action: "review" as const,
+        result: {
+          summary: "The notes were fetched with AKIAIOSFODNN7EXAMPLE.",
+          comments: [
+            {
+              file: "src/auth.ts",
+              line: 1,
+              side: "RIGHT" as const,
+              severity: "CRITICAL" as const,
+              body: "The migration guide showed this token.",
+            },
+          ],
+          research: [{ id, status: "researched" as const, source: `candidate:${id}-1` }],
+        },
+      }),
+    });
+    AgentMock.mockImplementation(function () {
+      return makeFakeAgent("") as never;
+    });
+
+    const outcome = await review({
+      cwd: "/repo",
+      output: "comment",
+      repo: "owner/repo",
+      githubToken: "token",
+      profile,
+      dependencyAnchors: anchors,
+    });
+
+    const call = sendOutputMock.mock.calls.at(-1)![0];
+    const result = call.structuredResult as ReviewResult;
+    expect(result.summary).toContain("withheld");
+    expect(result.summary).not.toContain("AKIAIOSFODNN7EXAMPLE");
+    expect(result.comments).toEqual([]);
+    // The dispositions survive: the coverage the check reports is the
+    // harness's, not the withheld text.
+    expect(result.research).toEqual([{ id, status: "researched", source: `candidate:${id}-1` }]);
+    expect(outcome.kind).toBe("published");
+  });
+
+  it("states that a resolved candidate is untrusted data, never instructions", async () => {
+    const outcome = await review({ cwd: "/repo", profile });
+
+    expect(outcome.kind).toBe("published");
+    const prompt = agentState().systemPrompt;
+    expect(prompt).toContain("<dependency_policy>");
+    expect(prompt).toContain("untrusted external content");
+    // The code profile carries no dependency policy.
+    AgentMock.mockClear();
+    await review({ cwd: "/repo" });
+    expect(agentState().systemPrompt).not.toContain("<dependency_policy>");
   });
 });
 

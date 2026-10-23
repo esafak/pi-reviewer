@@ -45,8 +45,8 @@ export interface FilterResult {
   skippedFiles?: string[];
 }
 
-function isNoise(filePath: string): boolean {
-  return NOISE_PATTERNS.some((re) => re.test(filePath));
+function isNoise(filePath: string, patterns: readonly RegExp[]): boolean {
+  return patterns.some((re) => re.test(filePath));
 }
 
 function parseFilePath(header: string): string | null {
@@ -66,8 +66,15 @@ export interface StrippedDiff {
  * filtering is deliberately skip-and-continue rather than a strict prefix,
  * so the final selection is not monotonic in the cap — never derive context
  * from an intermediate capped pass.
+ *
+ * The caller supplies the noise list: the review mode uses the shared
+ * `NOISE_PATTERNS` unchanged, and the dependency mode adds the lockfiles whose
+ * churn would otherwise crowd out the manifest change it is analyzing.
  */
-export function stripNoiseFiles(raw: string): StrippedDiff {
+export function stripNoiseFiles(
+  raw: string,
+  patterns: readonly RegExp[] = NOISE_PATTERNS,
+): StrippedDiff {
   const sections = raw.split(/(?=^diff --git )/m).filter((s) => s.trim());
 
   const kept: string[] = [];
@@ -76,7 +83,7 @@ export function stripNoiseFiles(raw: string): StrippedDiff {
   for (const section of sections) {
     const firstLine = section.split("\n")[0];
     const filePath = parseFilePath(firstLine);
-    if (filePath && isNoise(filePath)) {
+    if (filePath && isNoise(filePath, patterns)) {
       excluded.push(filePath);
     } else {
       kept.push(section);
@@ -86,8 +93,12 @@ export function stripNoiseFiles(raw: string): StrippedDiff {
   return { kept, excluded };
 }
 
-export function filterDiff(raw: string, maxChars = DEFAULT_MAX_CHARS): FilterResult {
-  const { kept, excluded } = stripNoiseFiles(raw);
+export function filterDiff(
+  raw: string,
+  maxChars = DEFAULT_MAX_CHARS,
+  patterns: readonly RegExp[] = NOISE_PATTERNS,
+): FilterResult {
+  const { kept, excluded } = stripNoiseFiles(raw, patterns);
 
   const warnings: string[] = [];
 

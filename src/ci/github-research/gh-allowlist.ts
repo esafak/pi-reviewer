@@ -226,11 +226,60 @@ const mutationFlags = new Set([
   "-f",
   "-F",
 ]);
+/**
+ * The characters the release's notes may take.
+ *
+ * The bound is applied inside the projection, so the projected result is what
+ * the transport receives, and it has to fit the transport's per-result byte
+ * cap. A character costs up to six bytes once JSON escapes it, so the bound
+ * and the metadata's own bounds together stay inside the cap.
+ */
+export const MAX_RELEASE_BODY_CHARS = 750;
+
+/** The characters the release's tag may take. */
+export const MAX_RELEASE_TAG_CHARS = 40;
+
+/** The characters the release's name may take. */
+export const MAX_RELEASE_NAME_CHARS = 100;
+
+/** The characters the release's page URL may take. */
+export const MAX_RELEASE_URL_CHARS = 150;
+
+/** The characters the release's publication date may take. */
+export const MAX_RELEASE_PUBLISHED_CHARS = 30;
+
+/** The characters the release's metadata may take beside the bounded body. */
+export const RELEASE_METADATA_CHARS =
+  MAX_RELEASE_TAG_CHARS +
+  MAX_RELEASE_NAME_CHARS +
+  MAX_RELEASE_URL_CHARS +
+  MAX_RELEASE_PUBLISHED_CHARS;
+
+/**
+ * The individual release read's projection.
+ *
+ * The notes are bounded inside the projection, so the truncated result is
+ * what the transport receives. The metadata is not shortened: a field that
+ * does not fit is null, because a shortened title is a different title and a
+ * shortened URL is a different document.
+ */
+export const RELEASE_JQ_EXPRESSION = `{${[
+  `tagName:(if ((.tag_name // "")[0:${MAX_RELEASE_TAG_CHARS}] == (.tag_name // "")) then .tag_name else null end)`,
+  `name:(if ((.name // "")[0:${MAX_RELEASE_NAME_CHARS}] == (.name // "")) then .name else null end)`,
+  "isDraft:.draft",
+  `url:(if ((.html_url // "")[0:${MAX_RELEASE_URL_CHARS}] == (.html_url // "")) then .html_url else null end)`,
+  `publishedAt:(if ((.published_at // "")[0:${MAX_RELEASE_PUBLISHED_CHARS}] == (.published_at // "")) then .published_at else null end)`,
+  `body:((.body // "")[0:${MAX_RELEASE_BODY_CHARS}])`,
+  `bodyTruncated:(((.body // "")[${MAX_RELEASE_BODY_CHARS}:${MAX_RELEASE_BODY_CHARS + 1}]) != "")`,
+].join(",")}}`;
+
 const jqExpressions = new Set([
   ".private",
   "{path:.path,url:.html_url,content:.content}",
   "{id,name,state,path,url,html_url}",
-  "{tagName:.tag_name,name,isDraft:.draft,url:.html_url,publishedAt:.published_at}",
+  // The individual release read carries the release's notes, bounded inside
+  // the projection so the truncated result is what the transport receives.
+  RELEASE_JQ_EXPRESSION,
   "{number,title,body,html_url,created_at,updated_at,category:.category.name,user:.user.login}",
 ]);
 

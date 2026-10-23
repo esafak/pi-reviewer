@@ -32,9 +32,9 @@ export const MAX_GH_RESULT_BYTES = 7 * 1024,
   MAX_GH_TOTAL_BYTES = 15 * 1024,
   MAX_GH_REQUESTS = 8,
   GH_TIMEOUT_MS = 5000,
-  GH_WALL_MS = 15000;
+  GH_WAIT_MS = 15000;
 // File downloads are cached for repeated greps; the raw payload never reaches
-// the model, so it observes a higher ceiling while request and wall-clock
+// the model, so it observes a higher ceiling while the request and wait-time
 // budgets still apply. Grep output stays within the per-result budget.
 export const MAX_GH_FILE_BYTES = 1024 * 1024;
 export function safeGhFailure(error: unknown): string {
@@ -48,7 +48,7 @@ export interface GhRunnerOptions {
   /** Dispatched subprocess attempts allowed per runner. */
   maxRequests?: number;
   /** Cumulative subprocess wait time allowed, in milliseconds. */
-  wallMs?: number;
+  waitMs?: number;
   /** Per-subprocess timeout, in milliseconds. */
   timeoutMs?: number;
   /** Monotonic clock, injectable so tests can drive the budget. */
@@ -63,12 +63,12 @@ function assertLimit(name: string, value: number): void {
 }
 export function createGhRunner(token: string, run = exec, options: GhRunnerOptions = {}) {
   const maxRequests = options.maxRequests ?? MAX_GH_REQUESTS;
-  const wallMs = options.wallMs ?? GH_WALL_MS;
+  const waitMs = options.waitMs ?? GH_WAIT_MS;
   const timeoutMs = options.timeoutMs ?? GH_TIMEOUT_MS;
   const now = options.now ?? (() => performance.now());
   const cwd = options.cwd;
   assertLimit("maxRequests", maxRequests);
-  assertLimit("wallMs", wallMs);
+  assertLimit("waitMs", waitMs);
   assertLimit("timeoutMs", timeoutMs);
   // The request count, the elapsed-time accounting, and the aggregate byte
   // budget are shared state, so subprocesses are dispatched one at a time:
@@ -84,7 +84,7 @@ export function createGhRunner(token: string, run = exec, options: GhRunnerOptio
     // subprocess is dispatched, so a rejected call spends neither an attempt
     // nor any of the time allowance.
     if (attempts >= maxRequests) throw new Error("gh request budget exhausted");
-    const allowance = Math.floor(Math.min(timeoutMs, wallMs - waited));
+    const allowance = Math.floor(Math.min(timeoutMs, waitMs - waited));
     // The clock is fractional and the subprocess timeout must be an integer;
     // a timeout of 0 would disable the timeout rather than expire it.
     if (allowance < 1) throw new Error("GitHub research time budget exhausted for this review");

@@ -7,6 +7,7 @@ import {
   parseAgentResponse,
   parseAgentResponseWithStatus,
   normalizeFinding,
+  normalizeReviewResult,
   reconcileFindingUpdates,
   renderPrSummary,
   stripPrSummaryBlock,
@@ -15,6 +16,7 @@ import {
   sendOutput,
 } from "../../src/core/output.js";
 import { decodeBatchMarker } from "../../src/ci/batch.js";
+import type { AiFixContext } from "../../src/core/ai-fix-footer.js";
 import {
   bodyFindingId,
   decodeBodyFindingMarkers,
@@ -1232,7 +1234,7 @@ describe("sendOutput", () => {
   });
 
   it("renders summary and Fixit payloads independently from canonical prose", () => {
-    const context = { file: "src/a.ts", line: 2, side: "RIGHT", severity: "WARN" };
+    const context: AiFixContext = { file: "src/a.ts", line: 2, side: "RIGHT", severity: "WARN" };
     const body = "Check this:\n\n```ts\nreturn value;\n```";
     expect(renderFindingSummary(context, body)).toBe(
       "🟡 **`src/a.ts:2 · RIGHT`**\n\nCheck this:\n\n```ts\nreturn value;\n```",
@@ -2384,6 +2386,7 @@ printf("first\\nsecond")
 
   it("replaces the summary block in place while preserving lifecycle markers", () => {
     const marker = encodeBatchMarker({
+      mode: "review",
       fromSha: "base",
       toSha: "head",
       kind: "opened",
@@ -2431,6 +2434,7 @@ printf("first\\nsecond")
 
   it("inserts the summary block after a marker-only body", () => {
     const marker = encodeBatchMarker({
+      mode: "review",
       fromSha: "base",
       toSha: "head",
       kind: "opened",
@@ -4194,5 +4198,269 @@ describe("sendOutput skipped-diff notice", () => {
     const body = JSON.parse((fetchMock.mock.calls[0][1] as { body: string }).body).body as string;
     expect(body).toContain("> [!WARNING]");
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/reactions"))).toBe(false);
+  });
+});
+
+describe("normalizeReviewResult — the research dispositions", () => {
+  it("carries the dispositions through", () => {
+    const research = [
+      { id: "u-abc123", status: "researched" as const, source: "candidate:u-abc123-1" },
+    ];
+
+    const normalized = normalizeReviewResult(
+      { summary: "React 19 removes the legacy render API.", comments: [], research },
+      { minSeverity: "INFO" },
+      false,
+    );
+
+    expect(normalized.research).toEqual(research);
+  });
+
+  it("leaves a review without dispositions alone", () => {
+    const normalized = normalizeReviewResult(
+      { summary: "LGTM", comments: [] },
+      { minSeverity: "INFO" },
+      false,
+    );
+
+    expect(normalized.research).toBeUndefined();
+  });
+});
+
+describe("sendOutput — the research dispositions", () => {
+  it("carries the dispositions a review reported", async () => {
+    const research = [
+      { id: "u-abc123", status: "researched" as const, source: "candidate:u-abc123-1" },
+    ];
+
+    const metadata = await sendOutput({
+      target: "terminal",
+      structuredResult: {
+        summary: "React 19 removes the legacy render API.",
+        comments: [],
+        research,
+      },
+    });
+
+    expect(metadata.research).toEqual(research);
+  });
+
+  it("carries the dispositions a none decision reported", async () => {
+    const research = [
+      { id: "u-abc123", status: "unverified" as const, reason: "the notes were gone" },
+    ];
+
+    const metadata = await sendOutput({ target: "terminal", none: true, research });
+
+    expect(metadata.research).toEqual(research);
+  });
+
+  it("bounds the dispositions it publishes", () => {
+    const normalized = normalizeReviewResult(
+      {
+        summary: "React 19 removes the legacy render API.",
+        comments: [],
+        research: [{ id: "  u-abc123  ", status: "unverified", reason: `  ${"x".repeat(5000)}  ` }],
+      },
+      { minSeverity: "INFO" },
+      false,
+    );
+
+    expect(normalized.research?.[0]?.id).toBe("u-abc123");
+    expect(normalized.research?.[0]?.status).toBe("unverified");
+    const reason = normalized.research?.[0];
+    expect(reason && "reason" in reason ? reason.reason.length : 0).toBe(2000);
+  });
+
+  it("publishes the bounded dispositions, not the raw ones", async () => {
+    // The copy that leaves the layer is the bounded one: the harness
+    // matches an upgrade id exactly, so a padded id would be a gap.
+    const metadata = await sendOutput({
+      target: "terminal",
+      structuredResult: {
+        summary: "React 19 removes the legacy render API.",
+        comments: [],
+        research: [{ id: "  u-abc123  ", status: "unverified", reason: `  ${"x".repeat(5000)}  ` }],
+      },
+    });
+
+    const entry = metadata.research?.[0];
+    expect(entry?.id).toBe("u-abc123");
+    expect(entry && "reason" in entry ? entry.reason.length : 0).toBe(2000);
+  });
+
+  it("drops a disposition that names no upgrade", async () => {
+    const metadata = await sendOutput({
+      target: "terminal",
+      none: true,
+      research: [{ id: "   ", status: "unverified", reason: "the notes were gone" }],
+    });
+
+    expect(metadata.research).toBeUndefined();
+  });
+
+  it("drops a disposition whose source is empty", async () => {
+    const metadata = await sendOutput({
+      target: "terminal",
+      none: true,
+      research: [{ id: "u-abc123", status: "researched", source: "   " }],
+    });
+
+    expect(metadata.research).toBeUndefined();
+  });
+});
+
+/**
+ * The dependency mode's harness-owned findings.
+ *
+ * The mode's contract is that a coverage gap survives the severity filter and
+ * that the analysis always posts a body: a finding a threshold hides, or a
+ * body a findings-free run does not post, would silently narrow what the
+ * check reports.
+ */
+describe("sendOutput coverage warnings", () => {
+  const DIFF = [
+    "diff --git a/package.json b/package.json",
+    "index 1234567..89abcde 100644",
+    "--- a/package.json",
+    "+++ b/package.json",
+    "@@ -1,3 +1,3 @@",
+    " {",
+    '-  "foo": "^1.0.0"',
+    '+  "foo": "^2.0.0"',
+    " }",
+    "",
+  ].join("\n");
+
+  it("publishes a coverage warning the severity filter would hide", async () => {
+    const fetchMock = okFetch();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const metadata = await sendOutput({
+      target: "comment",
+      structuredResult: { summary: "Nothing to report", comments: [] },
+      minSeverity: "CRITICAL",
+      commitId: "head",
+      diff: DIFF,
+      coverageWarnings: [
+        {
+          file: "package.json",
+          line: 2,
+          side: "RIGHT",
+          severity: "WARN",
+          body: "The harness could not verify the breaking changes for foo.",
+        },
+      ],
+      githubToken: "token123",
+      prNumber: 42,
+      repo: "owner/repo",
+    });
+
+    const posted = JSON.parse((fetchMock.mock.calls[0][1] as { body: string }).body) as {
+      comments: Array<{ body: string }>;
+    };
+    expect(posted.comments).toHaveLength(1);
+    expect(posted.comments[0]!.body).toContain(
+      "The harness could not verify the breaking changes for foo.",
+    );
+    expect(metadata.findings).toEqual([
+      {
+        file: "package.json",
+        line: 2,
+        side: "RIGHT",
+        severity: "WARN",
+        body: "The harness could not verify the breaking changes for foo.",
+      },
+    ]);
+  });
+
+  it("publishes a positionless coverage warning in the review body", async () => {
+    const fetchMock = okFetch();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const metadata = await sendOutput({
+      target: "comment",
+      structuredResult: { summary: "Nothing to report", comments: [] },
+      requireBody: true,
+      commitId: "head",
+      diff: DIFF,
+      coverageWarnings: [
+        { severity: "WARN", body: "The harness could not verify upgrade u-abc123." },
+      ],
+      githubToken: "token123",
+      prNumber: 42,
+      repo: "owner/repo",
+    });
+
+    const body = JSON.parse((fetchMock.mock.calls[0][1] as { body: string }).body).body as string;
+    expect(body).toContain("### Coverage warnings");
+    expect(body).toContain("The harness could not verify upgrade u-abc123.");
+    expect(metadata.findings).toEqual([
+      { severity: "WARN", body: "The harness could not verify upgrade u-abc123." },
+    ]);
+  });
+
+  it("posts a review body for a findings-free run the dependency mode requires it for", async () => {
+    const fetchMock = okFetch();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const metadata = await sendOutput({
+      target: "comment",
+      structuredResult: { summary: "No breaking change in react.", comments: [] },
+      requireBody: true,
+      commitId: "head",
+      diff: DIFF,
+      githubToken: "token123",
+      prNumber: 42,
+      repo: "owner/repo",
+    });
+
+    // The review API, not a reaction: the analysis itself is the deliverable.
+    expect(String(fetchMock.mock.calls[0][0])).toContain("/pulls/42/reviews");
+    const body = JSON.parse((fetchMock.mock.calls[0][1] as { body: string }).body).body as string;
+    expect(body).toContain("No breaking change in react.");
+    expect(metadata.findings).toEqual([]);
+  });
+
+  it("renders a positionless coverage warning in the issue-comment fallback", async () => {
+    const fetchMock = okFetch();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await sendOutput({
+      target: "comment",
+      structuredResult: { summary: "Nothing to report", comments: [] },
+      requireBody: true,
+      diff: DIFF,
+      coverageWarnings: [
+        { severity: "WARN", body: "The harness could not verify upgrade u-abc123." },
+      ],
+      githubToken: "token123",
+      prNumber: 42,
+      repo: "owner/repo",
+    });
+
+    // Without a commit to post a review against, the body is an issue comment,
+    // and the coverage the check run would annotate has to travel with it.
+    expect(String(fetchMock.mock.calls[0][0])).toContain("/issues/42/comments");
+    const body = JSON.parse((fetchMock.mock.calls[0][1] as { body: string }).body).body as string;
+    expect(body).toContain("### Coverage warnings");
+    expect(body).toContain("The harness could not verify upgrade u-abc123.");
+  });
+
+  it("keeps acknowledging a findings-free review the mode did not ask for", async () => {
+    const fetchMock = okFetch();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await sendOutput({
+      target: "comment",
+      structuredResult: { summary: "LGTM", comments: [] },
+      diff: DIFF,
+      githubToken: "token123",
+      prNumber: 42,
+      repo: "owner/repo",
+    });
+
+    const urls = fetchMock.mock.calls.map(([url]) => String(url));
+    expect(urls.some((url) => url.includes("/issues/42/reactions"))).toBe(true);
   });
 });
