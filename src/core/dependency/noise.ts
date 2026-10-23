@@ -37,8 +37,3 @@ export const DEPENDENCY_NOISE_PATTERNS: readonly RegExp[] = [
   ...NOISE_PATTERNS,
   ...DEPENDENCY_LOCKFILE_PATTERNS,
 ];
-
-/** Whether a path is a file the dependency mode filters out. */
-export function isDependencyNoise(path: string): boolean {
-  return DEPENDENCY_NOISE_PATTERNS.some((pattern) => pattern.test(path));
-}

@@ -370,7 +370,9 @@ const requirements: FormatSpec = {
   category: "library",
   matches: (path) => {
     const name = path.split("/").pop() ?? path;
-    return /^requirements.*\.txt$/.test(name) || path.startsWith("requirements/");
+    // The directory form is a convention for requirements files, not for every
+    // file under it: a README there is not a requirements manifest.
+    return /^requirements.*\.txt$/.test(name) || /^requirements\/.*\.txt$/.test(path);
   },
   parse(text) {
     const records: DependencyRecord[] = [];
@@ -821,9 +823,17 @@ const MISE_BACKENDS: ReadonlyMap<string, PackageRegistry> = new Map([
 
 /** Whether a path names a mise configuration. */
 function isMiseConfig(path: string): boolean {
-  if (path === "mise.toml" || path === ".mise.toml" || path === "mise.local.toml") return true;
   if (path === ".config/mise/config.toml" || path === ".config/mise/config.local.toml") return true;
-  return path.endsWith("/mise.toml") || path.endsWith("/.mise.toml");
+  // A monorepo keeps a config beside each project, so the three project-level
+  // names are matched at any depth — not just at the root.
+  return (
+    path === "mise.toml" ||
+    path === ".mise.toml" ||
+    path === "mise.local.toml" ||
+    path.endsWith("/mise.toml") ||
+    path.endsWith("/.mise.toml") ||
+    path.endsWith("/mise.local.toml")
+  );
 }
 
 /**

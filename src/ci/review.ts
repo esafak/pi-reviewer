@@ -15,10 +15,12 @@ import { loadContext, mergeContextFiles } from "../core/context.js";
 import { resolveRawDiff, extractDiffFiles } from "../core/diff-resolver.js";
 import {
   filterDiff,
+  NOISE_PATTERNS,
   resolveExplicitMaxDiffChars,
   resolveMaxDiffChars,
   stripNoiseFiles,
 } from "../core/diff-filter.js";
+import { DEPENDENCY_NOISE_PATTERNS } from "../core/dependency/noise.js";
 import { loadDocContext } from "../core/doc-context.js";
 import { loadSkillContext, resolveSkillDirs } from "../core/skill-context.js";
 import {
@@ -897,7 +899,12 @@ function prepareDependencyDecision(
 ): DependencyDecisionPreparation {
   const reported =
     decision.action === "review" ? (decision.result.research ?? []) : (decision.research ?? []);
-  const accounting = accountForUpgrades(profile.changes, profile.resolutions, reported);
+  const accounting = accountForUpgrades(
+    profile.changes,
+    profile.resolutions,
+    reported,
+    profile.omitted,
+  );
   if (accounting.diagnostics.length > 0) {
     log.warn(
       "dependency.report.discarded",
@@ -1028,8 +1035,14 @@ export async function review(options: ReviewOptions): Promise<ReviewOutcome> {
   // than prefixing, so context must never come from an intermediate capped
   // pass; the final filter below only runs once the prompt is measured.
   const explicitMaxDiffChars = resolveExplicitMaxDiffChars(options.maxDiffChars);
+  // The review mode keeps the shared list byte for byte; the dependency mode
+  // adds the lockfiles whose churn would otherwise crowd the manifest change
+  // out of the model's diff — and the context set must agree with that filter,
+  // or context would describe files the model was never shown.
+  const noisePatterns =
+    options.profile?.kind === "dependency" ? DEPENDENCY_NOISE_PATTERNS : NOISE_PATTERNS;
 
-  const diffFiles = extractDiffFiles(stripNoiseFiles(rawDiff).kept.join(""));
+  const diffFiles = extractDiffFiles(stripNoiseFiles(rawDiff, noisePatterns).kept.join(""));
   // One server per language: the candidates of a group are alternatives, and
   // the installed one that covers the most changed files serves the language.
   // Custom config-file servers run exactly as configured.
@@ -1345,7 +1358,7 @@ export async function review(options: ReviewOptions): Promise<ReviewOutcome> {
     model: options.model ?? process.env.PI_REVIEWER_MODEL,
     nonDiffChars: effectiveSystemPrompt.length,
   });
-  const { diff, warning, skippedFiles } = filterDiff(rawDiff, maxDiffChars);
+  const { diff, warning, skippedFiles } = filterDiff(rawDiff, maxDiffChars, noisePatterns);
   const skippedDiff =
     skippedFiles && skippedFiles.length > 0
       ? {

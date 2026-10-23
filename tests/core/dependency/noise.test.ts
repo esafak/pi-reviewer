@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import { NOISE_PATTERNS } from "../../../src/core/diff-filter.js";
-import { isDependencyNoise } from "../../../src/core/dependency/noise.js";
+import { DEPENDENCY_NOISE_PATTERNS } from "../../../src/core/dependency/noise.js";
+
+/** Whether the dependency mode's list filters a path out. */
+function isDependencyNoise(path: string): boolean {
+  return DEPENDENCY_NOISE_PATTERNS.some((pattern) => pattern.test(path));
+}
 
 describe("the dependency mode's noise list", () => {
   it("keeps the shared list", () => {

@@ -5,7 +5,7 @@ import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
-import { runDependencyCheck } from "../../src/ci/dependency-check.js";
+import { renderDependencySummary, runDependencyCheck } from "../../src/ci/dependency-check.js";
 import { resolveUpstreams } from "../../src/ci/dependency/resolve.js";
 import { review, type ReviewOutcome } from "../../src/ci/review.js";
 import { encodeBatchMarker } from "../../src/ci/batch.js";
@@ -375,5 +375,23 @@ describe("runDependencyCheck", () => {
 
     expect(reviewMock).not.toHaveBeenCalled();
     expect(result.summary).toContain("a patch change, below the threshold");
+  });
+});
+
+describe("renderDependencySummary", () => {
+  it("states what researched means and why an upgrade was left out", () => {
+    const summary = renderDependencySummary({
+      detection: { changes: [], unsupported: [], warnings: [] },
+      analyzed: [],
+      skipped: [],
+      accounting: { accounts: [], diagnostics: [] },
+      omitted: 2,
+    });
+
+    expect(summary).toContain("Reported researched: 0. Unverifiable: 0.");
+    // The check run is where branch protection looks; the guarantee has to be
+    // on that surface, not only in the review body and the docs.
+    expect(summary).toContain("*Researched* is the model's claim");
+    expect(summary).toContain("did not carry 2 upgrades");
   });
 });

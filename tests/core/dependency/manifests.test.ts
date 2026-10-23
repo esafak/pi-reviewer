@@ -13,6 +13,7 @@ describe("manifestFormat", () => {
     expect(manifestFormat("apps/web/package.json")).toBe("package.json");
     expect(manifestFormat("requirements.txt")).toBe("requirements");
     expect(manifestFormat("requirements/dev.txt")).toBe("requirements");
+    expect(manifestFormat("requirements/README.md")).toBeUndefined();
     expect(manifestFormat("pyproject.toml")).toBe("pyproject");
     expect(manifestFormat("pom.xml")).toBe("pom.xml");
     expect(manifestFormat("Cargo.toml")).toBe("Cargo.toml");

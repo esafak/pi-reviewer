@@ -1,6 +1,6 @@
 import type { DependencyChange } from "./dependency/types.js";
 import { upgradeId } from "./dependency/upgrade-id.js";
-import { dependencyUpgradeSet } from "./dependency/prompt-section.js";
+import { dependencyUpgradeSet, type OmittedUpgrade } from "./dependency/prompt-section.js";
 import type { UpstreamResolution } from "../ci/dependency/resolve.js";
 
 /**
@@ -16,7 +16,18 @@ import type { UpstreamResolution } from "../ci/dependency/resolve.js";
  */
 export type ReviewProfile =
   | { kind: "code" }
-  | { kind: "dependency"; changes: DependencyChange[]; resolutions: UpstreamResolution[] };
+  | {
+      kind: "dependency";
+      changes: DependencyChange[];
+      resolutions: UpstreamResolution[];
+      /**
+       * The upgrades the section could not carry, and why the report says so.
+       *
+       * Absent means the section carried every upgrade, which is what a
+       * profile built outside the section builder describes.
+       */
+      omitted?: OmittedUpgrade[];
+    };
 
 /** The profile that reviews a diff. */
 export type CodeProfile = Extract<ReviewProfile, { kind: "code" }>;
@@ -61,6 +72,7 @@ export function buildDependencyProfile(
   return {
     kind: "dependency",
     changes: changes.filter((change) => !unreadable.has(upgradeId(change))),
+    omitted: set.omitted,
     resolutions: resolutions.map((resolution) => {
       const reason = reasons.get(resolution.id);
       if (reason === undefined) return resolution;

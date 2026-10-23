@@ -235,14 +235,27 @@ disposition belongs to, that a cited remote location is one it resolved, and
 that none is missing; it cannot verify the notes were read, so *researched* is
 the model's claim.
 
+The prompt carries at most 100 upgrades (and a byte budget). Anything past that
+is reported as not carried, not as the model's omission, so a very large bump
+PR does not look like a model that ignored its instructions.
+
 This is research, not a build: an upgrade whose notes cannot be found or reached
 is a `WARN`, never a failure. A finding on that upgrade's own line is withdrawn,
 since the notes were what would ground it; a finding elsewhere cannot be related
 to an upgrade at all.
 
-GitHub upstreams are read with `github_read`. Everything else needs
-`url-reader: 'true'` — off by default because it is the only tool that can reach
-an arbitrary host. Without it, non-GitHub upgrades report as unverifiable.
+GitHub upstreams are read with `github_read`, and a release read returns at
+most 750 characters of notes with a truncation flag — enough to judge the
+headline change, and the model reads `CHANGELOG.md` for detail. Everything else
+needs `url-reader: 'true'` — off by default because it is the only tool that can
+reach an arbitrary host. Without it, non-GitHub upgrades report as unverifiable.
+
+The harness withholds the whole review body if it carries a credential-shaped
+value (an API key, a token, a private key, a JWT): the dispositions survive —
+the check summary still reports every upgrade, and the unverifiable ones remain
+coverage warnings — and its coverage section records what was analyzed. The
+scan is narrow and reduces the risk of a fetched page's text reaching a public
+comment; it does not eliminate it.
 
 Each run analyzes the whole pull request and creates a fresh check run; there is
 no incremental range and no reconciliation of earlier findings. `/pi-summary` is

@@ -467,6 +467,37 @@ describe("review", () => {
     expect(prompt).toContain("drop.ts");
   });
 
+  it("drops dependency lockfiles from the dependency mode's diff only", async () => {
+    const manifest =
+      'diff --git a/package.json b/package.json\n--- a/package.json\n+++ b/package.json\n@@ -1 +1 @@\n-"react": "^18.0.0"\n+"react": "^19.0.0"\n';
+    const lockfile =
+      "diff --git a/uv.lock b/uv.lock\n--- a/uv.lock\n+++ b/uv.lock\n@@ -1 +1 @@\n+version = 1\n";
+    resolveRawDiffMock.mockResolvedValue({
+      raw: manifest + lockfile,
+      source: "s",
+      changedFiles: [],
+    });
+    const dependency = createMemorySink();
+    await review({
+      cwd: "/repo",
+      dryRun: true,
+      profile: { kind: "dependency", changes: [], resolutions: [] },
+      logger: createLogger({ sink: dependency.sink }),
+    });
+    const dependencyPrompt = dependency.records.find(
+      ({ event }) => event === "review.dry_run.user_prompt",
+    )?.fields.prompt as string;
+    expect(dependencyPrompt).toContain("package.json");
+    expect(dependencyPrompt).not.toContain("uv.lock");
+
+    // The review mode's own list is unchanged: the same lockfile is reviewed.
+    const code = createMemorySink();
+    await review({ cwd: "/repo", dryRun: true, logger: createLogger({ sink: code.sink }) });
+    const codePrompt = code.records.find(({ event }) => event === "review.dry_run.user_prompt")
+      ?.fields.prompt as string;
+    expect(codePrompt).toContain("uv.lock");
+  });
+
   it("loads default skills into the dry-run system prompt", async () => {
     const { sink, records } = createMemorySink();
     resolveRawDiffMock.mockResolvedValue({

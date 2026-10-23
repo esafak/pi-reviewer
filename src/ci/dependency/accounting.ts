@@ -16,6 +16,7 @@
  */
 
 import type { DependencyChange } from "../../core/dependency/types.js";
+import type { OmittedUpgrade } from "../../core/dependency/prompt-section.js";
 import { upgradeId } from "../../core/dependency/upgrade-id.js";
 import { validateResearch, type UpgradeResearch, type UpstreamResolution } from "./resolve.js";
 
@@ -52,7 +53,11 @@ export interface DependencyAccounting {
  *    because the harness knows what it could not make reachable and a claim
  *    does not change that;
  * 2. the model reported it as unverified;
- * 3. the disposition is missing, conflicting, or invalid.
+ * 3. the disposition is missing, conflicting, or invalid. When the section
+ *    never carried the upgrade — it was past the section's count or size
+ *    bound — the reason names the harness's own limit, not the model's
+ *    silence: an upgrade the model was never shown is not a disposition it
+ *    failed to report.
  *
  * An upgrade whose values the harness could not read is not in `changes` — the
  * profile leaves it out — but its resolution is, with the reason it was
@@ -63,11 +68,13 @@ export function accountForUpgrades(
   changes: readonly DependencyChange[],
   resolutions: readonly UpstreamResolution[],
   report: readonly UpgradeResearch[],
+  omitted: readonly OmittedUpgrade[] = [],
 ): DependencyAccounting {
   const ids = changes.map(upgradeId);
   const validation = validateResearch(report, resolutions, ids);
   const accepted = new Map(validation.accepted.map((entry) => [entry.id, entry]));
   const byId = new Map(resolutions.map((resolution) => [resolution.id, resolution]));
+  const omittedReasons = new Map(omitted.map((entry) => [entry.id, entry.reason]));
 
   const accounts: UpgradeAccount[] = [];
   for (const change of changes) {
@@ -84,9 +91,13 @@ export function accountForUpgrades(
       continue;
     }
     if (!disposition) {
+      const sectionLimit = omittedReasons.get(id);
       accounts.push({
         ...base,
-        unverifiable: "the report did not account for this upgrade",
+        unverifiable:
+          sectionLimit === undefined
+            ? "the report did not account for this upgrade"
+            : `the analysis section did not carry this upgrade — ${sectionLimit}`,
       });
       continue;
     }

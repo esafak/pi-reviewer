@@ -277,7 +277,6 @@ const jqExpressions = new Set([
   ".private",
   "{path:.path,url:.html_url,content:.content}",
   "{id,name,state,path,url,html_url}",
-  "{tagName:.tag_name,name,isDraft:.draft,url:.html_url,publishedAt:.published_at}",
   // The individual release read carries the release's notes, bounded inside
   // the projection so the truncated result is what the transport receives.
   RELEASE_JQ_EXPRESSION,

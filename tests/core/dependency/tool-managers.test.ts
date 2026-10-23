@@ -8,6 +8,9 @@ describe("manifestFormat — the tool managers", () => {
     expect(manifestFormat("mise.toml")).toBe("mise.toml");
     expect(manifestFormat(".mise.toml")).toBe("mise.toml");
     expect(manifestFormat("mise.local.toml")).toBe("mise.toml");
+    expect(manifestFormat("packages/api/mise.toml")).toBe("mise.toml");
+    expect(manifestFormat("packages/api/.mise.toml")).toBe("mise.toml");
+    expect(manifestFormat("packages/api/mise.local.toml")).toBe("mise.toml");
     expect(manifestFormat(".config/mise/config.toml")).toBe("mise.toml");
     expect(manifestFormat(".tool-versions")).toBe("tool-versions");
     expect(manifestFormat("aqua.yaml")).toBe("aqua.yaml");

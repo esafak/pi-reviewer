@@ -164,13 +164,24 @@ export async function runDependencyCheck(
   // describe the same run differently.
   const accounting =
     outcome.kind === "published"
-      ? accountForUpgrades(profile.changes, profile.resolutions, reportedResearch(outcome))
+      ? accountForUpgrades(
+          profile.changes,
+          profile.resolutions,
+          reportedResearch(outcome),
+          profile.omitted,
+        )
       : undefined;
 
   return {
     findings: outcome.kind === "published" ? outcome.findings : [],
     diff: outcome.kind === "published" ? outcome.diff : raw.raw,
-    summary: renderDependencySummary({ detection, analyzed, skipped, accounting }),
+    summary: renderDependencySummary({
+      detection,
+      analyzed,
+      skipped,
+      accounting,
+      omitted: profile.omitted?.length ?? 0,
+    }),
   };
 }
 
@@ -189,6 +200,8 @@ interface DependencySummaryInput {
   analyzed: readonly DependencyChange[];
   skipped: readonly DependencyChange[];
   accounting?: DependencyAccounting;
+  /** How many upgrades the analysis section could not carry. */
+  omitted?: number;
 }
 
 /**
@@ -201,13 +214,13 @@ interface DependencySummaryInput {
  * were read.
  */
 export function renderDependencySummary(input: DependencySummaryInput): string {
-  const { detection, analyzed, skipped, accounting } = input;
+  const { detection, analyzed, skipped, accounting, omitted } = input;
   const lines: string[] = [];
   lines.push(
-    `Analyzed ${count(analyzed.length, "breaking-relevant upgrade")} in ${count(
+    `Analyzed ${count(analyzed.length, "breaking-relevant upgrade")} across ${count(
       new Set(detection.changes.map((change) => change.manifest)).size,
-      "changed manifest",
-    )}.`,
+      "manifest",
+    )} with a change.`,
   );
 
   if (accounting) {
@@ -217,10 +230,15 @@ export function renderDependencySummary(input: DependencySummaryInput): string {
     );
     lines.push(
       `Reported researched: ${researched.length}. Unverifiable: ${unverifiable.length}.`,
-      "",
-      "### Upgrades analyzed",
-      "",
+      // The guarantee is the model's own assertion; the summary says so where a
+      // reader of the check run, rather than the review, is looking.
+      "*Researched* is the model's claim: the harness checked which upgrade a citation belongs to and that it resolved the remote location, not that the notes were read.",
     );
+    if (omitted)
+      lines.push(
+        `The analysis section did not carry ${count(omitted, "upgrade")}; they are reported as unverifiable.`,
+      );
+    lines.push("", "### Upgrades analyzed", "");
     for (const account of accounting.accounts.slice(0, MAX_LISTED_ENTRIES)) {
       lines.push(`- ${describeAccount(account, resolutionOf(account.id, analyzed))}`);
     }
