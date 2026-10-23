@@ -130,6 +130,124 @@ To switch models without editing the workflow, put the full model name in a `MOD
 
 One review per eligible event, covering everything since the last marker. Markers are authenticated and stored in the review itself — not in a cache or LLM session — so a burst of pushes collapses into one correct range on the next run. Resolved findings get a `Resolved by <sha>` reply and are resolved; partially fixed ones explain what's left and stay open.
 
+## Dependency breaking-change check
+
+`mode: dependency` checks whether the upgrades a PR makes break this repository.
+Instead of reviewing the diff, it reads both ends of every changed dependency
+manifest, works out where each upgrade's release notes live, and asks the model
+what changed upstream. It posts a review — findings inline where the diff
+allows, coverage warnings on the upgrade's own line where it has one — and
+publishes a check run named `pi-reviewer/breaking-changes`.
+
+Which pull requests it checks is your workflow's `if:`. The action never
+chooses, and the review mode's `renovate[bot]` skip does not apply here: a
+Renovate bump is the point.
+
+### Setup
+
+It needs `checks: write`; `GITHUB_TOKEN` gets it from the job's `permissions:`
+block. A classic personal access token cannot write check runs — use
+`GITHUB_TOKEN` or a fine-grained token with **Checks: write**. Without the
+permission the review still posts; only the gate is missing.
+
+```yaml
+name: Pi dependency check
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+jobs:
+  dependency:
+    runs-on: ubuntu-latest
+    # The action does not choose its pull requests; this is the whole trigger.
+    if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write # Fallback when a review cannot be posted.
+      checks: write
+    concurrency:
+      # Its own group: the review job's is pi-reviewer-<repo>-<pr>.
+      group: pi-reviewer-dependency-${{ github.repository }}-${{ github.event.pull_request.number }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: esafak/pi-reviewer@v1
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          pi-api-key: ${{ secrets.PI_API_KEY }}
+          model: openai/gpt-6-luna
+          mode: dependency
+          url-reader: 'true'
+```
+
+The generated `pi-review.yml` carries an equivalent commented job. A
+`workflow_dispatch` trigger also needs a `pr-number` input and an `if:` that
+admits it; a `/pi-review` comment works if you also trigger on `issue_comment`
+and widen the `if:`. Drafts are skipped before the mode runs, so a required
+check waits on the draft until it is marked ready — or set
+`review-drafts: 'true'`.
+
+### The gate
+
+`failure` when a `CRITICAL` finding is published, `success` otherwise: `WARN`
+and `INFO` annotate the diff without failing it. An analysis that cannot
+complete fails too, rather than passing over work that did not happen. Coverage
+warnings survive `min-severity`, so `min-severity: critical` cannot hide an
+upgrade that could not be verified.
+
+**Require the check run's name, `pi-reviewer/breaking-changes`, not the job's.**
+The job succeeds whenever the action exits cleanly — even when a breaking change
+was found — so requiring the job would never gate on the analysis.
+
+### What is analyzed
+
+| Kind | Analyzed on |
+|---|---|
+| Libraries (imported by the code) | major, pre-1.0 minor (`0.x` → `0.y`) |
+| Tools and runtimes | major **and** minor (`3.11` → `3.12`) |
+
+Patch bumps, library minors past 1.0, additions, removals, downgrades and
+uncomparable constraints are listed in the check summary with a reason, never
+analyzed. So are manifests it does not read: `Podfile`, `pubspec.yaml`,
+`mix.exs`, `Package.swift`, `conanfile.*`, `MODULE.bazel`, `WORKSPACE`.
+
+Formats it does read: npm `package.json` (including `devEngines.runtime` and
+`packageManager`); PyPI `requirements*.txt` and `pyproject.toml`; Maven
+`pom.xml` and Gradle `build.gradle[.kts]`; crates `Cargo.toml`; Go `go.mod`;
+NuGet `*.csproj`, `*.fsproj`, `Directory.Packages.props`, `packages.config`;
+RubyGems `Gemfile`; Packagist `composer.json`; mise (`mise.toml` and
+`.mise.toml` at any depth, plus the `mise.local.toml` and `.config/mise/`
+variants); asdf `.tool-versions`; aqua `aqua.yaml`; and GitHub Actions
+workflows and actions.
+
+### What "researched" means
+
+Every qualifying upgrade gets a published disposition. The summary lists them
+with the accepted citation — a checkout path for a `local:` citation, the
+candidate id the analysis handed the model for a remote one — plus the
+researched and unverifiable totals. The harness checks which upgrade a
+disposition belongs to, that a cited remote location is one it resolved, and
+that none is missing; it cannot verify the notes were read, so *researched* is
+the model's claim.
+
+This is research, not a build: an upgrade whose notes cannot be found or reached
+is a `WARN`, never a failure. A finding on that upgrade's own line is withdrawn,
+since the notes were what would ground it; a finding elsewhere cannot be related
+to an upgrade at all.
+
+GitHub upstreams are read with `github_read`. Everything else needs
+`url-reader: 'true'` — off by default because it is the only tool that can reach
+an arbitrary host. Without it, non-GitHub upgrades report as unverifiable.
+
+Each run analyzes the whole pull request and creates a fresh check run; there is
+no incremental range and no reconciliation of earlier findings. `/pi-summary` is
+ignored here, and `target-head` is rejected.
+
 ## Advanced
 
 **MCP.** Prefer remote HTTP servers. Local stdio commands run from a temporary checkout of the trusted default-branch revision with no ambient env inheritance — provide only required variables in the server's explicit `env` mapping. Example config (`.github/mcp.json`):

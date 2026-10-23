@@ -88,8 +88,9 @@ jobs:
           # gh: 'false' # optional: disable gh-backed GitHub research
           # github-scope: 'public' # or 'token-accessible'; defaults to public
           # mode: 'dependency' # optional: check dependency upgrades instead of the diff.
-          #   This job skips renovate[bot] pull requests, so the dependency mode
-          #   reaches only the bumps a person made.
+          #   This job skips renovate[bot] pull requests; the commented
+          #   \`dependency\` job at the end of this file is the one that runs
+          #   for those bumps.
           # url-reader: 'true' # optional: read release notes from upstreams that are
           #   not on GitHub; off by default because it is the only tool that can
           #   reach an arbitrary host.
@@ -99,6 +100,47 @@ jobs:
           # code-exec-wall-time-budget-ms: '360000' # total exec wall-clock budget
           # code-exec-max-stream-bytes: '32768' # per-stream stdout/stderr cap
           # code-exec-image: '...' # macOS Apple Container image (pre-pulled)
+
+# Dependency breaking-change check. Uncomment the indented lines below to
+# analyze the pull request's upgrade manifests instead of the diff, and to
+# publish a \`pi-reviewer/breaking-changes\` check run. It is a separate job
+# because it must run for the pull requests the review job skips —
+# renovate[bot] above all — and because it needs \`checks: write\`.
+#
+# Require the check run's name (pi-reviewer/breaking-changes) in branch
+# protection, not this job's name: the job succeeds whenever the action
+# exits cleanly, so requiring only the job would never gate on the analysis.
+# See CI.md for the gate, the thresholds, and the supported manifests.
+#
+#   dependency:
+#     runs-on: ubuntu-latest
+#     if: \${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
+#     permissions:
+#       contents: read
+#       pull-requests: write
+#       issues: write # Required to post comments and reactions.
+#       checks: write # Required to publish the check run; a classic PAT cannot.
+#     concurrency:
+#       # Its own group: the review job's group has no job or mode component.
+#       group: pi-reviewer-dependency-\${{ github.repository }}-\${{ github.event.pull_request.number }}
+#       cancel-in-progress: false
+#     steps:
+#       - uses: actions/checkout@v4
+#         with:
+#           fetch-depth: 0
+#           persist-credentials: false
+#           ref: \${{ github.event.pull_request.head.sha || github.sha }}
+#       - uses: esafak/pi-reviewer@main
+#         with:
+#           github-token: \${{ secrets.GITHUB_TOKEN }}
+#           pi-api-key: \${{ secrets.PI_API_KEY }}
+#           model: openrouter/openai/gpt-5.4-mini
+#           mode: 'dependency'
+#           # Off by default: the bounded URL reader is the only tool that can
+#           # reach an arbitrary host. Without it only GitHub upstreams are read,
+#           # and every other upgrade is reported as unverifiable.
+#           url-reader: 'true'
+
 `;
 }
 
