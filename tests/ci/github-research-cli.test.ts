@@ -31,6 +31,17 @@ import {
 const GH_TIMEOUT_MS = 10_000;
 const UNKNOWN_FLAG = "--zzz-not-a-real-flag";
 
+/**
+ * The token the probes hand the binary.
+ *
+ * `gh` refuses to run at all inside a GitHub Actions workflow without
+ * `GH_TOKEN`, even for the local document these probes read. A placeholder
+ * keeps the contract check about the binary's projection rather than about
+ * the runner's credentials, and the probes assert that no credential reaches
+ * the local server, so the placeholder cannot leak into the request.
+ */
+const GH_PROBE_TOKEN = "gh-contract-probe";
+
 const execFileAsync = promisify(execFile);
 
 const ghAvailable = (() => {
@@ -52,7 +63,10 @@ interface Outcome {
 }
 const runGh = async (args: string[]): Promise<Outcome> => {
   try {
-    const { stdout, stderr } = await execFileAsync("gh", args, { timeout: GH_TIMEOUT_MS });
+    const { stdout, stderr } = await execFileAsync("gh", args, {
+      timeout: GH_TIMEOUT_MS,
+      env: { ...process.env, GH_TOKEN: process.env.GH_TOKEN ?? GH_PROBE_TOKEN },
+    });
     return { output: `${stdout}${stderr}`, exitCode: 0, unresponsive: false };
   } catch (error) {
     const failure = error as {
