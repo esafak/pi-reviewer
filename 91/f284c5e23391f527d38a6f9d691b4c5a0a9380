@@ -1,0 +1,18 @@
+tests/ci/dependency-check.test.ts
+  h_ea91e2db23540f 43-45,55-59
+tests/ci/dependency/detect.test.ts
+  h_ea91e2db23540f 18-20,31-35,37-41,159,203,233,364,379,418-423
+tests/ci/dependency/tools.test.ts
+  h_ea91e2db23540f 23-25,36-40,42-46
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "91f284c5e23391f527d38a6f9d691b4c5a0a9380",
+  "prompts": {},
+  "humans": {
+    "h_ea91e2db23540f": {
+      "author": "Emre Şafak <3928300+esafak@users.noreply.github.com>"
+    }
+  }
+}
