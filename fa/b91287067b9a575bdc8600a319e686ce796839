@@ -1,0 +1,38 @@
+CI.md
+  h_ea91e2db23540f 238-241,247-258
+src/ci/dependency-check.ts
+  h_ea91e2db23540f 167-172,178-184,203-204,217,220,222-223,233-235,237-241
+src/ci/dependency/accounting.ts
+  h_ea91e2db23540f 19,56-60,71,77,94,97-100
+src/ci/review.ts
+  h_ea91e2db23540f 18,23,902-907,1038-1045,1361
+src/core/dependency/manifests.ts
+  h_ea91e2db23540f 373-375,827-836
+src/core/diff-filter.ts
+  h_ea91e2db23540f 48-49,69-72,74-77,86,96-101
+src/core/review-profile.ts
+  h_ea91e2db23540f 3,19-30,75
+tests/ci/dependency-check.test.ts
+  h_ea91e2db23540f 8,380-397
+tests/ci/dependency/accounting.test.ts
+  h_ea91e2db23540f 1-64
+tests/ci/review.test.ts
+  h_ea91e2db23540f 470-500
+tests/core/dependency/manifests.test.ts
+  h_ea91e2db23540f 16
+tests/core/dependency/noise.test.ts
+  h_ea91e2db23540f 4-9
+tests/core/dependency/tool-managers.test.ts
+  h_ea91e2db23540f 11-13
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "fab91287067b9a575bdc8600a319e686ce796839",
+  "prompts": {},
+  "humans": {
+    "h_ea91e2db23540f": {
+      "author": "Emre Şafak <3928300+esafak@users.noreply.github.com>"
+    }
+  }
+}
