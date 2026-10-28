@@ -202,9 +202,11 @@ runs:
       shell: bash
       working-directory: ${{ github.action_path }}
       run: |
+        # The review executes `node` from PATH with cwd=workspace, so the node
+        # that matters is the one the consumer's cwd resolves.
         node_ready=false
         if command -v node >/dev/null 2>&1; then
-          major=$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || true)
+          major=$(cd "${{ github.workspace }}" && node -p 'process.versions.node.split(".")[0]' 2>/dev/null || true)
           case "$major" in
             ''|*[!0-9]*) ;;
             *) [ "$major" -ge 24 ] && node_ready=true ;;
@@ -347,11 +349,15 @@ runs:
     - name: Verify Node.js version
       shell: bash
       run: |
-        major=$(node -p 'process.versions.node.split(".")[0]')
-        if [ "$major" -lt 24 ]; then
-          echo "::error::pi-reviewer requires Node >= 24 (found $(node -v)). Use setup-node: true or provide Node >= 24."
-          exit 1
-        fi
+        # No working-directory: the review runs with cwd=workspace, so the
+        # node that matters is the one this cwd resolves.
+        major=$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || true)
+        case "$major" in
+          ''|*[!0-9]*) ;;
+          *) [ "$major" -ge 24 ] && exit 0 ;;
+        esac
+        echo "::error::pi-reviewer requires Node >= 24 (found $(node -v 2>/dev/null || echo unknown)). Use setup-node: true or provide Node >= 24."
+        exit 1
 
     - name: Resolve pnpm store and lockfile hash
       id: pnpm-meta
