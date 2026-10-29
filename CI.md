@@ -188,7 +188,7 @@ Mirrors [`action.yml`](./action.yml) — the action is source of truth if they d
 | `thinking` | `off` | Thinking budget: `off`, `minimal`, `low`, `medium`, `high`, `xhigh` |
 | `debug` | `false` | Log tool calls; upload thinking trace as a 1-day artifact |
 | `min-severity` | `info` | `info` reports everything, `warn` skips nits, `critical` only blockers |
-| `max-diff-chars` | model-derived (100k floor) | Explicit diff cap; whole file sections drop, never mid-hunk |
+| `max-diff-chars` | model-derived (100k floor) | Explicit diff cap; oversize comment reviews shard whole files (up to five concurrent shards) |
 | `summary` | `true` | Collapsed What/Why/Risks on the first review |
 | `doc-dirs` | off | Comma-separated dirs for matching project docs |
 | `skills-dirs` | `.pi/skills,.claude/skills,.agents/skills,skills` | Skill dirs for review guidance; `none` disables |
@@ -221,3 +221,9 @@ Mirrors [`action.yml`](./action.yml) — the action is source of truth if they d
 | `review-drafts` | `false` | Review draft PRs |
 | `setup-node` | `true` | Set up Node 24 when no compatible Node is on `PATH` |
 | `cache` | `true` | Cache the pnpm store across runs |
+
+Oversize comment reviews shard whole-file sections across up to five child processes. Allow at least 20 minutes of job time for fan-out plus posting; shard runs disable `code_exec` to prevent parallel mutation of the checkout (fit-path reviews retain it).
+
+Sharded reviews post a mechanical coverage line (`Reviewed N files across M shards…`) instead of model prose; a single in-process synth writes the PR overview afterwards (`pr_summary`, optional `pr_diagram`) from the merged findings and per-shard digests. The synth verifies claims with read-only tools, LSP when enabled, and `code_exec` — it has no search, registry, or MCP tools and cannot file findings. If synthesis fails, the review still posts findings plus the coverage line with a `review.shard.reduce.failed` warning.
+
+Operator notes for sharded runs (`review.diff.sharded` log event): `maxShards` is always 5, `cap` is the per-shard diff budget, `runs` counts started children, `abandoned` counts deadline-cut children (their files are marked `shard_limit`, retried never). Worst case wall time is roughly one shard's own worst case — model latency plus its own submit retries — plus the synth overview and a single post; five shards running concurrently share the provider's rate limits and per-key caps, so expect throttling, not speedup, under tight quotas. If overview synthesis fails, the review still posts findings with the coverage line and logs `review.shard.reduce.failed`.

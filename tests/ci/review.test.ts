@@ -37,6 +37,12 @@ vi.mock("../../src/core/output.js", async (importActual) => {
   return { ...actual, sendOutput: vi.fn() };
 });
 
+vi.mock("../../src/ci/shard-fanout.js", () => ({
+  runShardChildren: vi
+    .fn()
+    .mockResolvedValue({ envelopes: [], skipped: [], runs: 0, abandoned: 0 }),
+}));
+
 vi.mock("@earendil-works/pi-agent-core", () => ({
   Agent: vi.fn(),
 }));
@@ -54,18 +60,42 @@ vi.mock("pi-mcp-adapter", () => ({
   createMcpAdapter: vi.fn(() => () => {}),
 }));
 
-vi.mock("../../src/core/review-tool.js", () => ({
-  createReviewTool: vi.fn(() => ({
-    tool: {
-      name: "submit_review",
-      label: "submit_review",
-      description: "test",
-      parameters: {},
-      execute: vi.fn(),
-    },
-    getResult: () => undefined,
-  })),
-}));
+vi.mock("../../src/core/shard-tool.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/core/shard-tool.js")>();
+  return {
+    ...actual,
+    createShardTool: vi.fn(() => ({
+      tool: {
+        name: "submit_shard",
+        label: "submit_shard",
+        description: "test",
+        parameters: {},
+        execute: vi.fn(),
+      },
+      getResult: () => undefined,
+      nudge: "test shard nudge",
+      forcedTool: { type: "function", function: { name: "submit_shard" } },
+    })),
+    createOverviewTool: vi.fn(() => actual.createOverviewTool()),
+  };
+});
+
+vi.mock("../../src/core/review-tool.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/core/review-tool.js")>();
+  return {
+    ...actual,
+    createReviewTool: vi.fn(() => ({
+      tool: {
+        name: "submit_review",
+        label: "submit_review",
+        description: "test",
+        parameters: {},
+        execute: vi.fn(),
+      },
+      getResult: () => undefined,
+    })),
+  };
+});
 
 vi.mock("../../src/core/reply-tool.js", () => ({
   ALLOWED_REACTIONS: ["+1", "-1", "laugh", "confused", "heart", "hooray", "rocket", "eyes"],
@@ -94,7 +124,9 @@ import { loadDocContext } from "../../src/core/doc-context.js";
 import { loadSkillContext, resolveSkillDirs } from "../../src/core/skill-context.js";
 import { sendOutput } from "../../src/core/output.js";
 import { createReviewTool } from "../../src/core/review-tool.js";
+import { createOverviewTool, createShardTool } from "../../src/core/shard-tool.js";
 import { createReplyTool } from "../../src/core/reply-tool.js";
+import { runShardChildren } from "../../src/ci/shard-fanout.js";
 import type { CiMcpConfig } from "../../src/ci/mcp-config.js";
 import { LSP_TOOL_NAMES } from "../../src/ci/tool-names.js";
 import {
@@ -204,7 +236,10 @@ const createAgentSessionMock = vi.mocked(createAgentSession);
 const DefaultResourceLoaderMock = vi.mocked(DefaultResourceLoader);
 const createMcpAdapterMock = vi.mocked(createMcpAdapter);
 const createReviewToolMock = vi.mocked(createReviewTool);
+const createShardToolMock = vi.mocked(createShardTool);
+const createOverviewToolMock = vi.mocked(createOverviewTool);
 const createReplyToolMock = vi.mocked(createReplyTool);
+const runShardChildrenMock = vi.mocked(runShardChildren);
 
 let fakeAgentEvents: unknown[] = [];
 // Tool calls the fake agent really performs: the registered tool is looked up
@@ -374,6 +409,1076 @@ describe("review", () => {
     process.env.PI_REVIEWER_MODEL = "anthropic/claude-opus-4-6";
   });
 
+  it("golden fit path keeps the assembled prompts byte-identical and runs one Agent", async () => {
+    const dryRun = createMemorySink();
+    await review({ cwd: "/repo", dryRun: true, logger: createLogger({ sink: dryRun.sink }) });
+    const expectedSystem = dryRun.records.find(
+      ({ event }) => event === "review.dry_run.system_prompt",
+    )?.fields.prompt;
+    const expectedUser = dryRun.records.find(({ event }) => event === "review.dry_run.user_prompt")
+      ?.fields.prompt;
+
+    await review({ cwd: "/repo" });
+
+    expect(AgentMock).toHaveBeenCalledTimes(1);
+    const construction = AgentMock.mock.calls[0]?.[0];
+    expect(construction?.initialState?.systemPrompt).toBe(expectedSystem);
+    expect(AgentMock.mock.results[0]?.value.prompt).toHaveBeenCalledTimes(1);
+    expect(AgentMock.mock.results[0]?.value.prompt).toHaveBeenCalledWith(expectedUser);
+  });
+
+  it("merges successful shard findings and excludes failed shard files from coverage", async () => {
+    const sections = ["a", "b", "c"].map(
+      (name) =>
+        `diff --git a/${name}.ts b/${name}.ts\n--- a/${name}.ts\n+++ b/${name}.ts\n@@ -1 +1 @@\n+${name}\n`,
+    );
+    resolveRawDiffMock.mockResolvedValue({
+      raw: sections.join(""),
+      source: "test",
+      changedFiles: [],
+    });
+    runShardChildrenMock.mockImplementation(async (requests) => ({
+      envelopes: requests.slice(0, 2).map((request) => ({
+        index: request.index,
+        status: "ok",
+        decision: "review",
+        result: {
+          findings: [
+            {
+              file: request.shard.files[0] ?? "",
+              line: 1,
+              side: "RIGHT",
+              severity: "WARN",
+              body: "A meaningful finding",
+            },
+          ],
+          digest: [{ file: request.shard.files[0] ?? "", what: "covers the shard", risks: [] }],
+        },
+      })),
+      skipped: [{ path: "c.ts", reason: "shard_failed", cap: 1000 }],
+      runs: 3,
+      abandoned: 0,
+    }));
+    await review({ cwd: "/repo", output: "comment", maxDiffChars: sections[0]!.length + 1 });
+    expect(runShardChildrenMock).toHaveBeenCalledTimes(1);
+    expect(runShardChildrenMock.mock.calls[0]?.[0]?.[0]?.systemPrompt).not.toContain(
+      "<code_exec_policy>",
+    );
+    expect(runShardChildrenMock.mock.calls[0]?.[0]?.[0]?.systemPrompt).not.toContain(
+      "<pr_summary_policy>",
+    );
+    expect(sendOutputMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        diff: sections.slice(0, 2).join(""),
+        skippedDiff: {
+          kind: "sharded",
+          files: expect.arrayContaining([
+            expect.objectContaining({ path: "c.ts", reason: "shard_failed" }),
+          ]),
+        },
+        structuredResult: expect.objectContaining({
+          summary: expect.stringContaining("Reviewed 2 files across 2 shards; 1 skipped"),
+        }),
+      }),
+    );
+    expect(AgentMock).not.toHaveBeenCalled();
+  });
+
+  it("uses the least-resolved conflicting update and vetoes a required MCP failure", async () => {
+    const sections = ["a", "b"].map(
+      (name) =>
+        `diff --git a/${name}.ts b/${name}.ts\n--- a/${name}.ts\n+++ b/${name}.ts\n@@ -1 +1 @@\n+${name}\n`,
+    );
+    resolveRawDiffMock.mockResolvedValue({
+      raw: sections.join(""),
+      source: "test",
+      changedFiles: [],
+    });
+    const { sink, records } = createMemorySink();
+    runShardChildrenMock.mockImplementationOnce(async (requests) => ({
+      envelopes: requests.slice(0, 2).map((request, index) => ({
+        index: request.index,
+        status: "ok",
+        decision: "review",
+        result: {
+          findings: [],
+          digest: [],
+          finding_updates: [
+            {
+              comment_id: 42,
+              status: index === 0 ? "RESOLVED" : "STILL_OPEN",
+              explanation: "still present",
+            },
+          ],
+        },
+      })),
+      skipped: [],
+      runs: 2,
+      abandoned: 0,
+    }));
+    await review({
+      cwd: "/repo",
+      output: "comment",
+      maxDiffChars: sections[0]!.length + 1,
+      activeFindings: [{ commentId: 42, body: "prior issue" }],
+      logger: createLogger({ sink }),
+    });
+    expect(sendOutputMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        structuredResult: expect.objectContaining({
+          finding_updates: [{ comment_id: 42, status: "STILL_OPEN", explanation: "still present" }],
+        }),
+      }),
+    );
+    expect(records.some(({ event }) => event === "review.shard.update_conflict")).toBe(true);
+
+    sendOutputMock.mockClear();
+    runShardChildrenMock.mockImplementationOnce(async (requests) => ({
+      envelopes: [
+        {
+          index: requests[0]!.index,
+          status: "ok",
+          decision: "none",
+          mcpFailures: [
+            {
+              identity: { server: "docs", tool: "search" },
+              signal: { errorClass: "call_failed" },
+              repoIds: [],
+              unindexed: false,
+            },
+          ],
+        },
+      ],
+      skipped: [],
+      runs: 2,
+      abandoned: 0,
+    }));
+    await expect(
+      review({
+        cwd: "/repo",
+        output: "comment",
+        maxDiffChars: sections[0]!.length + 1,
+        mcpConfig: { mcpServers: { docs: { url: "https://mcp.example/mcp" } } },
+      }),
+    ).rejects.toThrow(/MCP tool call failed/);
+    expect(sendOutputMock).not.toHaveBeenCalled();
+  });
+
+  it("fit-vs-sharded keeps the model summary for fit and uses coverage for shards", async () => {
+    const sections = ["a", "b"].map(
+      (name) =>
+        `diff --git a/${name}.ts b/${name}.ts\n--- a/${name}.ts\n+++ b/${name}.ts\n@@ -1 +1 @@\n+${name}\n`,
+    );
+    const raw = sections.join("");
+    resolveRawDiffMock.mockResolvedValue({ raw, source: "test", changedFiles: [] });
+    await review({ cwd: "/repo", output: "comment", maxDiffChars: raw.length + 1 });
+    expect(sendOutputMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        structuredResult: expect.objectContaining({ summary: "LGTM" }),
+      }),
+    );
+
+    sendOutputMock.mockClear();
+    runShardChildrenMock.mockResolvedValueOnce({
+      envelopes: [
+        { index: 1, status: "ok", decision: "review", result: { findings: [], digest: [] } },
+        { index: 2, status: "ok", decision: "review", result: { findings: [], digest: [] } },
+      ],
+      skipped: [],
+      runs: 2,
+      abandoned: 0,
+    });
+    await review({ cwd: "/repo", output: "comment", maxDiffChars: sections[0]!.length + 1 });
+    expect(sendOutputMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        structuredResult: expect.objectContaining({
+          summary: expect.stringMatching(/^Reviewed 2 files across 2 shards;/),
+        }),
+      }),
+    );
+  });
+
+  it("logs the shard plan, per-shard budgets, and oversize files before fan-out", async () => {
+    const sections = ["a", "b"].map(
+      (name) =>
+        `diff --git a/${name}.ts b/${name}.ts\n--- a/${name}.ts\n+++ b/${name}.ts\n@@ -1 +1 @@\n+${name}\n`,
+    );
+    const big = `diff --git a/big.ts b/big.ts\n--- a/big.ts\n+++ b/big.ts\n@@ -1 +1 @@\n+${"x".repeat(500)}\n`;
+    const lock = `diff --git a/package-lock.json b/package-lock.json\n--- a/package-lock.json\n+++ b/package-lock.json\n@@ -1 +1 @@\n+lock\n`;
+    resolveRawDiffMock.mockResolvedValue({
+      raw: sections.join("") + big + lock,
+      source: "test",
+      changedFiles: [],
+    });
+    const previousArtifact = process.env.PI_REVIEWER_THINKING_ARTIFACT;
+    process.env.PI_REVIEWER_THINKING_ARTIFACT = "/tmp/pi-reviewer-thinking-custom";
+    const { sink, records } = createMemorySink();
+    runShardChildrenMock.mockResolvedValueOnce({
+      envelopes: [
+        { index: 1, status: "ok", decision: "none" },
+        { index: 2, status: "ok", decision: "none" },
+      ],
+      skipped: [],
+      runs: 2,
+      abandoned: 0,
+    });
+    await review({
+      cwd: "/repo",
+      output: "comment",
+      maxDiffChars: sections[0]!.length + 1,
+      logger: createLogger({ sink }),
+    });
+    expect(records.some(({ event }) => event === "review.diff.warning")).toBe(true);
+    expect(records.some(({ event }) => event === "review.diff.sharded")).toBe(true);
+    const requested = runShardChildrenMock.mock.calls.at(-1)?.[0] as Array<{
+      index: number;
+      tracing: { artifactPath: string } | null;
+    }>;
+    expect(requested).toHaveLength(2);
+    // Suffix-agnostic derivation: a base path without .jsonl still fans out
+    // to per-shard files (no two shards share a trace file).
+    expect(requested[0]?.tracing).toEqual({
+      artifactPath: "/tmp/pi-reviewer-thinking-custom-shard-1.jsonl",
+    });
+    expect(requested[1]?.tracing).toEqual({
+      artifactPath: "/tmp/pi-reviewer-thinking-custom-shard-2.jsonl",
+    });
+    if (previousArtifact === undefined) delete process.env.PI_REVIEWER_THINKING_ARTIFACT;
+    else process.env.PI_REVIEWER_THINKING_ARTIFACT = previousArtifact;
+    expect(records.some(({ event }) => event === "review.diff.budget")).toBe(true);
+    const budgets = records.filter(({ event }) => event === "review.diff.budget");
+    const totals = budgets.find(({ fields }) =>
+      Array.isArray((fields as { largest?: unknown }).largest),
+    );
+    expect(totals).toBeDefined();
+    expect(
+      ((totals!.fields ?? {}) as { largest: Array<{ path: string }> }).largest.map(
+        (entry) => entry.path,
+      ),
+    ).toContain("big.ts");
+    const perShard = budgets.find(({ fields }) => (fields as { shard?: unknown }).shard === 1);
+    expect(perShard).toBeDefined();
+    expect((perShard!.fields as { cap?: unknown }).cap).toBe(sections[0]!.length + 1);
+    expect(
+      records.some(
+        ({ event, fields }) =>
+          event === "review.diff.shard.oversize" && (fields as { file?: string }).file === "big.ts",
+      ),
+    ).toBe(true);
+  });
+
+  it("drops stray and hallucinated findings with separate counts", async () => {
+    const sections = ["a", "b"].map(
+      (name) =>
+        `diff --git a/${name}.ts b/${name}.ts\n--- a/${name}.ts\n+++ b/${name}.ts\n@@ -1 +1 @@\n+${name}\n`,
+    );
+    resolveRawDiffMock.mockResolvedValue({
+      raw: sections.join(""),
+      source: "test",
+      changedFiles: [],
+    });
+    extractDiffFilesMock.mockReturnValue(["a.ts", "b.ts"]);
+    const { sink, records } = createMemorySink();
+    runShardChildrenMock.mockResolvedValueOnce({
+      envelopes: [
+        {
+          index: 1,
+          status: "ok",
+          decision: "review",
+          result: {
+            findings: [
+              {
+                file: "b.ts",
+                line: 1,
+                side: "RIGHT",
+                severity: "WARN",
+                body: "stray: belongs to shard 2",
+              },
+              {
+                file: "ghost.ts",
+                line: 1,
+                side: "RIGHT",
+                severity: "WARN",
+                body: "hallucinated: absent from diff",
+              },
+              { file: "a.ts", line: 1, side: "RIGHT", severity: "WARN", body: "kept" },
+            ],
+            digest: [{ file: "a.ts", what: "covers a", risks: [] }],
+          },
+        },
+        {
+          index: 2,
+          status: "ok",
+          decision: "none",
+        },
+      ],
+      skipped: [],
+      runs: 2,
+      abandoned: 0,
+    });
+    await review({
+      cwd: "/repo",
+      output: "comment",
+      maxDiffChars: sections[0]!.length + 1,
+      logger: createLogger({ sink }),
+    });
+    const posted = sendOutputMock.mock.calls.at(-1)?.[0]?.structuredResult;
+    expect(posted?.comments?.map((comment: { body: string }) => comment.body)).toEqual(["kept"]);
+    const strays = records.filter(({ event }) => event === "review.shard.stray");
+    expect(strays).toHaveLength(2);
+    expect(strays.some(({ fields }) => (fields as { count?: number }).count === 1)).toBe(true);
+    expect(
+      strays.some(({ fields }) => (fields as { hallucinations?: number }).hallucinations === 1),
+    ).toBe(true);
+  });
+
+  it("posts a shard-3 finding inline", async () => {
+    const sections = ["a", "b", "c", "d"].map(
+      (name) =>
+        `diff --git a/${name}.ts b/${name}.ts\n--- a/${name}.ts\n+++ b/${name}.ts\n@@ -1 +1 @@\n+${name}\n`,
+    );
+    resolveRawDiffMock.mockResolvedValue({
+      raw: sections.join(""),
+      source: "test",
+      changedFiles: [],
+    });
+    runShardChildrenMock.mockResolvedValueOnce({
+      envelopes: [1, 2, 3, 4].map((index) => ({
+        index,
+        status: "ok",
+        decision: index === 3 ? "review" : "none",
+        ...(index === 3
+          ? {
+              result: {
+                findings: [
+                  {
+                    file: "c.ts",
+                    line: 1,
+                    side: "RIGHT",
+                    severity: "WARN",
+                    body: "shard three finding",
+                  },
+                ],
+                digest: [{ file: "c.ts", what: "covers c", risks: [] }],
+              },
+            }
+          : {}),
+      })),
+      skipped: [],
+      runs: 4,
+      abandoned: 0,
+    });
+    await review({ cwd: "/repo", output: "comment", maxDiffChars: sections[0]!.length + 1 });
+    const posted = sendOutputMock.mock.calls.at(-1)?.[0];
+    expect(posted?.structuredResult?.comments).toEqual([
+      expect.objectContaining({
+        file: "c.ts",
+        line: 1,
+        side: "RIGHT",
+        body: "shard three finding",
+      }),
+    ]);
+    expect(posted?.diff).toContain("diff --git a/c.ts b/c.ts");
+  });
+
+  it("takes the legacy filterDiff branch for terminal-target oversize diffs", async () => {
+    const sections = ["a", "b"].map(
+      (name) =>
+        `diff --git a/${name}.ts b/${name}.ts\n--- a/${name}.ts\n+++ b/${name}.ts\n@@ -1 +1 @@\n+${name}\n`,
+    );
+    resolveRawDiffMock.mockResolvedValue({
+      raw: sections.join(""),
+      source: "test",
+      changedFiles: [],
+    });
+    await review({ cwd: "/repo", output: "terminal", maxDiffChars: sections[0]!.length + 1 });
+    expect(runShardChildrenMock).not.toHaveBeenCalled();
+    expect(sendOutputMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        skippedDiff: expect.objectContaining({ kind: "budget", files: ["b.ts"] }),
+      }),
+    );
+  });
+
+  it("throws when every shard fails instead of posting an all-clear", async () => {
+    const sections = ["a", "b"].map(
+      (name) =>
+        `diff --git a/${name}.ts b/${name}.ts\n--- a/${name}.ts\n+++ b/${name}.ts\n@@ -1 +1 @@\n+${name}\n`,
+    );
+    resolveRawDiffMock.mockResolvedValue({
+      raw: sections.join(""),
+      source: "test",
+      changedFiles: [],
+    });
+    runShardChildrenMock.mockResolvedValueOnce({
+      envelopes: [
+        { index: 1, status: "error", decision: "none", error: "boom" },
+        { index: 2, status: "error", decision: "none", error: "boom" },
+      ],
+      skipped: [
+        { path: "a.ts", reason: "shard_failed", cap: 100 },
+        { path: "b.ts", reason: "shard_failed", cap: 100 },
+      ],
+      runs: 2,
+      abandoned: 0,
+    });
+    await expect(
+      review({ cwd: "/repo", output: "comment", maxDiffChars: sections[0]!.length + 1 }),
+    ).rejects.toThrow("every shard failed");
+    expect(sendOutputMock).not.toHaveBeenCalled();
+  });
+
+  it("writes shard thinking deltas to the env artifact path", async () => {
+    const { mkdtemp, readFile, rm, stat } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const dir = await mkdtemp(join(tmpdir(), "pi-reviewer-trace-"));
+    const artifact = join(dir, "trace.jsonl");
+    const previous = process.env.PI_REVIEWER_THINKING_ARTIFACT;
+    process.env.PI_REVIEWER_THINKING_ARTIFACT = artifact;
+    try {
+      const { runShardReview } = await import("../../src/ci/shard-runner.js");
+      const { buildJSONSystemPrompt } = await import("../../src/core/prompt-builder.js");
+      createShardToolMock.mockReturnValueOnce({
+        tool: {
+          name: "submit_shard",
+          label: "submit_shard",
+          description: "test",
+          parameters: {},
+          execute: vi.fn(),
+        },
+        getResult: () => ({
+          findings: [],
+          finding_updates: [],
+          digest: [{ file: "a.ts", what: "covers a", risks: [] }],
+        }),
+        nudge: "test shard nudge",
+        forcedTool: { type: "function", function: { name: "submit_shard" } },
+      });
+      fakeAgentEvents.push({
+        type: "message_update",
+        assistantMessageEvent: { type: "thinking_delta", delta: "considering edge cases" },
+      });
+      await runShardReview(
+        {
+          index: 1,
+          total: 1,
+          cwd: "/repo",
+          shard: { diff: "diff --git a/a.ts b/a.ts\n", files: ["a.ts"] },
+          systemPrompt: buildJSONSystemPrompt({ conventions: [], reviewRules: [] }),
+          userPrompt: "user",
+          model: "anthropic/claude-opus-4-6",
+          thinkingLevel: "off",
+          minSeverity: "INFO",
+          debug: true,
+          tools: { lspEntries: [], lspEnabled: false, citationOffset: 1 },
+          tracing: { artifactPath: artifact },
+        },
+        {
+          logger: createLogger({ sink: createMemorySink().sink }),
+          getApiKey: async () => "test-key",
+          githubToken: undefined,
+        },
+        { target: "comment", suppressCodeExec: true },
+      );
+      const body = await readFile(artifact, "utf8");
+      expect(body).toContain("considering edge cases");
+      expect(body).toContain('"type":"thinking"');
+      expect((await stat(artifact)).mode & 0o777).toBe(0o600);
+    } finally {
+      if (previous === undefined) delete process.env.PI_REVIEWER_THINKING_ARTIFACT;
+      else process.env.PI_REVIEWER_THINKING_ARTIFACT = previous;
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("marks a shard failed when its required search fails", async () => {
+    process.env.PI_REVIEWER_WEB_SEARCH = "true";
+    process.env.PI_REVIEWER_SEARCH_PROVIDER = "duckduckgo";
+    process.env.PI_REVIEWER_SEARCH_REQUIRED = "true";
+    let end: ((event: unknown) => void) | undefined;
+    AgentMock.mockImplementation(function (options: any) {
+      return {
+        subscribe: vi.fn((callback: (event: unknown) => void) => {
+          end = callback;
+          return vi.fn();
+        }),
+        prompt: vi.fn(async () => {
+          const tool = options.initialState.tools.find(
+            (candidate: { name?: string }) => candidate.name === "web_search",
+          );
+          await tool.execute("call", { query: "\u0000" }).catch(() => undefined);
+          end?.({
+            type: "agent_end",
+            messages: [{ role: "assistant", content: [{ type: "text", text: "LGTM" }] }],
+          });
+        }),
+      } as any;
+    });
+    createShardToolMock.mockReturnValueOnce({
+      tool: {
+        name: "submit_shard",
+        label: "submit_shard",
+        description: "test",
+        parameters: {},
+        execute: vi.fn(),
+      },
+      getResult: () => ({
+        findings: [],
+        finding_updates: [],
+        digest: [{ file: "a.ts", what: "covers a", risks: [] }],
+      }),
+      nudge: "test shard nudge",
+      forcedTool: { type: "function", function: { name: "submit_shard" } },
+    });
+    const { runShardReview } = await import("../../src/ci/shard-runner.js");
+    const { buildJSONSystemPrompt } = await import("../../src/core/prompt-builder.js");
+    const result = await runShardReview(
+      {
+        index: 1,
+        total: 1,
+        cwd: "/repo",
+        shard: { diff: "diff --git a/a.ts b/a.ts\n", files: ["a.ts"] },
+        systemPrompt: buildJSONSystemPrompt(
+          { conventions: [], reviewRules: [] },
+          "INFO",
+          [],
+          [],
+          undefined,
+          [],
+          undefined,
+          { summaryEnabled: false, shard: { index: 1, total: 1 } },
+        ),
+        userPrompt: "user",
+        model: "anthropic/claude-opus-4-6",
+        thinkingLevel: "off",
+        minSeverity: "INFO",
+        debug: false,
+        tools: { lspEntries: [], lspEnabled: false, citationOffset: 1 },
+        tracing: null,
+      },
+      {
+        logger: createLogger({ sink: createMemorySink().sink }),
+        getApiKey: async () => "test-key",
+        githubToken: undefined,
+      },
+      { target: "comment", suppressCodeExec: true },
+    );
+    expect(result.requiredSearchFailed).toBe(true);
+    expect(result.decision.action).toBe("none");
+  });
+
+  it("holds the shardCap >= fitCap invariant on real prompts built by the shared builder", async () => {
+    const { buildHistorySection, buildJSONSystemPrompt } =
+      await import("../../src/core/prompt-builder.js");
+    const { resolveMaxDiffChars } = await import("../../src/core/diff-filter.js");
+    const context = {
+      conventions: [{ path: "AGENTS.md", content: "Use strict typing" }],
+      reviewRules: [],
+    };
+    const active = [
+      { commentId: 1, body: "prior issue in a", file: "a.ts" },
+      { commentId: 2, body: "prior issue in b", file: "b.ts" },
+    ];
+    const resolved = [{ historicalFindingId: "h1", originalBody: "old" }];
+    const fitPrompt = buildJSONSystemPrompt(
+      context,
+      "INFO",
+      [],
+      active,
+      "prior summary",
+      resolved,
+      { title: "T", body: "B" },
+      { summaryEnabled: true },
+    );
+    const shardBasePrompt = buildJSONSystemPrompt(
+      context,
+      "INFO",
+      [],
+      [],
+      undefined,
+      [],
+      { title: "T", body: "B" },
+      { summaryEnabled: false },
+    );
+    const measuredHistory = buildHistorySection(active, "prior summary", resolved);
+    // The subset relation the acceptance claim rests on: the shard base plus
+    // the measured global history fits inside the complete fit prompt.
+    expect(shardBasePrompt.length + measuredHistory.length).toBeLessThanOrEqual(fitPrompt.length);
+    const model = "anthropic/claude-opus-4-6";
+    const fitCap = resolveMaxDiffChars({ model, nonDiffChars: fitPrompt.length });
+    const shardCap = resolveMaxDiffChars({
+      model,
+      nonDiffChars: shardBasePrompt.length + measuredHistory.length,
+    });
+    expect(shardCap).toBeGreaterThanOrEqual(fitCap);
+    // Phase 3 re-check: the submit_shard field-rule swap must not break the
+    // subset relation — a real shard-variant prompt stays within the fit
+    // prompt, so no max() clamp is ever needed to hold the inequality.
+    const shardPrompt = buildJSONSystemPrompt(
+      context,
+      "INFO",
+      [],
+      active,
+      "prior summary",
+      resolved,
+      { title: "T", body: "B" },
+      { summaryEnabled: false, shard: { index: 1, total: 2 } },
+    );
+    expect(shardPrompt.length).toBeLessThanOrEqual(fitPrompt.length);
+  });
+
+  it("isolates per-shard history to the shard's files", async () => {
+    const sections = ["a", "b"].map(
+      (name) =>
+        `diff --git a/${name}.ts b/${name}.ts\n--- a/${name}.ts\n+++ b/${name}.ts\n@@ -1 +1 @@\n+${name}\n`,
+    );
+    resolveRawDiffMock.mockResolvedValue({
+      raw: sections.join(""),
+      source: "test",
+      changedFiles: [],
+    });
+    const { sink, records } = createMemorySink();
+    await review({
+      cwd: "/repo",
+      dryRun: true,
+      output: "comment",
+      maxDiffChars: sections[0]!.length + 1,
+      activeFindings: [
+        { commentId: 1, body: "shard-one-finding", file: "a.ts" },
+        { commentId: 2, body: "shard-two-finding", file: "b.ts" },
+      ],
+      logger: createLogger({ sink }),
+    });
+    const systems = records
+      .filter(({ event }) => event === "review.dry_run.system_prompt")
+      .map(({ fields }) => (fields as { prompt: string }).prompt);
+    expect(systems).toHaveLength(2);
+    expect(systems[0]).toContain("shard-one-finding");
+    expect(systems[0]).not.toContain("shard-two-finding");
+    expect(systems[1]).toContain("shard-two-finding");
+    expect(systems[1]).not.toContain("shard-one-finding");
+  });
+  it("pins submit_shard on the shard retry, not submit_review", async () => {
+    const { runShardReview } = await import("../../src/ci/shard-runner.js");
+    const agent = makeFakeAgent("prose only");
+    const baseStream = agent.streamFunction;
+    AgentMock.mockImplementation(function () {
+      return agent;
+    } as never);
+    let reads = 0;
+    createShardToolMock.mockReturnValueOnce({
+      tool: {
+        name: "submit_shard",
+        label: "submit_shard",
+        description: "test",
+        parameters: {},
+        execute: vi.fn(),
+      },
+      getResult: () =>
+        reads++ === 0
+          ? undefined
+          : {
+              findings: [
+                {
+                  file: "a.ts",
+                  line: 1,
+                  side: "RIGHT",
+                  severity: "WARN",
+                  body: "A meaningful finding",
+                },
+              ],
+              finding_updates: [],
+              digest: [{ file: "a.ts", what: "covers a", risks: [] as string[] }],
+            },
+      nudge: "Call submit_shard now with the shard findings",
+      forcedTool: { type: "function", function: { name: "submit_shard" } },
+    });
+    const result = await runShardReview(
+      {
+        index: 1,
+        total: 1,
+        cwd: "/repo",
+        shard: { diff: "diff --git a/a.ts b/a.ts\n", files: ["a.ts"] },
+        systemPrompt: "system",
+        userPrompt: "user",
+        model: "anthropic/claude-opus-4-6",
+        thinkingLevel: "off",
+        minSeverity: "INFO",
+        debug: false,
+        tools: { lspEntries: [], lspEnabled: false, citationOffset: 1 },
+        tracing: null,
+      },
+      {
+        logger: createLogger({ sink: createMemorySink().sink }),
+        getApiKey: async () => "test-key",
+        githubToken: undefined,
+      },
+      { target: "comment", suppressCodeExec: true },
+    );
+    expect(result.decision.action).toBe("review");
+    expect(agent.prompt).toHaveBeenCalledTimes(2);
+    expect(agent.prompt.mock.calls[1]?.[0]).toContain("submit_shard");
+    expect(baseStream).toHaveBeenCalledTimes(2);
+    expect(baseStream.mock.calls[1]?.[2]).toEqual(
+      expect.objectContaining({
+        toolChoice: expect.objectContaining({
+          function: expect.objectContaining({ name: "submit_shard" }),
+        }),
+      }),
+    );
+  });
+
+  it("equips the synth with verification tools only and attaches its overview", async () => {
+    const sections = ["a", "b"].map(
+      (name) =>
+        `diff --git a/${name}.ts b/${name}.ts\n--- a/${name}.ts\n+++ b/${name}.ts\n@@ -1 +1 @@\n+${name}\n`,
+    );
+    resolveRawDiffMock.mockResolvedValue({
+      raw: sections.join(""),
+      source: "test",
+      changedFiles: [],
+    });
+    process.env.PI_REVIEWER_CODE_EXEC = "true";
+    runShardChildrenMock.mockResolvedValue({
+      envelopes: [1, 2].map((index) => ({
+        index,
+        status: "ok",
+        decision: "review",
+        result: {
+          findings: [
+            {
+              file: index === 1 ? "a.ts" : "b.ts",
+              line: 1,
+              side: "RIGHT",
+              severity: "WARN",
+              body: "A meaningful finding",
+            },
+          ],
+          digest: [{ file: index === 1 ? "a.ts" : "b.ts", what: "covers the file", risks: [] }],
+        },
+      })),
+      skipped: [],
+      runs: 2,
+      abandoned: 0,
+    });
+    fakeToolExecutions.push({
+      toolName: "submit_overview",
+      toolCallId: "s1",
+      args: { pr_summary: "## What\n- change", pr_diagram: undefined },
+    });
+    await review({
+      cwd: "/repo",
+      output: "comment",
+      maxDiffChars: sections[0]!.length + 1,
+      summary: true,
+    });
+    const customTools = createAgentSessionMock.mock.calls.at(-1)?.[0]?.customTools as Array<{
+      name: string;
+    }>;
+    const names = customTools.map((tool) => tool.name);
+    // Read-only tools are constructed via createReadOnlyTools (mocked to []
+    // here); the synth adds verification + overview tools and nothing else.
+    expect(createReadOnlyToolsMock).toHaveBeenCalledWith("/repo");
+    expect(names).toEqual(expect.arrayContaining(["code_exec", "submit_overview"]));
+    for (const absent of [
+      "submit_review",
+      "web_search",
+      "web_ai_search",
+      "package_lookup",
+      "github_search",
+      "mcp",
+    ]) {
+      expect(names).not.toContain(absent);
+    }
+    const activated = fakeMcpSession.setActiveToolsByName.mock.calls.at(-1)?.[0] as string[];
+    expect(activated).toEqual(
+      expect.arrayContaining(["submit_overview", "code_exec", "lsp_diagnostics"]),
+    );
+    for (const absent of [
+      "submit_review",
+      "web_search",
+      "web_ai_search",
+      "package_lookup",
+      "github_search",
+      "mcp",
+    ]) {
+      expect(activated).not.toContain(absent);
+    }
+    expect(sendOutputMock).toHaveBeenCalled();
+  });
+
+  it("attaches the synth overview and keeps coverage-line output byte-identical", async () => {
+    const sections = ["a", "b"].map(
+      (name) =>
+        `diff --git a/${name}.ts b/${name}.ts\n--- a/${name}.ts\n+++ b/${name}.ts\n@@ -1 +1 @@\n+${name}\n`,
+    );
+    resolveRawDiffMock.mockResolvedValue({
+      raw: sections.join(""),
+      source: "test",
+      changedFiles: [],
+    });
+    process.env.PI_REVIEWER_CODE_EXEC = "true";
+    runShardChildrenMock.mockResolvedValue({
+      envelopes: [1, 2].map((index) => ({
+        index,
+        status: "ok",
+        decision: "review",
+        result: {
+          findings: [
+            {
+              file: index === 1 ? "a.ts" : "b.ts",
+              line: 1,
+              side: "RIGHT",
+              severity: "WARN",
+              body: "A meaningful finding",
+            },
+          ],
+          digest: [{ file: index === 1 ? "a.ts" : "b.ts", what: "covers the file", risks: [] }],
+        },
+      })),
+      skipped: [],
+      runs: 2,
+      abandoned: 0,
+    });
+    fakeToolExecutions.push({
+      toolName: "submit_overview",
+      toolCallId: "s1",
+      args: { pr_summary: "## What\n- change" },
+    });
+    await review({
+      cwd: "/repo",
+      output: "comment",
+      maxDiffChars: sections[0]!.length + 1,
+      summary: true,
+      lspServers: "none",
+    });
+    expect(createAgentSessionMock).not.toHaveBeenCalled();
+    const first = sendOutputMock.mock.calls.at(-1)?.[0]?.structuredResult;
+    expect(first?.pr_summary).toBe("## What\n- change");
+    expect(first?.summary).toMatch(/^Reviewed 2 files across 2 shards;/);
+
+    sendOutputMock.mockClear();
+    await review({
+      cwd: "/repo",
+      output: "comment",
+      maxDiffChars: sections[0]!.length + 1,
+      summary: true,
+      lspServers: "none",
+    });
+    const second = sendOutputMock.mock.calls.at(-1)?.[0]?.structuredResult;
+    expect(second).toEqual(first);
+  });
+
+  it("degrades to findings plus coverage when the synth fails", async () => {
+    const sections = ["a", "b"].map(
+      (name) =>
+        `diff --git a/${name}.ts b/${name}.ts\n--- a/${name}.ts\n+++ b/${name}.ts\n@@ -1 +1 @@\n+${name}\n`,
+    );
+    resolveRawDiffMock.mockResolvedValue({
+      raw: sections.join(""),
+      source: "test",
+      changedFiles: [],
+    });
+    const { sink, records } = createMemorySink();
+    runShardChildrenMock.mockResolvedValue({
+      envelopes: [1, 2].map((index) => ({
+        index,
+        status: "ok",
+        decision: "review",
+        result: {
+          findings: [
+            {
+              file: index === 1 ? "a.ts" : "b.ts",
+              line: 1,
+              side: "RIGHT",
+              severity: "WARN",
+              body: "A meaningful finding",
+            },
+          ],
+          digest: [{ file: index === 1 ? "a.ts" : "b.ts", what: "covers the file", risks: [] }],
+        },
+      })),
+      skipped: [],
+      runs: 2,
+      abandoned: 0,
+    });
+    createOverviewToolMock.mockImplementationOnce(() => {
+      throw new Error("synth boom");
+    });
+    await review({
+      cwd: "/repo",
+      output: "comment",
+      maxDiffChars: sections[0]!.length + 1,
+      summary: true,
+      logger: createLogger({ sink }),
+    });
+    expect(records.some(({ event }) => event === "review.shard.reduce.failed")).toBe(true);
+    const posted = sendOutputMock.mock.calls.at(-1)?.[0]?.structuredResult;
+    expect(posted?.pr_summary).toBeUndefined();
+    expect(posted?.summary).toMatch(/^Reviewed 2 files across 2 shards;/);
+    expect(posted?.comments).toHaveLength(2);
+  });
+
+  it("skips synthesis entirely when summaries are disabled", async () => {
+    const sections = ["a", "b"].map(
+      (name) =>
+        `diff --git a/${name}.ts b/${name}.ts\n--- a/${name}.ts\n+++ b/${name}.ts\n@@ -1 +1 @@\n+${name}\n`,
+    );
+    resolveRawDiffMock.mockResolvedValue({
+      raw: sections.join(""),
+      source: "test",
+      changedFiles: [],
+    });
+    runShardChildrenMock.mockResolvedValue({
+      envelopes: [1, 2].map((index) => ({
+        index,
+        status: "ok",
+        decision: "review",
+        result: {
+          findings: [
+            {
+              file: index === 1 ? "a.ts" : "b.ts",
+              line: 1,
+              side: "RIGHT",
+              severity: "WARN",
+              body: "A meaningful finding",
+            },
+          ],
+          digest: [{ file: index === 1 ? "a.ts" : "b.ts", what: "covers the file", risks: [] }],
+        },
+      })),
+      skipped: [],
+      runs: 2,
+      abandoned: 0,
+    });
+    await review({
+      cwd: "/repo",
+      output: "comment",
+      maxDiffChars: sections[0]!.length + 1,
+      summary: false,
+    });
+    expect(AgentMock).not.toHaveBeenCalled();
+    expect(createAgentSessionMock).not.toHaveBeenCalled();
+    expect(sendOutputMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("omits the overview when the synth makes no tool call", async () => {
+    const sections = ["a", "b"].map(
+      (name) =>
+        `diff --git a/${name}.ts b/${name}.ts\n--- a/${name}.ts\n+++ b/${name}.ts\n@@ -1 +1 @@\n+${name}\n`,
+    );
+    resolveRawDiffMock.mockResolvedValue({
+      raw: sections.join(""),
+      source: "test",
+      changedFiles: [],
+    });
+    const { sink, records } = createMemorySink();
+    runShardChildrenMock.mockResolvedValue({
+      envelopes: [1, 2].map((index) => ({
+        index,
+        status: "ok",
+        decision: "review",
+        result: {
+          findings: [
+            {
+              file: index === 1 ? "a.ts" : "b.ts",
+              line: 1,
+              side: "RIGHT",
+              severity: "WARN",
+              body: "A meaningful finding",
+            },
+          ],
+          digest: [{ file: index === 1 ? "a.ts" : "b.ts", what: "covers the file", risks: [] }],
+        },
+      })),
+      skipped: [],
+      runs: 2,
+      abandoned: 0,
+    });
+    await review({
+      cwd: "/repo",
+      output: "comment",
+      maxDiffChars: sections[0]!.length + 1,
+      summary: true,
+      logger: createLogger({ sink }),
+    });
+    const posted = sendOutputMock.mock.calls.at(-1)?.[0]?.structuredResult;
+    expect(posted?.pr_summary).toBeUndefined();
+    expect(posted?.pr_diagram).toBeUndefined();
+    expect(posted?.summary).toMatch(/^Reviewed 2 files across 2 shards;/);
+    expect(posted?.comments).toHaveLength(2);
+    expect(records.some(({ event }) => event === "review.shard.reduce.failed")).toBe(false);
+  });
+
+  it("shard runs exclude code_exec from tools and prompt", async () => {
+    const { runShardReview } = await import("../../src/ci/shard-runner.js");
+    const { buildJSONSystemPrompt } = await import("../../src/core/prompt-builder.js");
+    createShardToolMock.mockReturnValueOnce({
+      tool: {
+        name: "submit_shard",
+        label: "submit_shard",
+        description: "test",
+        parameters: {},
+        execute: vi.fn(),
+      },
+      getResult: () => ({
+        findings: [],
+        finding_updates: [],
+        digest: [{ file: "a.ts", what: "covers a", risks: [] }],
+      }),
+      nudge: "test shard nudge",
+      forcedTool: { type: "function", function: { name: "submit_shard" } },
+    });
+    const systemPrompt = buildJSONSystemPrompt(
+      { conventions: [], reviewRules: [] },
+      "INFO",
+      [],
+      [],
+      undefined,
+      [],
+      undefined,
+      { summaryEnabled: false, shard: { index: 1, total: 1 } },
+    );
+    AgentMock.mockClear();
+    const shardResult = await runShardReview(
+      {
+        index: 1,
+        total: 1,
+        cwd: "/repo",
+        shard: { diff: "diff --git a/a.ts b/a.ts\n", files: ["a.ts"] },
+        systemPrompt,
+        userPrompt: "user",
+        model: "anthropic/claude-opus-4-6",
+        thinkingLevel: "off",
+        minSeverity: "INFO",
+        debug: false,
+        tools: { lspEntries: [], lspEnabled: false, citationOffset: 1 },
+        tracing: null,
+      },
+      {
+        logger: createLogger({ sink: createMemorySink().sink }),
+        getApiKey: async () => "test-key",
+        githubToken: undefined,
+      },
+      { target: "comment", suppressCodeExec: true },
+    );
+    const tools = AgentMock.mock.calls.at(-1)?.[0]?.initialState?.tools as Array<{ name: string }>;
+    expect(shardResult.decision.action).toBe("none");
+    expect(tools.map((tool) => tool.name)).not.toContain("code_exec");
+    expect(tools.map((tool) => tool.name)).toContain("submit_shard");
+    expect(systemPrompt).toContain("submit_shard");
+    expect(systemPrompt).toContain("- findings: one entry per issue");
+    expect(systemPrompt).toContain("- digest: one entry per reviewed file");
+    expect(systemPrompt).not.toContain("comments: inline comments");
+    expect(systemPrompt).not.toContain("- summary:");
+    expect(systemPrompt).not.toContain("(shard 1/1 findings above; body composed at merge)");
+    expect(systemPrompt).not.toContain("<code_exec_policy>");
+    expect(AgentMock.mock.calls.at(-1)?.[0]?.initialState?.systemPrompt).not.toContain(
+      "<code_exec_policy>",
+    );
+  });
+
   it("prefers explicit extra instructions over env in the dry-run prompt", async () => {
     process.env.PI_REVIEWER_EXTRA_INSTRUCTIONS = "from env";
     const { sink, records } = createMemorySink();
@@ -414,6 +1519,14 @@ describe("review", () => {
         }),
       ]),
     );
+    expect(AgentMock).not.toHaveBeenCalled();
+    expect(sendOutputMock).not.toHaveBeenCalled();
+  });
+
+  it("dry-run reports tool availability without instantiating tools", async () => {
+    const { sink, records } = createMemorySink();
+    await review({ cwd: "/repo", output: "comment", dryRun: true, logger: createLogger({ sink }) });
+    expect(records.some(({ event }) => event === "review.tools.status")).toBe(true);
     expect(AgentMock).not.toHaveBeenCalled();
     expect(sendOutputMock).not.toHaveBeenCalled();
   });
@@ -2385,6 +3498,7 @@ describe("review", () => {
       expect.objectContaining({
         diff: keep,
         skippedDiff: {
+          kind: "budget",
           files: ["drop.ts"],
           cap: keep.length + 1,
           shortfall: raw.length - (keep.length + 1),

@@ -25,6 +25,7 @@ import {
   removeAiFixFooter,
 } from "./ai-fix-footer.js";
 import type { SearchCitation } from "../ci/search/types.js";
+import type { SkippedFile } from "./diff-filter.js";
 
 export type OutputTarget = "terminal" | "comment" | "file";
 export type { Severity } from "./severity.js";
@@ -152,11 +153,9 @@ export interface OutputOptions {
  * `shortfall` is raw-minus-cap chars: how much more budget the full diff
  * needed. Positive whenever `files` is non-empty.
  */
-export interface SkippedDiffNotice {
-  files: string[];
-  cap: number;
-  shortfall: number;
-}
+export type SkippedDiffNotice =
+  | { kind: "budget"; files: string[]; cap: number; shortfall: number }
+  | { kind: "sharded"; files: SkippedFile[] };
 
 /** Max skipped paths listed before collapsing the remainder into a count. */
 export const MAX_LISTED_SKIPPED_FILES = 50;
@@ -170,13 +169,38 @@ export const MAX_LISTED_SKIPPED_FILES = 50;
  */
 export function renderSkippedDiffNotice(notice: SkippedDiffNotice): string {
   const count = notice.files.length;
-  const shown = notice.files.slice(0, MAX_LISTED_SKIPPED_FILES);
-  const rest = count - shown.length;
-  const items = shown.map((file) => `- \`${sanitizeVisibleReviewText(file).replace(/`/g, "'")}\``);
+  const rest = count - Math.min(count, MAX_LISTED_SKIPPED_FILES);
+  const items =
+    notice.kind === "budget"
+      ? notice.files
+          .slice(0, MAX_LISTED_SKIPPED_FILES)
+          .map((file) => `- \`${sanitizeVisibleReviewText(file).replace(/`/g, "'")}\``)
+      : notice.files
+          .slice(0, MAX_LISTED_SKIPPED_FILES)
+          .map(
+            (entry) =>
+              `- \`${sanitizeVisibleReviewText(entry.path).replace(/`/g, "'")}\` (${entry.reason})`,
+          );
   if (rest > 0) items.push(`- …and ${rest} more`);
+  let heading: string;
+  if (notice.kind === "budget") {
+    heading = `Diff budget exceeded — ${count} file${count === 1 ? " was" : "s were"} not reviewed (${notice.shortfall.toLocaleString()} chars over the ${notice.cap.toLocaleString()}-char cap).`;
+  } else {
+    const counts = new Map<SkippedFile["reason"], number>();
+    for (const file of notice.files) counts.set(file.reason, (counts.get(file.reason) ?? 0) + 1);
+    const messages: Record<SkippedFile["reason"], string> = {
+      shard_failed: `${counts.get("shard_failed") ?? 0} file${counts.get("shard_failed") === 1 ? "" : "s"} could not be reviewed because its shard failed`,
+      shard_limit: `${counts.get("shard_limit") ?? 0} file${counts.get("shard_limit") === 1 ? "" : "s"} were not started before the shard limit`,
+      oversize: `${counts.get("oversize") ?? 0} file${counts.get("oversize") === 1 ? "" : "s"} exceeded the per-shard size cap`,
+    };
+    const parts = (["shard_failed", "shard_limit", "oversize"] as const)
+      .filter((reason) => counts.has(reason))
+      .map((reason) => messages[reason]);
+    heading = `${parts.join("; ")}.`;
+  }
   return [
     "> [!WARNING]",
-    `> Diff budget exceeded — ${count} file${count === 1 ? " was" : "s were"} not reviewed (${notice.shortfall.toLocaleString()} chars over the ${notice.cap.toLocaleString()}-char cap).`,
+    `> ${heading}`,
     "",
     "<details>",
     `<summary>Skipped files (${count})</summary>`,
@@ -185,6 +209,15 @@ export function renderSkippedDiffNotice(notice: SkippedDiffNotice): string {
     "",
     "</details>",
   ].join("\n");
+}
+
+export function buildCoverageLine(
+  reviewedFiles: number,
+  shards: number,
+  skipped: readonly SkippedFile[],
+): string {
+  const reasons = [...new Set(skipped.map((file) => file.reason))].join(", ") || "none";
+  return `Reviewed ${reviewedFiles} files across ${shards} shards; ${skipped.length} skipped (${reasons}).`;
 }
 export interface ResolvedFinding {
   historicalFindingId: string;
@@ -656,7 +689,7 @@ function normalizeSeverity(value: unknown): Severity {
   return "INFO";
 }
 
-function isReviewComment(value: unknown): value is ReviewComment {
+export function isReviewComment(value: unknown): value is ReviewComment {
   if (!value || typeof value !== "object") return false;
   const comment = value as Record<string, unknown>;
   return (

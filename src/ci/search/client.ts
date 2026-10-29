@@ -48,7 +48,7 @@ export interface SearchClient {
   hasRequiredFailure(): boolean;
 }
 
-export function createSearchClient(config: SearchConfig): SearchClient {
+export function createSearchClient(config: SearchConfig, startAt = 1): SearchClient {
   const regularProvider = config.regular
     ? provider(config.regular.provider, config.regular.key)
     : undefined;
@@ -58,7 +58,7 @@ export function createSearchClient(config: SearchConfig): SearchClient {
   let regularCalls = 0;
   let aiCalls = 0;
   let requiredFailure = false;
-  let nextCitationId = 1;
+  let nextCitationId = startAt;
 
   const add = async (
     item: SearchResult,

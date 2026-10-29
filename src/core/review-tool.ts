@@ -84,7 +84,7 @@ const commentsField = Type.Optional(
     },
   ),
 );
-const findingUpdatesField = Type.Optional(
+export const findingUpdatesField = Type.Optional(
   Type.Array(
     Type.Object(
       {
