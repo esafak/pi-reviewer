@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 
 import { resolveSearchConfig, unavailableSearchWarnings } from "../../src/ci/search/config.js";
 import { createSearchClient } from "../../src/ci/search/client.js";
+import { CITATION_STRIDE } from "../../src/ci/search/config.js";
 import { createSearchTools } from "../../src/ci/search/tool.js";
 import { createBraveProvider } from "../../src/ci/search/providers/brave.js";
 import { createDuckDuckGoProvider } from "../../src/ci/search/providers/duckduckgo.js";
@@ -356,6 +357,41 @@ describe("search client", () => {
     expect(result.citations[1]).toEqual(
       expect.objectContaining({ id: "web:2", url: "https://example.com/reference" }),
     );
+    vi.unstubAllGlobals();
+  });
+
+  it("seeds shard citation ranges so concatenated evidence IDs stay unique", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>().mockImplementation(
+        async () =>
+          new Response(
+            JSON.stringify({
+              web: {
+                results: [{ title: "Docs", url: "https://example.com", description: "Current" }],
+              },
+            }),
+            { status: 200 },
+          ),
+      ),
+    );
+    const config = {
+      regular: {
+        provider: "brave" as const,
+        key: "test",
+        maxQueries: 1,
+        maxResults: 5,
+        timeoutMs: 1000,
+        required: false,
+      },
+    };
+    const first = createSearchClient(config, 1);
+    const second = createSearchClient(config, CITATION_STRIDE + 1);
+    await first.search("query one");
+    await second.search("query two");
+    const ids = [...first.snapshot(), ...second.snapshot()].map((citation) => citation.id);
+    expect(ids).toEqual(["web:1", `web:${CITATION_STRIDE + 1}`]);
+    expect(new Set(ids).size).toBe(ids.length);
     vi.unstubAllGlobals();
   });
 

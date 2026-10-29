@@ -2,11 +2,14 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import {
   DEFAULT_MAX_CHARS,
+  describeSectionSize,
   filterDiff,
   lookupModelLimits,
   MAX_DERIVED_DIFF_CHARS,
   MAX_DIFF_CHARS_ENV_VAR,
+  MAX_SHARDS,
   parseMaxDiffChars,
+  planReview,
   resolveExplicitMaxDiffChars,
   resolveMaxDiffChars,
   stripNoiseFiles,
@@ -245,5 +248,180 @@ describe("resolveMaxDiffChars", () => {
       nonDiffChars: 10_000_000_000,
     });
     expect(cap).toBe(DEFAULT_MAX_CHARS);
+  });
+});
+
+describe("shard", () => {
+  it("packs in diff order without splitting a file", () => {
+    const a = makeDiffSection("src/a.ts");
+    const b = makeDiffSection("src/b.ts");
+    // Both fit the fit cap, so this is the single path; sharded packing
+    // below uses caps that force overflow.
+    const single = planReview([a, b], [], a.length + b.length + 1, 10_000);
+    expect(single.kind).toBe("single");
+    const plan = planReview([a, b], [], 10, 10_000);
+    expect(plan.kind).toBe("sharded");
+    if (plan.kind !== "sharded") return;
+    // Shard 1 is the legacy-kept set (skip-and-continue under fitCap): with
+    // fitCap 10 neither section fits, so the legacy set is empty and both
+    // sections pack into the first remainder shard in diff order.
+    expect(plan.shards).toHaveLength(1);
+    expect(plan.shards[0]?.files).toEqual(["src/a.ts", "src/b.ts"]);
+    expect(plan.shards[0]?.diff).toBe(a + b);
+  });
+
+  it("packs multiple shards when sections exceed the shard cap", () => {
+    const a = makeDiffSection("src/a.ts");
+    const plan = planReview([a, a, a], [], 10, a.length);
+    expect(plan.kind).toBe("sharded");
+    if (plan.kind !== "sharded") return;
+    expect(plan.shards).toHaveLength(3);
+    expect(plan.skipped).toEqual([]);
+  });
+
+  it("skips oversize single sections with their own size as cap", () => {
+    const big = `diff --git a/src/big.ts b/src/big.ts\n${"x".repeat(500)}\n`;
+    const small = makeDiffSection("src/small.ts");
+    const plan = planReview([big, small], [], 10, 200);
+    expect(plan.kind).toBe("sharded");
+    if (plan.kind !== "sharded") return;
+    expect(plan.skipped).toEqual([{ path: "src/big.ts", reason: "oversize", cap: big.length }]);
+    expect(plan.shards).toHaveLength(1);
+    expect(plan.shards[0]?.files).toEqual(["src/small.ts"]);
+  });
+
+  it("returns unreviewable when every section exceeds the shard budget", () => {
+    const big = `diff --git a/src/big.ts b/src/big.ts\n${"x".repeat(500)}\n`;
+    const plan = planReview([big], [], 10, 200);
+    expect(plan.kind).toBe("unreviewable");
+    if (plan.kind !== "unreviewable") return;
+    expect(plan.skipped).toEqual([{ path: "src/big.ts", reason: "oversize", cap: big.length }]);
+  });
+
+  it("takes the single path for empty and all-noise candidate sets", () => {
+    const empty = planReview([], [], 10, 10);
+    expect(empty.kind).toBe("single");
+    if (empty.kind !== "single") return;
+    expect(empty.diff).toBe("");
+    expect(empty.skipped).toEqual([]);
+
+    const noiseExcluded = planReview([], ["package-lock.json"], 10, 10);
+    expect(noiseExcluded.kind).toBe("single");
+    if (noiseExcluded.kind !== "single") return;
+    expect(noiseExcluded.diff).toBe("");
+    expect(noiseExcluded.warning).toMatch(/package-lock\.json/);
+  });
+
+  it("carries the noise warning on sharded plans", () => {
+    const a = makeDiffSection("src/a.ts");
+    const warned = planReview([a, a], ["package-lock.json"], 10, a.length);
+    expect(warned.kind).toBe("sharded");
+    if (warned.kind !== "sharded") return;
+    expect(warned.warning).toMatch(/package-lock\.json/);
+    expect(warned.skipped).toEqual([]);
+  });
+
+  it("cuts the contiguous diff-order tail beyond MAX_SHARDS", () => {
+    expect(MAX_SHARDS).toBe(5);
+    const one = makeDiffSection("src/a.ts");
+    const kept = [0, 1, 2, 3, 4, 5, 6].map((i) => one.replaceAll("src/a.ts", `src/f${i}.ts`));
+    const cap = kept[0]?.length ?? one.length;
+    const plan = planReview(kept, [], 10, cap);
+    expect(plan.kind).toBe("sharded");
+    if (plan.kind !== "sharded") return;
+    expect(plan.shards).toHaveLength(MAX_SHARDS);
+    expect(plan.skipped.map((s) => s.reason)).toEqual(["shard_limit", "shard_limit"]);
+    expect(plan.skipped[0]?.cap).toBe(cap);
+  });
+
+  it("reviews a superset of the legacy path: set violation repro", () => {
+    // Six 506-char sections then a 394-char one, fitCap = shardCap = 1000.
+    // Legacy skip-and-continue keeps e0 and s.ts; a naive contiguous packer
+    // fills five shards with e0..e4 and drops e5 and s.ts as shard_limit.
+    // Shard 1 must hold exactly the legacy-kept set.
+    const e = (i: number): string =>
+      `diff --git a/src/e${i}.ts b/src/e${i}.ts\n${"x".repeat(470)}\n`;
+    const s = `diff --git a/src/s.ts b/src/s.ts\n${"y".repeat(360)}\n`;
+    expect(e(0).length).toBe(506);
+    expect(s.length).toBe(394);
+    const fitCap = 1000;
+    const kept = [0, 1, 2, 3, 4, 5].map(e).concat([s]);
+    const { diff: legacyDiff } = filterDiff(kept.join(""), fitCap);
+    expect(legacyDiff).toContain("src/e0.ts");
+    expect(legacyDiff).toContain("src/s.ts");
+    const plan = planReview(kept, [], fitCap, fitCap);
+    expect(plan.kind).toBe("sharded");
+    if (plan.kind !== "sharded") return;
+    // Pinned exactly: shard 1 IS the legacy-kept set (fails on the old
+    // packer, whose shards[0] is ["src/e0.ts"] alone).
+    expect(plan.shards[0]?.files).toEqual(["src/e0.ts", "src/s.ts"]);
+    const reviewed = plan.shards.flatMap((shard) => shard.files);
+    expect(reviewed).toContain("src/e0.ts");
+    expect(reviewed).toContain("src/s.ts");
+  });
+
+  it("reviews at least as many files as the legacy path: count repro", () => {
+    // fitCap 1000, shardCap 2000; six ~1486-char sections then fourteen
+    // ~56-char ones. Legacy skips the big six and reviews all fourteen tiny
+    // files; a naive packer fills five shards with big files and reviews
+    // only 5. Sharding must review at least the legacy 14.
+    const big = (i: number): string =>
+      `diff --git a/src/x${i}.ts b/src/x${i}.ts\n${"x".repeat(1450)}\n`;
+    const tiny = (i: number): string =>
+      `diff --git a/src/t${i}.ts b/src/t${i}.ts\n${"y".repeat(20)}\n`;
+    const kept = [0, 1, 2, 3, 4, 5].map(big).concat(Array.from({ length: 14 }, (_, i) => tiny(i)));
+    const { diff: legacyDiff } = filterDiff(kept.join(""), 1000);
+    const legacyCount = legacyDiff.split("diff --git ").length - 1;
+    expect(legacyCount).toBe(14);
+    const plan = planReview(kept, [], 1000, 2000);
+    expect(plan.kind).toBe("sharded");
+    if (plan.kind !== "sharded") return;
+    const reviewedCount = plan.shards.flatMap((shard) => shard.files).length;
+    expect(reviewedCount).toBeGreaterThanOrEqual(legacyCount);
+  });
+
+  it("is deterministic across runs", () => {
+    const kept = ["c", "a", "b"].map((f) => makeDiffSection(`src/${f}.ts`));
+    const first = planReview(kept, ["x"], 10, 10_000);
+    const second = planReview(kept, ["x"], 10, 10_000);
+    expect(second).toEqual(first);
+  });
+
+  it("honours an explicit cap below the floor and above the ceiling", () => {
+    expect(resolveMaxDiffChars({ explicit: 10 })).toBe(10);
+    expect(resolveMaxDiffChars({ explicit: 10_000_000 })).toBe(10_000_000);
+  });
+
+  it("is monotone non-increasing in nonDiffChars", () => {
+    const model = "anthropic/claude-opus-4-6";
+    const caps = [0, 1000, 50_000, 3_000_000].map((nonDiffChars) =>
+      resolveMaxDiffChars({ model, nonDiffChars }),
+    );
+    for (let i = 1; i < caps.length; i += 1) {
+      expect(caps[i]).toBeLessThanOrEqual(caps[i - 1] ?? 0);
+    }
+  });
+
+  it("derives section size signals from raw text only", () => {
+    const sized = describeSectionSize(
+      "diff --git a/src/a.ts b/src/a.ts\n--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1,2 +1,2 @@\n+new\n-old\n context\n",
+    );
+    expect(sized.added).toBe(1);
+    expect(sized.removed).toBe(1);
+
+    const headers = describeSectionSize(makeDiffSection("src/h.ts"));
+    // The section body is a single "+" line; +++ / --- / @@ markers excluded.
+    expect(headers.added).toBe(1);
+    expect(headers.removed).toBe(0);
+
+    const binary = describeSectionSize(
+      "diff --git a/img.png b/img.png\nnew file mode 100644\nindex 0000000..1111111\nBinary files a/img.png and b/img.png differ\n",
+    );
+    expect(binary.added).toBe(0);
+    expect(binary.removed).toBe(0);
+    expect(binary.chars).toBe(
+      "diff --git a/img.png b/img.png\nnew file mode 100644\nindex 0000000..1111111\nBinary files a/img.png and b/img.png differ\n"
+        .length,
+    );
   });
 });

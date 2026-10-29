@@ -1,6 +1,11 @@
 import type { ExaOrBrave, SearchConfig, SearchProviderId } from "./types.js";
 
 const PROVIDERS = ["exa", "brave", "duckduckgo"] as const;
+export const CITATION_STRIDE = 10_000;
+
+// A shard can emit at most query-limit × (result/source-limit + AI answer).
+if (10 * 10 + 3 * (10 + 1) >= CITATION_STRIDE)
+  throw new Error("Search citation limits exceed the shard citation stride");
 
 function enabled(value: string | undefined): boolean {
   return value === "true";

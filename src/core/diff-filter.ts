@@ -91,10 +91,9 @@ export function filterDiff(raw: string, maxChars = DEFAULT_MAX_CHARS): FilterRes
 
   const warnings: string[] = [];
 
-  if (excluded.length > 0) {
-    warnings.push(
-      `${excluded.length} noise file${excluded.length > 1 ? "s" : ""} excluded (${excluded.join(", ")})`,
-    );
+  const noise = noiseClause(excluded);
+  if (noise !== undefined) {
+    warnings.push(noise);
   }
 
   const included: string[] = [];
@@ -125,6 +124,194 @@ export function filterDiff(raw: string, maxChars = DEFAULT_MAX_CHARS): FilterRes
   };
 }
 
+/**
+ * Sharded-review planning (Phase 1: pure functions, no agent calls).
+ *
+ * `filterDiff` above stays untouched for the two legacy call sites
+ * (terminal/file and `summaryOnly`). The posted (comment-target) path uses
+ * `planReview` below instead: fit -> single pass, overflow -> shard 1 holds
+ * the exact legacy-kept set with the remainder packed into shards 2..5 in
+ * diff order, unreviewable -> coded hard error.
+ */
+
+/**
+ * Fixed shard ceiling for V1: at most 5 concurrent shard agents bound wall
+ * time to ~1 shard latency and tokens to ~5x single-pass. No action input,
+ * no env var; revisit on evidence. Also caps parallel fan-out width.
+ */
+export const MAX_SHARDS = 5;
+
+/** Why a file was skipped on the sharded path (posted notice union keys). */
+export type SkippedReason = "shard_failed" | "shard_limit" | "oversize";
+
+/** One skipped file with its own cap (attempted shard's cap; for `oversize` the file's own section size). */
+export interface SkippedFile {
+  path: string;
+  reason: SkippedReason;
+  cap: number;
+}
+
+/** One shard: raw `diff --git` sections (headers included for `parseDiffPositions`) in diff order. */
+export interface DiffShard {
+  diff: string;
+  files: string[];
+}
+
+/**
+ * Decision point for posted (comment-target) reviews. `warning`/`skipped`
+ * exist on all variants so the noise-exclusion warning survives either path;
+ * `single.skipped` is always empty. `unreviewable` means zero reviewable
+ * sections and maps to a coded hard error, never message-text matching.
+ */
+export type ReviewShardPlan =
+  | { kind: "single"; diff: string; warning?: string; skipped: SkippedFile[] }
+  | { kind: "sharded"; shards: DiffShard[]; warning?: string; skipped: SkippedFile[] }
+  | { kind: "unreviewable"; warning?: string; skipped: SkippedFile[] };
+
+function noiseClause(excluded: string[]): string | undefined {
+  if (excluded.length === 0) return undefined;
+  return `${excluded.length} noise file${excluded.length > 1 ? "s" : ""} excluded (${excluded.join(", ")})`;
+}
+
+function noiseWarning(excluded: string[]): string | undefined {
+  const clause = noiseClause(excluded);
+  return clause === undefined ? undefined : `⚠ ${clause}`;
+}
+
+function sectionPath(section: string): string {
+  const firstLine = section.split("\n")[0];
+  return parseFilePath(firstLine) ?? firstLine;
+}
+
+/**
+ * Greedy pack of reviewable sections in diff order; never splits a file.
+ * Shard 1 is the legacy-kept set (the exact `filterDiff` skip-and-continue
+ * selection under `fitCap`, in diff order): because it totals at most
+ * `fitCap <= shardCap` (by the `shardCap >= fitCap` invariant), it always
+ * fits in one shard, so the sharded path reviews a superset of the legacy
+ * path by construction. Remaining sections pack in diff order into shards
+ * 2..MAX_SHARDS. Sections larger than the shard cap are skipped `oversize`
+ * (cap = own section size; these exceed `fitCap` too, so the legacy path
+ * also skips them). Once `MAX_SHARDS` shards are full, the diff-order tail
+ * is skipped `shard_limit` (cap = attempted shard cap).
+ */
+export function planReview(
+  kept: string[],
+  excluded: string[],
+  fitCap: number,
+  shardCap: number,
+): ReviewShardPlan {
+  const warning = noiseWarning(excluded);
+  if (kept.length === 0) {
+    return { kind: "single", diff: "", warning, skipped: [] };
+  }
+  const full = kept.join("");
+  if (full.length <= fitCap) {
+    return { kind: "single", diff: full, warning, skipped: [] };
+  }
+  // Legacy-kept set first: the filterDiff skip-and-continue selection under
+  // fitCap. Fits in one shardCap shard by the invariant, so shard 1 always
+  // covers everything the old posted path reviewed.
+  const legacySections: string[] = [];
+  const legacyIndices = new Set<number>();
+  let legacyChars = 0;
+  kept.forEach((section, index) => {
+    if (legacyChars + section.length <= fitCap) {
+      legacySections.push(section);
+      legacyIndices.add(index);
+      legacyChars += section.length;
+    }
+  });
+  const skipped: SkippedFile[] = [];
+  const shards: DiffShard[] = [];
+  if (legacySections.length > 0) {
+    shards.push({
+      diff: legacySections.join(""),
+      files: legacySections.map(sectionPath),
+    });
+  }
+  let current: string[] = [];
+  let currentFiles: string[] = [];
+  let currentChars = 0;
+  const flush = (): void => {
+    if (current.length > 0) {
+      shards.push({ diff: current.join(""), files: [...currentFiles] });
+      current = [];
+      currentFiles = [];
+      currentChars = 0;
+    }
+  };
+  for (let index = 0; index < kept.length; index += 1) {
+    const section = kept[index] as string;
+    if (legacyIndices.has(index)) continue;
+    const path = sectionPath(section);
+    if (section.length > shardCap) {
+      skipped.push({ path, reason: "oversize", cap: section.length });
+      continue;
+    }
+    if (shards.length >= MAX_SHARDS) {
+      skipped.push({ path, reason: "shard_limit", cap: shardCap });
+      continue;
+    }
+    if (currentChars + section.length > shardCap && current.length > 0) {
+      flush();
+      if (shards.length >= MAX_SHARDS) {
+        skipped.push({ path, reason: "shard_limit", cap: shardCap });
+        continue;
+      }
+    }
+    current.push(section);
+    currentFiles.push(path);
+    currentChars += section.length;
+  }
+  flush();
+  if (shards.length === 0) {
+    return { kind: "unreviewable", warning, skipped };
+  }
+  // Keep skipped in diff order: oversize entries were collected inline above,
+  // so re-sort by first appearance in `kept` for determinism.
+  const order = new Map<string, number>();
+  kept.forEach((section, index) => {
+    const path = sectionPath(section);
+    if (!order.has(path)) order.set(path, index);
+  });
+  skipped.sort((a, b) => (order.get(a.path) ?? 0) - (order.get(b.path) ?? 0));
+  return { kind: "sharded", shards, warning, skipped };
+}
+
+/** Per-section size signals for `review.diff.budget` totals/top-5 logging. */
+export interface SectionSize {
+  path: string;
+  /** Raw section char length (packing budget uses this). */
+  chars: number;
+  /** Hunk `+` lines, excluding `+++` headers and `@@` markers. */
+  added: number;
+  /** Hunk `-` lines, excluding `---` headers and `@@` markers. */
+  removed: number;
+}
+
+function hasHunks(section: string): boolean {
+  return section.split("\n").some((line) => line.startsWith("@@"));
+}
+
+/**
+ * Size signals derived from raw section text only. Sections with no hunks
+ * (binary/rename) contribute zero added/removed lines so top-5 logging never
+ * mis-ranks them; one test case pins each rule.
+ */
+export function describeSectionSize(section: string): SectionSize {
+  const path = sectionPath(section);
+  const chars = section.length;
+  if (!hasHunks(section)) return { path, chars, added: 0, removed: 0 };
+  let added = 0;
+  let removed = 0;
+  for (const line of section.split("\n")) {
+    if (line.startsWith("+++") || line.startsWith("---") || line.startsWith("@@")) continue;
+    if (line.startsWith("+")) added += 1;
+    else if (line.startsWith("-")) removed += 1;
+  }
+  return { path, chars, added, removed };
+}
 /**
  * Parses a user-supplied diff cap. Accepts positive integers as numbers or
  * decimal strings; everything else (missing, malformed, fractional,

@@ -3981,8 +3981,25 @@ describe("reconcileFindingUpdates", () => {
 });
 
 describe("renderSkippedDiffNotice", () => {
+  it("renders per-file shard failure reasons and caps the listed paths", () => {
+    const body = renderSkippedDiffNotice({
+      kind: "sharded",
+      files: [
+        { path: "broken.ts", reason: "shard_failed", cap: 20 },
+        { path: "too-large.ts", reason: "oversize", cap: 900 },
+      ],
+    });
+    expect(body).toContain("broken.ts");
+    expect(body).toContain("(shard_failed)");
+    expect(body).toContain("too-large.ts");
+    expect(body).toContain("(oversize)");
+    expect(body).toContain("because its shard failed");
+    expect(body).toContain("exceeded the per-shard size cap");
+  });
+
   it("renders a WARNING callout with the shortfall and a collapsible file list", () => {
     const body = renderSkippedDiffNotice({
+      kind: "budget",
       files: ["backend/app.kt", "sql/mig.sql"],
       cap: 100_000,
       shortfall: 34_210,
@@ -4001,7 +4018,7 @@ describe("renderSkippedDiffNotice", () => {
 
   it("collapses the list past the display limit", () => {
     const files = Array.from({ length: 55 }, (_, i) => `f${i}.ts`);
-    const body = renderSkippedDiffNotice({ files, cap: 100_000, shortfall: 1 });
+    const body = renderSkippedDiffNotice({ kind: "budget", files, cap: 100_000, shortfall: 1 });
     expect(body).toContain("`f49.ts`");
     expect(body).not.toContain("`f50.ts`");
     expect(body).toContain("…and 5 more");
@@ -4009,6 +4026,7 @@ describe("renderSkippedDiffNotice", () => {
 
   it("neutralizes backticks in untrusted paths", () => {
     const body = renderSkippedDiffNotice({
+      kind: "budget",
       files: ["a`.ts", "b.ts"],
       cap: 100_000,
       shortfall: 1,
@@ -4034,7 +4052,7 @@ describe("sendOutput skipped-diff notice", () => {
       githubToken: "token123",
       prNumber: 42,
       repo: "owner/repo",
-      skippedDiff: { files: ["backend/app.kt"], cap: 100_000, shortfall: 5_432 },
+      skippedDiff: { kind: "budget", files: ["backend/app.kt"], cap: 100_000, shortfall: 5_432 },
     });
 
     const body = JSON.parse((fetchMock.mock.calls[0][1] as { body: string }).body).body as string;
@@ -4054,7 +4072,7 @@ describe("sendOutput skipped-diff notice", () => {
       githubToken: "token123",
       prNumber: 42,
       repo: "owner/repo",
-      skippedDiff: { files: ["backend/app.kt"], cap: 100_000, shortfall: 5_432 },
+      skippedDiff: { kind: "budget", files: ["backend/app.kt"], cap: 100_000, shortfall: 5_432 },
     });
 
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/issues/42/comments"))).toBe(
@@ -4076,7 +4094,7 @@ describe("sendOutput skipped-diff notice", () => {
       prNumber: 42,
       repo: "owner/repo",
       existingFindings: [{ commentId: 7 }],
-      skippedDiff: { files: ["sql/mig.sql"], cap: 100_000, shortfall: 99 },
+      skippedDiff: { kind: "budget", files: ["sql/mig.sql"], cap: 100_000, shortfall: 99 },
     });
 
     const body = JSON.parse((fetchMock.mock.calls[0][1] as { body: string }).body).body as string;
@@ -4113,7 +4131,7 @@ describe("sendOutput skipped-diff notice", () => {
       batchMarker: marker,
       // Open findings stay open: no reaction, notice posted, range recorded.
       existingFindings: [{ commentId: 7 }],
-      skippedDiff: { files: ["backend/app.kt"], cap: 100_000, shortfall: 5_432 },
+      skippedDiff: { kind: "budget", files: ["backend/app.kt"], cap: 100_000, shortfall: 5_432 },
     });
 
     const reviewCall = fetchMock.mock.calls.find(([url]) =>
@@ -4162,7 +4180,7 @@ describe("sendOutput skipped-diff notice", () => {
         commitId: "head",
         batchMarker:
           '<!-- pi-reviewer:batch:v1 {"version":1,"fromSha":"a","toSha":"b","kind":"opened","actor":"bot","reviewId":0} -->',
-        skippedDiff: { files: ["backend/app.kt"], cap: 100_000, shortfall: 5_432 },
+        skippedDiff: { kind: "budget", files: ["backend/app.kt"], cap: 100_000, shortfall: 5_432 },
       });
 
       expect(warnSpy).toHaveBeenCalledWith(
@@ -4185,7 +4203,7 @@ describe("sendOutput skipped-diff notice", () => {
       githubToken: "token123",
       prNumber: 42,
       repo: "owner/repo",
-      skippedDiff: { files: ["sql/mig.sql"], cap: 100_000, shortfall: 99 },
+      skippedDiff: { kind: "budget", files: ["sql/mig.sql"], cap: 100_000, shortfall: 99 },
     });
 
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/issues/42/comments"))).toBe(

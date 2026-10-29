@@ -2,6 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { createReplyTool } from "../../src/core/reply-tool.js";
 import { createReviewTool } from "../../src/core/review-tool.js";
+import { createOverviewTool, createShardTool } from "../../src/core/shard-tool.js";
 import { aiSchema, searchSchema } from "../../src/ci/search/tool.js";
 
 // OpenAI-compatible function calling requires each tool's `parameters` to be a
@@ -11,6 +12,8 @@ import { aiSchema, searchSchema } from "../../src/ci/search/tool.js";
 const tools = [
   { name: "submit_reply", parameters: createReplyTool().tool.parameters },
   { name: "submit_review", parameters: createReviewTool().tool.parameters },
+  { name: "submit_shard", parameters: createShardTool([]).tool.parameters },
+  { name: "submit_overview", parameters: createOverviewTool().tool.parameters },
   { name: "web_search", parameters: searchSchema },
   { name: "web_ai_search", parameters: aiSchema },
 ];

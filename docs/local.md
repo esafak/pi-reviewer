@@ -140,7 +140,7 @@ Persistent settings are stored in `~/.pi/pi-reviewer/config.json`. All fields ar
 
 ### Diff size handling
 
-pi-reviewer automatically filters out noise files (lockfiles, `dist/`, `build/`, `.next/`, `node_modules/`, minified files, `.d.ts` files). If the remaining diff still exceeds the cap, whole file sections are dropped — never mid-hunk — and the posted review carries a harness-rendered `> [!WARNING]` callout naming the shortfall, with the skipped paths in a collapsible list. The agent is also told which files were skipped so the summary stays consistent.
+pi-reviewer automatically filters out noise files (lockfiles, `dist/`, `build/`, `.next/`, `node_modules/`, minified files, `.d.ts` files). Local terminal/file reviews retain the legacy size filter: whole file sections are dropped, never mid-hunk. CI comment reviews that exceed the cap shard reviewable files across up to five shards.
 
 ```
 ⚠ 1 noise file excluded (package-lock.json) — 2 files skipped — diff exceeded 100,000 chars (src/big.ts, src/huge.ts)
