@@ -1,0 +1,65 @@
+CI.md
+  s_22398befdc0ea3::t_29879e645f7d2b 191,224-229
+action.yml
+  s_22398befdc0ea3::t_354b834f5ee965 528
+docs/local.md
+  s_22398befdc0ea3::t_8d5ceead505e43 143
+docs/plans/large-diff-sharding.md
+  s_22398befdc0ea3::t_41ff518eb225e7 1-725
+src/ci/review.ts
+  s_22398befdc0ea3::t_783a7e5d3158e1 1,11-13,25,29-30,35-38,44,46,50-51,53,59-70,74-77,94,102-149,177,258,274-323,334,338,355,377,510,668,876-1076,1198-1243,1245-1266,1270-1272,1274-1275,1279-1285,1287-1310,1312,1315-1320,1322-1327,1329-1367,1369-1410,1412-1417,1420-1423,1425-1458,1461-1467,1469-1509,1511-1517,1519,1521-1529,1531,1536-1542,1545,1553-1554,1580-1582,1584,1586-1711
+src/ci/search/client.ts
+  s_22398befdc0ea3::t_a5cd9faa6b5aa1 51,61
+src/ci/search/config.ts
+  s_22398befdc0ea3::t_c0ef69b461f22d 4-8
+src/ci/shard-fanout.ts
+  s_22398befdc0ea3::t_00cee3062717e0 1-185
+src/ci/shard-protocol.ts
+  s_22398befdc0ea3::t_424730a5b1700f 1-110
+src/ci/shard-run.ts
+  s_22398befdc0ea3::t_ce69a6be0144de 1-58
+src/ci/shard-runner.ts
+  s_22398befdc0ea3::t_6e9a9509c6ffa2 1-1165
+src/core/diff-filter.ts
+  s_22398befdc0ea3::t_f61b7d563e296e 94-96,127-314
+src/core/output.ts
+  s_22398befdc0ea3::t_364fbc2f2635eb 28,156-158,172-183,185-200,203,213-221,692
+src/core/prompt-builder.ts
+  s_22398befdc0ea3::t_2bedcfff1d5475 3-5,47-50,145-163,166-167,170,172,225-246,271-275,277,342-353,368-464
+src/core/review-tool.ts
+  s_22398befdc0ea3::t_30645ef08df43c 87
+src/core/shard-tool.ts
+  s_22398befdc0ea3::t_cc52223c68e5e8 1-166
+tests/ci/review.test.ts
+  s_22398befdc0ea3::t_1160e2ffbefa1f 40-45,63-98,127,129,239-240,242,412-1481,1526-1533,3501
+tests/ci/search.test.ts
+  s_22398befdc0ea3::t_c6f70df32641a1 5,363-397
+tests/ci/shard-runner.test.ts
+  s_22398befdc0ea3::t_156988037396c5 1-276
+tests/core/diff-filter.test.ts
+  s_22398befdc0ea3::t_761cd75e3bb26b 5,10,12,253-427
+tests/core/output.test.ts
+  s_22398befdc0ea3::t_1491a81d206ac1 3984-3999,4002,4021,4029,4055,4075,4097,4134,4183,4206
+tests/core/prompt-builder.test.ts
+  s_22398befdc0ea3::t_291b29ed26a517 6,14,596-710
+tests/core/shard-tool.test.ts
+  s_22398befdc0ea3::t_d09fac2ff29595 1-134
+tests/core/tool-schemas.test.ts
+  s_22398befdc0ea3::t_0b57c0a6b2bd80 5,15-16
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "0412bd37cbe37c69735e53e9779ba75100c048df",
+  "prompts": {},
+  "sessions": {
+    "s_22398befdc0ea3": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_e80ae6180ffegArrzNRJpLxlpR",
+        "model": "unknown"
+      },
+      "human_author": "Emre Şafak <3928300+esafak@users.noreply.github.com>"
+    }
+  }
+}
