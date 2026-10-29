@@ -1,0 +1,25 @@
+src/ci/shard-fanout.ts
+  s_22398befdc0ea3::t_8831f94eb9b8b9 6-15,60-63,71-80,165
+src/ci/shard-runner.ts
+  s_22398befdc0ea3::t_c2a570bb160421 263,266-272
+tests/ci/review.test.ts
+  s_22398befdc0ea3::t_883fa5f89607ab 1414-1475
+tests/ci/shard-runner.test.ts
+  s_22398befdc0ea3::t_5dd27a28d9e247 6-12,152,156,158,160,218-230,234-238,255,261,263,265,280,285,287,289
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "550581cae4f601951ec9f160d8eb4fc673c23816",
+  "prompts": {},
+  "sessions": {
+    "s_22398befdc0ea3": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_e80ae6180ffegArrzNRJpLxlpR",
+        "model": "unknown"
+      },
+      "human_author": "Emre Şafak <3928300+esafak@users.noreply.github.com>"
+    }
+  }
+}
