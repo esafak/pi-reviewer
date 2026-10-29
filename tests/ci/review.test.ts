@@ -1411,6 +1411,68 @@ describe("review", () => {
     expect(records.some(({ event }) => event === "review.shard.reduce.failed")).toBe(false);
   });
 
+  it("feeds clean shards' digests to the synth even when they report none", async () => {
+    const sections = ["a", "b"].map(
+      (name) =>
+        `diff --git a/${name}.ts b/${name}.ts\n--- a/${name}.ts\n+++ b/${name}.ts\n@@ -1 +1 @@\n+${name}\n`,
+    );
+    resolveRawDiffMock.mockResolvedValue({
+      raw: sections.join(""),
+      source: "test",
+      changedFiles: [],
+    });
+    runShardChildrenMock.mockResolvedValue({
+      envelopes: [
+        {
+          index: 1,
+          status: "ok",
+          decision: "review",
+          result: {
+            findings: [
+              {
+                file: "a.ts",
+                line: 1,
+                side: "RIGHT",
+                severity: "WARN",
+                body: "A meaningful finding",
+              },
+            ],
+            finding_updates: [],
+            digest: [{ file: "a.ts", what: "covers a", risks: [] }],
+          },
+        },
+        {
+          index: 2,
+          status: "ok",
+          decision: "none",
+          result: {
+            findings: [],
+            finding_updates: [],
+            digest: [{ file: "b.ts", what: "covers b cleanly", risks: [] }],
+          },
+        },
+      ],
+      skipped: [],
+      runs: 2,
+      abandoned: 0,
+    });
+    await review({
+      cwd: "/repo",
+      output: "comment",
+      maxDiffChars: sections[0]!.length + 1,
+      summary: true,
+      lspServers: "none",
+    });
+    const synthAgent = AgentMock.mock.results[0]?.value as
+      | { prompt: { mock: { calls: unknown[][] } } }
+      | undefined;
+    const synthPrompt = synthAgent?.prompt.mock.calls[0]?.[0] as unknown;
+    // The no-findings shard still contributes its digest to the overview input.
+    expect(synthPrompt).toEqual(expect.stringContaining("covers b cleanly"));
+    const posted = sendOutputMock.mock.calls.at(-1)?.[0]?.structuredResult;
+    expect(posted?.comments).toHaveLength(1);
+  });
+
   it("shard runs exclude code_exec from tools and prompt", async () => {
     const { runShardReview } = await import("../../src/ci/shard-runner.js");
     const { buildJSONSystemPrompt } = await import("../../src/core/prompt-builder.js");

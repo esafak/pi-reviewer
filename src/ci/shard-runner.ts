@@ -260,18 +260,16 @@ export async function runShardReview(
   const reviewToolState = opts.suppressCodeExec ? undefined : createReviewTool();
   const submitTool = shardTool?.tool ?? reviewToolState?.tool;
   const submitName = shardTool ? "submit_shard" : "submit_review";
-  const getResult = () => {
+  const getResult = (): ReviewDecision | ShardToolDecision | undefined => {
     if (shardTool) {
       const result = shardTool.getResult();
-      return result
-        ? {
-            action:
-              result.findings.length || result.finding_updates.length
-                ? ("review" as const)
-                : ("none" as const),
-            result,
-          }
-        : undefined;
+      if (!result) return undefined;
+      // No action field on the wire: non-empty findings or updates mean
+      // review. Anything else is "none" — but the digest still rides along,
+      // because clean shards' digests feed the overview synth.
+      if (result.findings.length > 0 || result.finding_updates.length > 0)
+        return { action: "review", result };
+      return { action: "none", result };
     }
     return reviewToolState?.getResult();
   };

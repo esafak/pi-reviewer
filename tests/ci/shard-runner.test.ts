@@ -3,6 +3,13 @@ import { readFile, rm, writeFile } from "node:fs/promises";
 import { spawn as realSpawn, type ChildProcess } from "node:child_process";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { clearTimeout as clearNodeTimeout, setTimeout as scheduleNodeTimeout } from "node:timers";
+
+// Same single-signature pinning as src/ci/shard-fanout.ts: the stub must
+// satisfy the NodeJS.Timeout contract under any @types/node version.
+const scheduleRealForTest: (callback: () => void, ms: number) => NodeJS.Timeout =
+  scheduleNodeTimeout;
+const cancelRealForTest: (handle: NodeJS.Timeout) => void = clearNodeTimeout;
 import { describe, expect, it } from "vite-plus/test";
 import { runShardChildren, shardEntryPoint } from "../../src/ci/shard-fanout.js";
 import { toShardEnvelope } from "../../src/ci/shard-runner.js";
@@ -142,15 +149,15 @@ describe("runShardChildren", () => {
     let firstTimer = true;
     const clock = {
       now: () => 10,
-      setTimeout: (callback: () => void, _ms: number) => {
+      setTimeout: (callback: () => void, _ms: number): NodeJS.Timeout => {
         if (firstTimer) {
           firstTimer = false;
           cut = callback;
-          return setTimeout(() => {}, 60_000);
+          return scheduleRealForTest(() => {}, 60_000);
         }
-        return setTimeout(callback, 20);
+        return scheduleRealForTest(callback, 20);
       },
-      clearTimeout: (handle: ReturnType<typeof setTimeout>) => clearTimeout(handle),
+      clearTimeout: (handle: NodeJS.Timeout) => cancelRealForTest(handle),
     };
     const spawn = ((
       _command: string,
@@ -208,10 +215,27 @@ describe("toShardEnvelope", () => {
       mcpFailures: new Map(),
       requiredSearchFailed: false,
     } as const;
-    expect(toShardEnvelope(2, { ...base, decision: { action: "none" } })).toEqual({
+    expect(
+      toShardEnvelope(2, {
+        ...base,
+        decision: {
+          action: "none",
+          result: {
+            findings: [],
+            finding_updates: [],
+            digest: [{ file: "b.ts", what: "clean", risks: [] }],
+          },
+        },
+      }),
+    ).toEqual({
       index: 2,
       status: "ok",
       decision: "none",
+      result: {
+        findings: [],
+        finding_updates: [],
+        digest: [{ file: "b.ts", what: "clean", risks: [] }],
+      },
     });
     expect(
       toShardEnvelope(1, {
@@ -228,15 +252,17 @@ describe("toShardEnvelope", () => {
                 body: "A meaningful finding",
               },
             ],
+            finding_updates: [],
             digest: [{ file: "a.ts", what: "covers a", risks: [] }],
           },
         },
         evidence: [
           {
+            id: "web:1",
             kind: "search-result",
-            provider: "p",
+            provider: "duckduckgo",
             title: "t",
-            url: "u",
+            url: "https://example.com",
             queryHash: "h",
             rank: 1,
             retrievedAt: "now",
@@ -251,14 +277,16 @@ describe("toShardEnvelope", () => {
         findings: [
           { file: "a.ts", line: 1, side: "RIGHT", severity: "WARN", body: "A meaningful finding" },
         ],
+        finding_updates: [],
         digest: [{ file: "a.ts", what: "covers a", risks: [] }],
       },
       evidence: [
         {
+          id: "web:1",
           kind: "search-result",
-          provider: "p",
+          provider: "duckduckgo",
           title: "t",
-          url: "u",
+          url: "https://example.com",
           queryHash: "h",
           rank: 1,
           retrievedAt: "now",

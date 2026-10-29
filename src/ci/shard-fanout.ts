@@ -3,6 +3,16 @@ import { mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { clearTimeout as clearNodeTimeout, setTimeout as scheduleNodeTimeout } from "node:timers";
+
+// Single-signature aliases: ambient setTimeout overloads differ across
+// @types/node versions (a DOM-compatible number-returning overload broke CI
+// with TS2322 after the v24->v26 bump), so the barrier never calls an
+// overloaded signature directly. These aliases fail loudly here if the
+// underlying signatures ever stop satisfying the contract.
+const scheduleRealTimeout: (callback: () => void, ms: number) => NodeJS.Timeout =
+  scheduleNodeTimeout;
+const cancelRealTimeout: (handle: NodeJS.Timeout) => void = clearNodeTimeout;
 import { MAX_SHARDS, type SkippedFile } from "../core/diff-filter.js";
 import { isShardEnvelope, type ShardEnvelope, type ShardRequest } from "./shard-protocol.js";
 
@@ -47,8 +57,10 @@ export async function runShardChildren(
     now?: () => number;
     clock?: {
       now(): number;
-      setTimeout(callback: () => void, ms: number): ReturnType<typeof setTimeout>;
-      clearTimeout(handle: ReturnType<typeof setTimeout>): void;
+      // Named NodeJS.Timeout explicitly; see scheduleRealTimeout below for
+      // why the barrier never calls an ambient setTimeout overload directly.
+      setTimeout(callback: () => void, ms: number): NodeJS.Timeout;
+      clearTimeout(handle: NodeJS.Timeout): void;
     };
     startedAt?: number;
     entryPoint?: string;
@@ -56,9 +68,16 @@ export async function runShardChildren(
   } = {},
 ): Promise<ShardRunResult> {
   const spawnChild = options.spawn ?? nodeSpawn;
-  const now = options.clock?.now.bind(options.clock) ?? options.now ?? Date.now;
-  const schedule = options.clock?.setTimeout.bind(options.clock) ?? setTimeout;
-  const cancel = options.clock?.clearTimeout.bind(options.clock) ?? clearTimeout;
+  const clock = options.clock;
+  const now = clock ? () => clock.now() : (options.now ?? Date.now);
+  const schedule = clock
+    ? (callback: () => void, ms: number): NodeJS.Timeout => clock.setTimeout(callback, ms)
+    : scheduleRealTimeout;
+  const cancel = clock
+    ? (handle: NodeJS.Timeout): void => {
+        clock.clearTimeout(handle);
+      }
+    : cancelRealTimeout;
   const startedAt = options.startedAt ?? now();
   const envelopes: ShardEnvelope[] = [];
   const skipped: SkippedFile[] = [];
@@ -143,7 +162,7 @@ export async function runShardChildren(
       if (directory) await rm(directory, { recursive: true, force: true });
     }
   });
-  let timeout: ReturnType<typeof setTimeout> | undefined;
+  let timeout: NodeJS.Timeout | undefined;
   const barrier = new Promise<void>((resolve) => {
     const remaining = Math.max(0, SHARD_FANOUT_TIMEOUT_MS - (now() - startedAt));
     timeout = schedule(() => {
