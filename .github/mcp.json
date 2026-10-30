@@ -1,9 +1,8 @@
 {
   "mcpServers": {
     "deepwiki": {
-      "url": "https://mcp.deepwiki.com/mcp",
-      "auth": false,
-      "loggableArgs": ["repoName"]
+      "type": "http",
+      "url": "https://mcp.deepwiki.com/mcp"
     }
   }
 }

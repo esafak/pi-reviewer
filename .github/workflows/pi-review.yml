@@ -2,6 +2,7 @@ name: Pi Reviewer
 
 on:
   pull_request:
+    branches: [main]
     types: [opened, synchronize, reopened, ready_for_review]
   pull_request_review_comment:
     types: [created]
@@ -35,21 +36,24 @@ on:
         default: false
         type: boolean
 
+# Review every PR update; never abort an in-flight review mid-generation.
+concurrency:
+  group: pi-review-${{ github.event.pull_request.number || github.event.issue.number || inputs.pr-number || github.run_id }}
+  cancel-in-progress: false
+  queue: max
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
 jobs:
   review:
     name: Review
     timeout-minutes: 30
-    if: (github.event_name != 'pull_request_review_comment' || github.event.comment.user.type != 'Bot') && (github.event_name != 'issue_comment' || github.event.comment.user.type != 'Bot') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && (github.event_name != 'pull_request_review_comment' || github.event.pull_request.head.repo.full_name == github.repository) && (github.event_name != 'pull_request' || github.event.pull_request.user.login != 'renovate[bot]') && (github.event_name != 'pull_request_review_comment' || github.event.pull_request.user.login != 'renovate[bot]') && (github.event_name != 'issue_comment' || github.event.issue.user.login != 'renovate[bot]')
+    if: (github.event_name != 'issue_comment' || github.event.issue.pull_request != null) && (github.event_name != 'pull_request_review_comment' || github.event.comment.user.type != 'Bot') && (github.event_name != 'issue_comment' || github.event.comment.user.type != 'Bot') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && (github.event_name != 'pull_request_review_comment' || github.event.pull_request.head.repo.full_name == github.repository) && (github.event_name != 'pull_request' || github.event.pull_request.user.login != 'dependabot[bot]') && (github.event_name != 'pull_request' || !endsWith(github.event.pull_request.user.login, 'renovate[bot]')) && (github.event_name != 'pull_request' || github.event.pull_request.user.login != 'fresnel-deployment-configs[bot]')
     runs-on: ubuntu-latest
     environment: review
-    permissions:
-      contents: read
-      pull-requests: write
-      issues: write
-    concurrency:
-      group: pi-reviewer-${{ github.repository }}-${{ github.event.pull_request.number || github.event.issue.number || inputs.pr-number || github.run_id }}
-      cancel-in-progress: false
-
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -143,5 +147,10 @@ jobs:
           gh: 'true'
           ai-search: 'true'
           web-search: 'true'
-          mcp-config-file: ${{ (github.event_name == 'issue_comment' || github.event_name == 'workflow_dispatch') && '.github/mcp.json' || '' }}
+          code-exec: true
+          # Keep aligned with .github/mcp.json, which configures the deepwiki server.
+          mcp-config-file: .github/mcp.json
           cache: true
+          extra-instructions: |
+            Use the configured DeepWiki MCP server when upstream project context would help;
+            never use MCP documentation to query the repository under review.
