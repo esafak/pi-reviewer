@@ -1,0 +1,19 @@
+.github/mcp.json
+  s_e19076d540cc25::t_39efd2f3f7719a 4-5
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "42f893f24ee6d88716b4cfa749bad073f19b9a5e",
+  "prompts": {},
+  "sessions": {
+    "s_e19076d540cc25": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_e752bd99cffdIQ2lweOGSVJNg6",
+        "model": "unknown"
+      },
+      "human_author": "Emre Şafak <3928300+esafak@users.noreply.github.com>"
+    }
+  }
+}
