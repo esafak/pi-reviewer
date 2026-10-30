@@ -1,0 +1,14 @@
+vite.config.ts
+  h_ea91e2db23540f 15,28,34
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "ad0f3cc631b02e4122cd2cf925c08753bacd1a98",
+  "prompts": {},
+  "humans": {
+    "h_ea91e2db23540f": {
+      "author": "Emre Şafak <3928300+esafak@users.noreply.github.com>"
+    }
+  }
+}
