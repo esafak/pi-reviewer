@@ -12,6 +12,7 @@ export default defineConfig({
     // exclude them to stay code-only.
     ignorePatterns: [
       "dist/**",
+      ".worktrees/**",
       "dist-ui/**",
       "**/*.md",
       "**/*.html",
@@ -24,12 +25,12 @@ export default defineConfig({
     ],
   },
   lint: {
-    ignorePatterns: ["dist/**", "dist-ui/**"],
+    ignorePatterns: ["dist/**", "dist-ui/**", ".worktrees/**"],
     jsPlugins: [{ name: "vite-plus", specifier: "vite-plus/oxlint-plugin" }],
     rules: { "vite-plus/prefer-vite-plus-imports": "error" },
     options: { typeAware: false, typeCheck: false },
   },
   test: {
-    exclude: ["dist/**", "node_modules/**"],
+    exclude: ["dist/**", "node_modules/**", ".worktrees/**"],
   },
 });
