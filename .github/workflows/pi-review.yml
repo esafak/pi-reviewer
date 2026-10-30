@@ -2,67 +2,44 @@ name: Pi Reviewer
 
 on:
   pull_request:
+    branches: [main, 'stage/**']
     types: [opened, synchronize, reopened, ready_for_review]
   pull_request_review_comment:
     types: [created]
   issue_comment:
     types: [created]
-  workflow_dispatch:
-    inputs:
-      min-severity:
-        description: Minimum severity to report
-        required: false
-        default: warn
-        type: choice
-        options: [info, warn, critical]
-      pr-number:
-        description: Pull request number to review
-        required: false
-        type: number
-      target-head:
-        description: Optional ancestor commit to review
-        required: false
-        type: string
-      thinking:
-        description: Thinking budget for this manual run only
-        required: false
-        default: off
-        type: choice
-        options: [off, minimal, low, medium, high, xhigh]
-      debug:
-        description: Upload thinking/action trace artifact for this manual run only
-        required: false
-        default: false
-        type: boolean
+
+# Review every PR update; never abort an in-flight review mid-generation.
+# Queue pending comment-event runs so skipped bot replies cannot evict a human-triggered review.
+concurrency:
+  group: pi-review-${{ github.event.pull_request.number || github.event.issue.number || github.run_id }}
+  cancel-in-progress: false
+  queue: max
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
 
 jobs:
   review:
     name: Review
     timeout-minutes: 30
-    if: (github.event_name != 'pull_request_review_comment' || github.event.comment.user.type != 'Bot') && (github.event_name != 'issue_comment' || github.event.comment.user.type != 'Bot') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && (github.event_name != 'pull_request_review_comment' || github.event.pull_request.head.repo.full_name == github.repository) && (github.event_name != 'pull_request' || github.event.pull_request.user.login != 'renovate[bot]') && (github.event_name != 'pull_request_review_comment' || github.event.pull_request.user.login != 'renovate[bot]') && (github.event_name != 'issue_comment' || github.event.issue.user.login != 'renovate[bot]')
+    if: (github.event_name != 'issue_comment' || github.event.issue.pull_request != null) && (github.event_name != 'pull_request_review_comment' || github.event.comment.user.type != 'Bot') && (github.event_name != 'issue_comment' || github.event.comment.user.type != 'Bot') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && (github.event_name != 'pull_request_review_comment' || github.event.pull_request.head.repo.full_name == github.repository) && (github.event_name != 'pull_request' || github.event.pull_request.user.login != 'dependabot[bot]') && (github.event_name != 'pull_request' || !endsWith(github.event.pull_request.user.login, 'renovate[bot]')) && (github.event_name != 'pull_request' || github.event.pull_request.user.login != 'fresnel-deployment-configs[bot]')
     runs-on: ubuntu-latest
     environment: review
-    permissions:
-      contents: read
-      pull-requests: write
-      issues: write
-    concurrency:
-      group: pi-reviewer-${{ github.repository }}-${{ github.event.pull_request.number || github.event.issue.number || inputs.pr-number || github.run_id }}
-      cancel-in-progress: false
-
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           # The Review step runs the local action (`uses: ./`). pull_request and
-          # pull_request_review_comment check out the PR head; issue_comment and
-          # workflow_dispatch have no pull_request payload and fall back to
-          # github.sha (default branch), so a comment can never execute PR-owned
+          # pull_request_review_comment check out the PR head; issue_comment has
+          # no pull_request payload and falls back to github.sha, so a comment can never execute PR-owned
           # action code.
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
-      - name: Fetch PR refs for comment and manual events
+      - name: Fetch PR refs for comment events
         shell: bash
         run: git fetch origin '+refs/pull/*/head:refs/remotes/origin/pr/*' --no-tags
 
@@ -130,18 +107,15 @@ jobs:
           github-token: ${{ steps.bot-token.outputs.token }}
           pi-api-key: ${{ env.PI_API_KEY }}
           model: ${{ vars.MODEL_NAME }}
-          # Manual runs may raise the thinking budget or enable the trace;
-          # scheduled PR runs stay at off/false. The `||` fallback covers
-          # non-dispatch events where inputs are unset.
-          thinking: ${{ inputs.thinking || 'off' }}
-          debug: ${{ inputs.debug == true && 'true' || 'false' }}
+          thinking: off
+          debug: 'false'
           review-drafts: false
-          min-severity: ${{ inputs.min-severity || 'warn' }}
+          min-severity: warn
           github-scope: ${{ vars.PI_REVIEWER_GITHUB_SCOPE }}
           ai-search-provider: ${{ vars.PI_REVIEWER_AI_SEARCH_PROVIDER }}
           search-provider: ${{ vars.PI_REVIEWER_SEARCH_PROVIDER }}
           gh: 'true'
           ai-search: 'true'
           web-search: 'true'
-          mcp-config-file: ${{ (github.event_name == 'issue_comment' || github.event_name == 'workflow_dispatch') && '.github/mcp.json' || '' }}
+          mcp-config-file: ${{ github.event_name == 'issue_comment' && '.github/mcp.json' || '' }}
           cache: true
