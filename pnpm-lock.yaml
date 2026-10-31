@@ -196,8 +196,8 @@ importers:
         specifier: ^1.0.0
         version: 1.3.0
       '@microsoft/mxc-sdk':
-        specifier: 1.0.0
-        version: 1.0.0
+        specifier: 1.0.1
+        version: 1.0.1
       dompurify:
         specifier: ^3.4.2
         version: 3.4.17
@@ -740,8 +740,8 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@microsoft/mxc-sdk@1.0.0':
-    resolution: {integrity: sha512-7aVR+GHVKveIknZmUtkAEFwUBp61qgEmhJRe1ZyKHJ274yWlKWB/ZfDP/u/whfmDyck0wRNKZN49atlF+SZt2Q==}
+  '@microsoft/mxc-sdk@1.0.1':
+    resolution: {integrity: sha512-2cP925G5+lQyKzjBVha8uNtVd7XESgDBtgi1yCYYSo9M3xiFyZWtCO4SWPGTk509rdI6nqjyGcZxvEP3t6l8Hg==}
     engines: {node: '>=24.0.0'}
 
   '@modelcontextprotocol/client@2.3.1':
@@ -3537,7 +3537,7 @@ snapshots:
   '@koromix/koffi-win32-x64@3.3.2':
     optional: true
 
-  '@microsoft/mxc-sdk@1.0.0':
+  '@microsoft/mxc-sdk@1.0.1':
     dependencies:
       koffi: 3.3.2
       node-pty: 1.1.0
