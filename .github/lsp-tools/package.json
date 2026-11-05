@@ -4,6 +4,6 @@
   "private": true,
   "description": "Pinned language-server binaries for pi-reviewer's own review workflow. Renovate updates these; the Review step requires them preinstalled (require-preinstalled policy).",
   "dependencies": {
-    "tsc-rs": "0.7.0"
+    "tsc-rs": "0.8.0"
   }
 }
