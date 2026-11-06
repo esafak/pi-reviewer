@@ -1,0 +1,21 @@
+tests/core/lsp-extension.test.ts
+  s_8ae42522d37d34::t_eacbb04acf439c 246-251
+vite.config.ts
+  s_8ae42522d37d34::t_05dae44e7a5d3c 29-32
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "b2437388b89331887622cf7ad563ad3ad878e24d",
+  "prompts": {},
+  "sessions": {
+    "s_8ae42522d37d34": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_e4cf044b8ffdk4cyDq3u0Zv2fB",
+        "model": "unknown"
+      },
+      "human_author": "Emre Şafak <3928300+esafak@users.noreply.github.com>"
+    }
+  }
+}
