@@ -1,0 +1,19 @@
+pnpm-lock.yaml
+  s_cbf6e4e1cee392::t_fc4f792d79d30d 181-185,193,196,199,214,217,280,632-633,1941-1942,2209-2210,2255,2257,2338,2571-2572,2575-2576,2731-2732,2736,2741,2980-2997,2999,3014,3016,3019,3023-3048,3068,3070-3071,3085,3090,3196,3207,3292,3296,3300,3924,4072,4216,4339,4341,4373,4377,4379-4387,4462,4464,4470,4486-4487,4489,4728,4730,4895
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "d43be9c2ef0bbb63a9c80cee5e9016add0f1693c",
+  "prompts": {},
+  "sessions": {
+    "s_cbf6e4e1cee392": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_e4d36b195ffeRAUuI5rzAQV2p3",
+        "model": "unknown"
+      },
+      "human_author": "Emre Şafak <3928300+esafak@users.noreply.github.com>"
+    }
+  }
+}
