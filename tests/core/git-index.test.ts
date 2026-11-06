@@ -37,7 +37,7 @@ describe("leaked GIT_INDEX_FILE", () => {
       expect(existsSync(marker)).toBe(false);
       expect(diff).toContain("v2");
     } finally {
-      await rm(dir, { recursive: true, force: true });
+      await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }
   });
 });

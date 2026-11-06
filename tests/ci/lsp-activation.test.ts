@@ -70,8 +70,8 @@ describe("lsp tool allowlist activation (real session)", () => {
         session.dispose();
       }
     } finally {
-      await rm(cwd, { recursive: true, force: true });
-      await rm(agentDir, { recursive: true, force: true });
+      await rm(cwd, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+      await rm(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }
   });
 
@@ -90,8 +90,8 @@ describe("lsp tool allowlist activation (real session)", () => {
         session.dispose();
       }
     } finally {
-      await rm(cwd, { recursive: true, force: true });
-      await rm(agentDir, { recursive: true, force: true });
+      await rm(cwd, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+      await rm(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }
   });
 });

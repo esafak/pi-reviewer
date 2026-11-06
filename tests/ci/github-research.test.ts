@@ -712,7 +712,7 @@ describe("gh-backed GitHub research", () => {
       const response = (await tools[2]!.execute("id", { pattern: "a" } as never)) as ToolResult;
       expect(response.content[0]!.text).toContain("GitHub grep unavailable");
       expect(response.isError).toBe(true);
-      await rm(dir, { recursive: true, force: true });
+      await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     });
     it("marks usage errors as error results", async () => {
       const read = vi.fn().mockResolvedValue({});
@@ -1445,7 +1445,7 @@ describe("github file cache, ranges, and grep", () => {
     } finally {
       if (previous === undefined) delete process.env.PI_REVIEWER_GH_CACHE_DIR;
       else process.env.PI_REVIEWER_GH_CACHE_DIR = previous;
-      await rm(dir, { recursive: true, force: true });
+      await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }
   });
 
@@ -1476,7 +1476,7 @@ describe("github file cache, ranges, and grep", () => {
     >;
     expect(body).toMatchObject({ content: "two\nthree", offset: 2, limit: 2, totalLines: 5 });
     expect(run).not.toHaveBeenCalled();
-    await rm(dir, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   });
 
   it("rejects out-of-range limits and attempt numbers", async () => {
@@ -1545,7 +1545,7 @@ describe("github file cache, ranges, and grep", () => {
       repo: "missing",
     } as never)) as { content: Array<{ text: string }> };
     expect(empty.content[0]!.text).toContain("No cached downloads match this scope");
-    await rm(dir, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   });
 
   it("rejects grep patterns with control characters", async () => {
@@ -1561,7 +1561,7 @@ describe("github file cache, ranges, and grep", () => {
       content: Array<{ text: string }>;
     };
     expect(response.content[0]!.text).toContain("GitHub grep unavailable");
-    await rm(dir, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   });
 
   it("keeps cache-hit ranged reads within the per-result budget", async () => {
@@ -1588,7 +1588,7 @@ describe("github file cache, ranges, and grep", () => {
     expect(Buffer.byteLength(response.content[0]!.text)).toBeLessThanOrEqual(7 * 1024);
     expect(response.content[0]!.text).toContain("[truncated]");
     expect(run).not.toHaveBeenCalled();
-    await rm(dir, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   });
 
   it("fails closed when JSON escaping inflates a cache hit past the budget", async () => {
@@ -1611,7 +1611,7 @@ describe("github file cache, ranges, and grep", () => {
     } as never)) as { content: Array<{ text: string }> };
     expect(response.content[0]!.text).toContain("GitHub read unavailable");
     expect(response.content[0]!.text).toContain("byte limit");
-    await rm(dir, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   });
 
   it("scopes grep to ref-less paths and directories", async () => {
@@ -1664,6 +1664,6 @@ describe("github file cache, ranges, and grep", () => {
       matches: Array<{ path: string }>;
     };
     expect(byDirBody.matches.map((m) => m.path)).toEqual(["docs/a.md"]);
-    await rm(dir, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   });
 });

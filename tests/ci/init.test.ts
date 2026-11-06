@@ -23,7 +23,9 @@ describe("init", () => {
 
   afterEach(async () => {
     await Promise.all(
-      createdDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })),
+      createdDirs
+        .splice(0)
+        .map((dir) => rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })),
     );
   });
 

@@ -6,6 +6,7 @@
 * NEVER push to `main`, use feature branches in worktrees. Create a worktree right away if the main branch is dirty.
 * NEVER force-push a branch that has an open PR without the user's permission — a reviewer may already have reviewed the commits it replaces. Prefer `--force-with-lease` over `--force` so nobody else's work is discarded, and prefer a new commit over rewriting that history.
 * Run repo scripts with `vpr` (npm-script runner, e.g. `vpr test`), not the `vp` built-ins — CI uses `vpr test`.
+* In new worktrees, install `hk` and any `mise` tools required by the repo as needed before running checks or hooks.
 * When reviewing or planning, iterate using one agent until convergence; don't create a new one at each step.
 * Write permanent comments: state the invariant or rationale, never the incident that prompted it,
   which belongs in the commit or PR, not the code.

@@ -68,7 +68,7 @@ describe("probeServerBinaries", () => {
       // Slash-containing relative path: resolved by the caller, never PATH-joined.
       expect(findLspBinary("./rel/bin", `/bin${":"}`)).toBeUndefined();
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }
   });
 
@@ -86,7 +86,7 @@ describe("probeServerBinaries", () => {
         await probeServerBinaries([entry], { cwd: "/repo", roots: [], pathValue: dir }),
       ).toMatchObject([{ found: true }]);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }
   });
 
@@ -113,7 +113,7 @@ describe("probeServerBinaries", () => {
         }),
       ).toMatchObject([{ found: false }]);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }
   });
 
@@ -133,7 +133,7 @@ describe("probeServerBinaries", () => {
         { found: true },
       ]);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }
   });
 });
@@ -174,8 +174,8 @@ describe("loadPiLspExtension", () => {
         expect(loaded.warnings.join("\n")).toMatch(/rejected|non-interactive/);
       });
     } finally {
-      await rm(dir, { recursive: true, force: true });
-      await rm(agentDir, { recursive: true, force: true });
+      await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+      await rm(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }
   });
 });
@@ -231,8 +231,8 @@ describe("lsp agent tools", () => {
         expect(result.content[0]?.text).toMatch(/No matching LSP server/);
       });
     } finally {
-      await rm(dir, { recursive: true, force: true });
-      await rm(agentDir, { recursive: true, force: true });
+      await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+      await rm(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }
   });
 
@@ -304,8 +304,8 @@ describe("lsp agent unavailable binaries", () => {
         ).rejects.toThrow(/binary not found/);
       });
     } finally {
-      await rm(dir, { recursive: true, force: true });
-      await rm(agentDir, { recursive: true, force: true });
+      await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+      await rm(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }
   });
 });

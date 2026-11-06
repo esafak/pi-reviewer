@@ -101,7 +101,7 @@ describe("probeServerBinaries", () => {
       // Only the file in the root that has the binary can be served.
       expect(probes[0]?.servedFiles).toEqual(["a.py"]);
     } finally {
-      await rm(dir, { recursive: true, force: true });
+      await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }
   });
 
@@ -134,7 +134,7 @@ describe("probeServerBinaries", () => {
       const picks = pickGroupServers(groups(undefined), probes);
       expect(python(picks)?.entry?.id).toBe("ty");
     } finally {
-      await rm(dir, { recursive: true, force: true });
+      await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }
   });
 });

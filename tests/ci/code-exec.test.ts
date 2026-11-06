@@ -446,7 +446,7 @@ describe("sandbox backends", () => {
       expect(request.filesystem.readwritePaths).toEqual([workspace]);
       expect(existsSync(scratch)).toBe(false);
     } finally {
-      rmSync(workspace, { recursive: true, force: true });
+      rmSync(workspace, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
       vi.unstubAllEnvs();
     }
   });
