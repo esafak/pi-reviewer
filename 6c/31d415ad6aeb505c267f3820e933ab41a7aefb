@@ -1,0 +1,19 @@
+tests/ci/shard-runner.test.ts
+  s_becf530e8b56c6::t_280143b4a039f3 167-169
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "6c31d415ad6aeb505c267f3820e933ab41a7aefb",
+  "prompts": {},
+  "sessions": {
+    "s_becf530e8b56c6": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_e4d1cab52ffdXvSu5oP5bnXYTO",
+        "model": "unknown"
+      },
+      "human_author": "Emre Şafak <3928300+esafak@users.noreply.github.com>"
+    }
+  }
+}
