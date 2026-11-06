@@ -164,8 +164,9 @@ describe("runShardChildren", () => {
       _args: readonly string[],
       options: Parameters<typeof realSpawn>[2],
     ) => {
-      const script = `const fs=require('node:fs');const{spawn}=require('node:child_process');const c=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'});fs.writeFileSync(${JSON.stringify(pidFile)},String(c.pid));setInterval(()=>{},1000);`;
-      const child = realSpawn(process.execPath, ["-e", script], options);
+      const script =
+        "const fs=require('node:fs');const{spawn}=require('node:child_process');const c=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'});fs.writeFileSync(process.argv[1],String(c.pid));setInterval(()=>{},1000);";
+      const child = realSpawn(process.execPath, ["-e", script, pidFile], options);
       // Cut only after the grandchild exists: a fixed delay races the real
       // node startup under load (ENOENT on the pid file).
       const waitForPidFile = async () => {
