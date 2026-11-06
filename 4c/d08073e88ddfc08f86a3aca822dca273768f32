@@ -1,0 +1,51 @@
+tests/ci/code-exec-live.test.ts
+  s_becf530e8b56c6::t_400b68ee8f6c39 33
+tests/ci/code-exec.test.ts
+  s_becf530e8b56c6::t_9c603ba6e6754c 449
+tests/ci/github-research.test.ts
+  s_becf530e8b56c6::t_8dc1d727d1a990 715,1448,1479,1548,1564,1591,1614,1667
+tests/ci/init.test.ts
+  s_becf530e8b56c6::t_0f1c41e2e174e2 26-28
+tests/ci/lsp-activation.test.ts
+  s_becf530e8b56c6::t_1044ab871fdba2 73-74,93-94
+tests/ci/mcp-config.test.ts
+  s_becf530e8b56c6::t_91d27681db3288 38-42
+tests/ci/mcp-session.test.ts
+  s_becf530e8b56c6::t_5f64095da0619f 18-22
+tests/ci/review.test.ts
+  s_becf530e8b56c6::t_1a7407459c60e5 891,1869,1909,1940,2194,2236,2314,2356,2944,3347
+tests/core/context.test.ts
+  s_becf530e8b56c6::t_4dd2b7aa33e78c 30-34
+tests/core/git-index.test.ts
+  s_becf530e8b56c6::t_ffd64cc99f54fb 40
+tests/core/lsp-config.test.ts
+  s_becf530e8b56c6::t_681648021a2799 216,226,243,270,284
+tests/core/lsp-extension.test.ts
+  s_becf530e8b56c6::t_e0e7b8eda44a90 71,89,116,136,177-178,234-235,307-308
+tests/core/lsp-lifecycle.test.ts
+  s_becf530e8b56c6::t_3c6efeb1e3bc85 160-161
+tests/core/lsp-probe.test.ts
+  s_becf530e8b56c6::t_f3ca9f2672f223 104,137
+tests/core/lsp-roots.test.ts
+  s_becf530e8b56c6::t_3066a71385cd8f 72
+tests/core/output.test.ts
+  s_becf530e8b56c6::t_0bbda5d12fa1ec 1314-1316
+tests/core/skill-context.test.ts
+  s_becf530e8b56c6::t_762b213a7bb8b8 39-43
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "4cd08073e88ddfc08f86a3aca822dca273768f32",
+  "prompts": {},
+  "sessions": {
+    "s_becf530e8b56c6": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_e4d1cab52ffdXvSu5oP5bnXYTO",
+        "model": "unknown"
+      },
+      "human_author": "Emre Şafak <3928300+esafak@users.noreply.github.com>"
+    }
+  }
+}
