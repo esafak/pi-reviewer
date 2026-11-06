@@ -213,7 +213,7 @@ describe("loadLspOverridesFromBase", () => {
       const overrides = loadLspOverridesFromBase(dir, sha, ".pi/lsp.json");
       expect(overrides).toEqual({ ty: { diagnosticsWaitMs: 5000 } });
     } finally {
-      await rm(dir, { recursive: true, force: true });
+      await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }
   });
 
@@ -223,7 +223,7 @@ describe("loadLspOverridesFromBase", () => {
       expect(loadLspOverridesFromBase(dir, sha, undefined)).toEqual({});
       expect(loadLspOverridesFromBase(dir, sha, "  ")).toEqual({});
     } finally {
-      await rm(dir, { recursive: true, force: true });
+      await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }
   });
 
@@ -240,7 +240,7 @@ describe("loadLspOverridesFromBase", () => {
         "normalized repository-relative path",
       );
     } finally {
-      await rm(dir, { recursive: true, force: true });
+      await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }
   });
 });
@@ -267,7 +267,7 @@ describe("trusted config bridge", () => {
       });
       expect(process.env[PI_AGENT_DIR_ENV]).toBe(previous);
     } finally {
-      await rm(dir, { recursive: true, force: true });
+      await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }
   });
 
@@ -281,7 +281,7 @@ describe("trusted config bridge", () => {
       });
       expect(PI_AGENT_DIR_ENV in process.env).toBe(false);
     } finally {
-      await rm(dir, { recursive: true, force: true });
+      await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }
   });
 });

@@ -157,8 +157,8 @@ describe("pi-lsp stock lifecycle", () => {
           // Already gone.
         }
       }
-      await rm(dir, { recursive: true, force: true });
-      await rm(agentDir, { recursive: true, force: true });
+      await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+      await rm(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }
   }, 45_000);
 });

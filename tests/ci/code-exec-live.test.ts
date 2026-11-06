@@ -30,7 +30,7 @@ describe.runIf(!!backend)("live sandbox backend", () => {
   });
 
   afterEach(() => {
-    rmSync(workspace, { recursive: true, force: true });
+    rmSync(workspace, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     vi.unstubAllEnvs();
   });
 

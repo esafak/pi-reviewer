@@ -888,7 +888,7 @@ describe("review", () => {
     } finally {
       if (previous === undefined) delete process.env.PI_REVIEWER_THINKING_ARTIFACT;
       else process.env.PI_REVIEWER_THINKING_ARTIFACT = previous;
-      await rm(dir, { recursive: true, force: true });
+      await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }
   });
 
@@ -1866,7 +1866,7 @@ describe("review", () => {
       expect(missing[0]?.fields.language).toBe("typescript");
       expect(missing[0]?.fields.candidates).toEqual([expect.stringContaining("tsc-rs")]);
     } finally {
-      await rm(directory, { recursive: true, force: true });
+      await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }
   });
 
@@ -1906,7 +1906,7 @@ describe("review", () => {
       expect(uncovered[0]?.fields.language).toBe("python");
       expect(uncovered[0]?.fields.files).toEqual(["x.py"]);
     } finally {
-      await rm(directory, { recursive: true, force: true });
+      await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }
   });
 
@@ -1937,7 +1937,7 @@ describe("review", () => {
       expect(uncovered).toHaveLength(1);
       expect(uncovered[0]?.fields.files).toEqual(["x.py"]);
     } finally {
-      await rm(directory, { recursive: true, force: true });
+      await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }
   });
 
@@ -2191,7 +2191,7 @@ describe("review", () => {
       if (previousArtifactPath === undefined) delete process.env.PI_REVIEWER_THINKING_ARTIFACT;
       else process.env.PI_REVIEWER_THINKING_ARTIFACT = previousArtifactPath;
       writeFileSpy.mockClear();
-      await rm(directory, { recursive: true, force: true });
+      await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }
   });
 
@@ -2233,7 +2233,7 @@ describe("review", () => {
     } finally {
       if (previousArtifactPath === undefined) delete process.env.PI_REVIEWER_THINKING_ARTIFACT;
       else process.env.PI_REVIEWER_THINKING_ARTIFACT = previousArtifactPath;
-      await rm(directory, { recursive: true, force: true });
+      await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }
   });
 
@@ -2311,7 +2311,7 @@ describe("review", () => {
     } finally {
       if (previousArtifactPath === undefined) delete process.env.PI_REVIEWER_THINKING_ARTIFACT;
       else process.env.PI_REVIEWER_THINKING_ARTIFACT = previousArtifactPath;
-      await rm(directory, { recursive: true, force: true });
+      await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }
   });
 
@@ -2353,7 +2353,7 @@ describe("review", () => {
     } finally {
       if (previousArtifactPath === undefined) delete process.env.PI_REVIEWER_THINKING_ARTIFACT;
       else process.env.PI_REVIEWER_THINKING_ARTIFACT = previousArtifactPath;
-      await rm(directory, { recursive: true, force: true });
+      await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }
   });
 
@@ -2941,7 +2941,7 @@ describe("review", () => {
     } finally {
       if (previousArtifactPath === undefined) delete process.env.PI_REVIEWER_THINKING_ARTIFACT;
       else process.env.PI_REVIEWER_THINKING_ARTIFACT = previousArtifactPath;
-      await rm(directory, { recursive: true, force: true });
+      await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }
   });
 
@@ -3344,7 +3344,7 @@ describe("review", () => {
       await expect(access(outputFile)).rejects.toThrow();
       await expect(access(outputDir)).rejects.toThrow();
     } finally {
-      await rm(outputDir, { recursive: true, force: true });
+      await rm(outputDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }
   });
 
