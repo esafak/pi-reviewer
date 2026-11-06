@@ -243,11 +243,12 @@ describe("lsp agent tools", () => {
         | { promptSnippet?: unknown; promptGuidelines?: unknown }
         | undefined;
       expect(tool, name).toBeDefined();
-      expect(typeof tool?.promptSnippet, name).toBe("string");
-      expect((tool?.promptSnippet as string).length, name).toBeGreaterThan(0);
-      expect(Array.isArray(tool?.promptGuidelines), name).toBe(true);
-      expect((tool?.promptGuidelines as unknown[]).length, name).toBeGreaterThan(0);
-      for (const guideline of tool?.promptGuidelines as unknown[]) {
+      if (!tool) continue;
+      expect(typeof tool.promptSnippet, name).toBe("string");
+      expect((tool.promptSnippet as string).length, name).toBeGreaterThan(0);
+      expect(Array.isArray(tool.promptGuidelines), name).toBe(true);
+      expect((tool.promptGuidelines as unknown[]).length, name).toBeGreaterThan(0);
+      for (const guideline of tool.promptGuidelines as unknown[]) {
         expect(typeof guideline, name).toBe("string");
       }
     }
