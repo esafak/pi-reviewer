@@ -755,7 +755,7 @@ describe("review-comment reply action path", () => {
         generate,
       }),
     ).toBe(true);
-    expect(github.createReviewCommentReaction).toHaveBeenCalledWith("owner/repo", 42, 9, "heart");
+    expect(github.createReviewCommentReaction).toHaveBeenCalledWith("owner/repo", 9, "heart");
     expect(github.reply).not.toHaveBeenCalled();
   });
   it("posts nothing for a malformed action", async () => {

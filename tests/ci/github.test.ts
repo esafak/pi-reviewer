@@ -90,9 +90,9 @@ describe("GitHubClient", () => {
   it("creates a reaction on a specific review comment", async () => {
     const fetchMock = vi.fn().mockResolvedValue(response({ id: 8, content: "eyes" }));
     vi.stubGlobal("fetch", fetchMock);
-    await new GitHubClient("token").createReviewCommentReaction("owner/repo", 42, 99, "eyes");
+    await new GitHubClient("token").createReviewCommentReaction("owner/repo", 99, "eyes");
     expect(fetchMock).toHaveBeenCalledWith(
-      "https://api.github.com/repos/owner/repo/pulls/42/comments/99/reactions",
+      "https://api.github.com/repos/owner/repo/pulls/comments/99/reactions",
       expect.objectContaining({ method: "POST", body: JSON.stringify({ content: "eyes" }) }),
     );
   });

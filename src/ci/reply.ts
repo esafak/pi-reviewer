@@ -26,7 +26,6 @@ export interface ReplyClient {
   resolveThread(threadId: string): Promise<unknown>;
   createReviewCommentReaction(
     repo: string,
-    number: number,
     comment: number,
     content: string,
   ): Promise<{ id: number; content: string }>;
@@ -459,12 +458,7 @@ export async function handleReplyComment(options: ReplyCommentOptions): Promise<
         });
         return false;
       }
-      await github.createReviewCommentReaction(
-        repo,
-        snapshot.pullRequest.number,
-        pending.commentId,
-        action.content,
-      );
+      await github.createReviewCommentReaction(repo, pending.commentId, action.content);
     } else if (freshReply) {
       const freshStatus = decodeStatusMarker(freshReply.body);
       if (
