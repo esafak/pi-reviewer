@@ -28,7 +28,7 @@ overrides:
   # CVE-2023-54404
   zod: 4.6.7
   # CVE-2026-118764
-  minimatch: 11.0.1
+  minimatch: 11.0.2
 peerDependencyRules:
   allowAny:
     - vite
