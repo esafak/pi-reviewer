@@ -68,7 +68,7 @@ type GitHubPathRegistry = {
   issueComments: (repo: string, number: number) => string;
   issueComment: (repo: string, comment: number) => string;
   reviewComment: (repo: string, comment: number) => string;
-  reviewCommentReactions: (repo: string, number: number, comment: number) => string;
+  reviewCommentReactions: (repo: string, comment: number) => string;
   collaboratorPermission: (repo: string, login: string) => string;
   issueReactions: (repo: string, number: number) => string;
   issueReaction: (repo: string, number: number, reaction: number) => string;
@@ -84,8 +84,9 @@ export const githubPaths = {
   issueComments: (repo, number) => githubPath("repos", repo, "issues", number, "comments"),
   issueComment: (repo, comment) => githubPath("repos", repo, "issues", "comments", comment),
   reviewComment: (repo, comment) => githubPath("repos", repo, "pulls", "comments", comment),
-  reviewCommentReactions: (repo, number, comment) =>
-    githubPath("repos", repo, "pulls", number, "comments", comment, "reactions"),
+  // Review-comment reactions are addressed by comment id alone; the pull-request number is not part of the route.
+  reviewCommentReactions: (repo, comment) =>
+    githubPath("repos", repo, "pulls", "comments", comment, "reactions"),
   collaboratorPermission: (repo, login) =>
     githubPath("repos", repo, "collaborators", login, "permission"),
   issueReactions: (repo, number) => githubPath("repos", repo, "issues", number, "reactions"),
@@ -341,9 +342,9 @@ export class GitHubClient {
       body: JSON.stringify({ body, in_reply_to: comment }),
     });
   }
-  createReviewCommentReaction(repo: string, number: number, comment: number, content: string) {
+  createReviewCommentReaction(repo: string, comment: number, content: string) {
     return this.request<{ id: number; content: string }>(
-      githubPaths.reviewCommentReactions(repo, number, comment),
+      githubPaths.reviewCommentReactions(repo, comment),
       { method: "POST", body: JSON.stringify({ content }) },
     );
   }
