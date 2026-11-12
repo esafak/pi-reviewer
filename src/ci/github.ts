@@ -361,6 +361,7 @@ export class GitHubClient {
     body: string,
     commit_id: string,
     comments: unknown[],
+    event: "COMMENT" | "REQUEST_CHANGES" = "COMMENT",
   ): Promise<Review> {
     try {
       const { owner, repo: name } = splitRepo(repo);
@@ -370,7 +371,7 @@ export class GitHubClient {
         pull_number: number,
         commit_id,
         body,
-        event: "COMMENT",
+        event,
         comments: comments as ReviewCommentInput[],
       });
       return data as Review;

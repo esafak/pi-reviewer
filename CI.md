@@ -219,6 +219,7 @@ Mirrors [`action.yml`](./action.yml) — the action is source of truth if they d
 | `code-exec-max-stream-bytes` | `32768` | Per-stream stdout/stderr cap (1KiB–128KiB) |
 | `code-exec-image` | — | Pre-pulled Linux image for macOS Apple Container backend |
 | `review-drafts` | `false` | Review draft PRs |
+| `request-changes` | `false` | Request GitHub changes when review has CRITICAL findings; otherwise posts as comment |
 | `setup-node` | `true` | Set up Node 24 when no compatible Node is on `PATH` |
 | `cache` | `true` | Cache the pnpm store across runs |
 
