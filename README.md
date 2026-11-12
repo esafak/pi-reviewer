@@ -78,6 +78,7 @@ For the full list of settings see [CI.md](./CI.md).
 | `min-severity` | `info` reports everything, `warn` skips nits, `critical` only blockers | `info` |
 | `summary` | Post the collapsed PR summary on the first review | `true` |
 | `review-drafts` | Review draft PRs | `false` |
+| `request-changes` | Request GitHub changes when review has CRITICAL findings | `false` |
 | `doc-dirs` | Inject matching project docs (`.md` with `description` frontmatter) | off |
 | `skills-dirs` | Skill dirs loaded as review guidance (`.pi/skills`, `.claude/skills`, `.agents/skills`, `skills`); `'none'` disables | default on |
 | `lsp-servers` | Semantic context (hover/definition/references); pins a language's server, or `'none'` to disable. Binaries must be preinstalled | best-effort on |

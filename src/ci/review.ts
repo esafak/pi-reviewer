@@ -234,6 +234,11 @@ export interface ReviewOptions {
   /** True when no prior authenticated review with a body exists on the PR. */
   isFirstReview?: boolean;
   /**
+   * Request GitHub changes when the final review contains CRITICAL findings.
+   * Defaults to env PI_REVIEWER_REQUEST_CHANGES. Stays COMMENT when unset.
+   */
+  requestChanges?: boolean;
+  /**
    * Caller-supplied free-text guidance appended to the CI system prompt as
    * `<custom_instructions>`. Only trusted when the caller keeps it
    * maintainer-controlled. Prefer the `extra-instructions` action input
@@ -742,6 +747,32 @@ export function parseSummaryFlag(raw: string | undefined): boolean {
   return true;
 }
 
+/**
+ * Parses the opt-in `request-changes` flag. Unset/empty/"false" keeps COMMENT
+ * behavior; "true"/"critical" enables REQUEST_CHANGES on CRITICAL findings.
+ * Unknown values warn and stay disabled, so a typo never blocks PRs.
+ */
+export function parseRequestChangesFlag(raw: string | undefined): boolean {
+  if (raw === undefined || raw.trim() === "") return false;
+  const value = raw.trim().toLowerCase();
+  if (value === "true" || value === "critical") return true;
+  if (value === "false") return false;
+  log.warn(
+    "review.request_changes.unexpected_value",
+    "Unexpected request-changes flag value; leaving reviews as comments",
+    {
+      value: raw.trim().slice(0, 32),
+    },
+  );
+  return false;
+}
+
+/** Resolves the effective request-changes opt-in from options, falling back to env. */
+export function resolveRequestChanges(explicit?: boolean): boolean {
+  if (explicit !== undefined) return explicit;
+  return parseRequestChangesFlag(process.env.PI_REVIEWER_REQUEST_CHANGES);
+}
+
 export const REPLY_INPUT_LIMITS = { parent: 4_000, userReply: 4_000, thread: 8_000 } as const;
 export const REPLY_GENERATION_TIMEOUT_MS = 3 * 60 * 1_000;
 export function truncateReplyInput(value: string, limit: number): string {
@@ -917,6 +948,7 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
     (target === "comment" &&
       (options.summary ?? parseSummaryFlag(process.env.PI_REVIEWER_SUMMARY)) &&
       (options.isFirstReview ?? true));
+  const requestChanges = resolveRequestChanges(options.requestChanges);
   // Null and blank titles/bodies carry no intent, so normalize them to absent
   // before prompt construction keeps the omission check in one place.
   const prTitle = options.title?.trim() ? options.title : undefined;
@@ -1577,6 +1609,7 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
       resolvedFindings,
       summaryEnabled,
       isFirstReview: options.isFirstReview ?? true,
+      requestChanges,
       evidence: valid.flatMap((envelope) =>
         Array.isArray(envelope.evidence) ? envelope.evidence.filter(isSearchCitation) : [],
       ),
@@ -1707,6 +1740,7 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
     resolvedFindings,
     summaryEnabled,
     isFirstReview: options.isFirstReview ?? true,
+    requestChanges,
     evidence: runResult.evidence,
   });
 }

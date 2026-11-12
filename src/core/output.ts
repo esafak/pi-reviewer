@@ -140,6 +140,11 @@ export interface OutputOptions {
   /** True when no prior authenticated review with a body exists (first review). */
   isFirstReview?: boolean;
   /**
+   * Opt-in to GitHub REQUEST_CHANGES when the final review contains CRITICAL
+   * findings. Default false keeps COMMENT behavior.
+   */
+  requestChanges?: boolean;
+  /**
    * Files dropped by the diff-size filter. Rendered as a harness-owned
    * warning — never model prose — so skipped coverage is unmissable.
    */
@@ -1163,6 +1168,18 @@ function hasActionableFindings(comments: ReviewComment[]): boolean {
   return comments.some((comment) => comment.severity === "WARN" || comment.severity === "CRITICAL");
 }
 
+/**
+ * Opt-in blocking: REQUEST_CHANGES iff enabled and the final posted set
+ * contains a CRITICAL finding. Uses the normalized/deduped comments so
+ * min-severity filtering applies.
+ */
+export function shouldRequestChanges(
+  comments: readonly ReviewComment[],
+  requestChanges?: boolean,
+): boolean {
+  return Boolean(requestChanges) && comments.some((comment) => comment.severity === "CRITICAL");
+}
+
 /** Adds the fix instruction only to actionable individual findings. */
 function appendFindingFooter(comment: ReviewComment, body: string): string {
   const metadata = body.match(/^(?:(?:<!--\s*pi-reviewer\s*:[\s\S]*?-->\n?)*)/)?.[0] ?? "";
@@ -1792,9 +1809,13 @@ export async function sendOutput(options: OutputOptions): Promise<OutputMetadata
 
     // Try PR Reviews API first (supports inline comments and a body).
     if (options.commitId) {
+      const reviewEvent = shouldRequestChanges(comments, options.requestChanges)
+        ? "REQUEST_CHANGES"
+        : "COMMENT";
       console.log(
         `[pi-reviewer] posting review with ${inlineComments.length} inline comment(s)` +
-          (moved.length > 0 ? ` and ${moved.length} comment(s) in body` : ""),
+          (moved.length > 0 ? ` and ${moved.length} comment(s) in body` : "") +
+          ` as ${reviewEvent}`,
       );
       const poster = new GitHubClient(options.githubToken);
       const repo = options.repo;
@@ -1842,6 +1863,7 @@ export async function sendOutput(options: OutputOptions): Promise<OutputMetadata
           body,
           options.commitId,
           inlineComments,
+          reviewEvent,
         )) as unknown as PostedReview;
         console.log("[pi-reviewer] review posted with inline comments");
       } catch (error) {
@@ -1868,6 +1890,7 @@ export async function sendOutput(options: OutputOptions): Promise<OutputMetadata
               allMovedBody,
               options.commitId,
               [],
+              reviewEvent,
             )) as unknown as PostedReview;
             bodyOnly = true;
             console.log("[pi-reviewer] review posted as body-only (inline positions rejected)");

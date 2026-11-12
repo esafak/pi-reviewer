@@ -184,6 +184,11 @@ inputs:
     required: false
     default: "true"
 
+  request-changes:
+    description: "Request GitHub changes when the review has CRITICAL findings (default: false). Otherwise reviews post as comments."
+    required: false
+    default: "false"
+
   setup-node:
     description: "Set up Node via actions/setup-node when a compatible Node is not already on PATH. Set to false to require the runner to provide Node 24 or newer."
     required: false
@@ -495,6 +500,7 @@ runs:
         MIN_SEVERITY: ${{ inputs.min-severity }}
         PI_REVIEWER_MAX_DIFF_CHARS: ${{ inputs.max-diff-chars || env.PI_REVIEWER_MAX_DIFF_CHARS }}
         PI_REVIEWER_SUMMARY: ${{ inputs.summary }}
+        PI_REVIEWER_REQUEST_CHANGES: ${{ inputs.request-changes }}
         PI_REVIEWER_DOC_DIRS: ${{ inputs.doc-dirs }}
         PI_REVIEWER_SKILLS_DIRS: ${{ inputs.skills-dirs }}
         PI_REVIEWER_MCP_CONFIG_FILE: ${{ inputs.mcp-config-file }}

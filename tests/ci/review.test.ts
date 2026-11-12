@@ -139,7 +139,9 @@ import {
   FORCED_SUBMIT_TOOL,
   generateReplyResponse,
   parseReplyAction,
+  parseRequestChangesFlag,
   resolveProviderApiKey,
+  resolveRequestChanges,
   review,
   parseDocDirs,
   parseSummaryFlag,
@@ -4364,6 +4366,71 @@ describe("review", () => {
 
     expect(agent!.prompt).toHaveBeenCalledTimes(1);
   });
+
+  it("threads requestChanges through the fit path", async () => {
+    const prior = process.env.PI_REVIEWER_REQUEST_CHANGES;
+    try {
+      process.env.PI_REVIEWER_REQUEST_CHANGES = "true";
+      await review({ cwd: "/repo", output: "comment" });
+      expect(sendOutputMock).toHaveBeenCalledWith(
+        expect.objectContaining({ requestChanges: true }),
+      );
+
+      sendOutputMock.mockClear();
+      await review({ cwd: "/repo", output: "comment", requestChanges: false });
+      expect(sendOutputMock).toHaveBeenCalledWith(
+        expect.objectContaining({ requestChanges: false }),
+      );
+    } finally {
+      if (prior === undefined) delete process.env.PI_REVIEWER_REQUEST_CHANGES;
+      else process.env.PI_REVIEWER_REQUEST_CHANGES = prior;
+    }
+  });
+
+  it("threads requestChanges through the sharded path", async () => {
+    const sections = ["a", "b", "c"].map(
+      (name) =>
+        `diff --git a/${name}.ts b/${name}.ts\n--- a/${name}.ts\n+++ b/${name}.ts\n@@ -1 +1 @@\n+${name}\n`,
+    );
+    resolveRawDiffMock.mockResolvedValue({
+      raw: sections.join(""),
+      source: "test",
+      changedFiles: [],
+    });
+    runShardChildrenMock.mockImplementation(async (requests) => ({
+      envelopes: requests.slice(0, 2).map((request) => ({
+        index: request.index,
+        status: "ok",
+        decision: "review",
+        result: {
+          findings: [
+            {
+              file: request.shard.files[0] ?? "",
+              line: 1,
+              side: "RIGHT",
+              severity: "WARN",
+              body: "A meaningful finding",
+            },
+          ],
+          digest: [{ file: request.shard.files[0] ?? "", what: "covers the shard", risks: [] }],
+        },
+      })),
+      skipped: [{ path: "c.ts", reason: "shard_failed", cap: 1000 }],
+      runs: 3,
+      abandoned: 0,
+    }));
+    const prior = process.env.PI_REVIEWER_REQUEST_CHANGES;
+    try {
+      process.env.PI_REVIEWER_REQUEST_CHANGES = "true";
+      await review({ cwd: "/repo", output: "comment", maxDiffChars: sections[0]!.length + 1 });
+      expect(sendOutputMock).toHaveBeenCalledWith(
+        expect.objectContaining({ requestChanges: true }),
+      );
+    } finally {
+      if (prior === undefined) delete process.env.PI_REVIEWER_REQUEST_CHANGES;
+      else process.env.PI_REVIEWER_REQUEST_CHANGES = prior;
+    }
+  });
 });
 
 describe("parseThinkingLevel", () => {
@@ -4397,5 +4464,42 @@ describe("parseSummaryFlag", () => {
     expect(parseSummaryFlag(" TRUE ")).toBe(true);
     expect(parseSummaryFlag("yes")).toBe(true);
     expect(parseSummaryFlag("0")).toBe(true);
+  });
+});
+
+describe("parseRequestChangesFlag", () => {
+  it("defaults to false when unset or empty", () => {
+    expect(parseRequestChangesFlag(undefined)).toBe(false);
+    expect(parseRequestChangesFlag("")).toBe(false);
+    expect(parseRequestChangesFlag("   ")).toBe(false);
+    expect(parseRequestChangesFlag("false")).toBe(false);
+    expect(parseRequestChangesFlag(" FALSE ")).toBe(false);
+  });
+
+  it("enables on true or critical", () => {
+    expect(parseRequestChangesFlag("true")).toBe(true);
+    expect(parseRequestChangesFlag(" TRUE ")).toBe(true);
+    expect(parseRequestChangesFlag("critical")).toBe(true);
+    expect(parseRequestChangesFlag(" CRITICAL ")).toBe(true);
+  });
+
+  it("treats garbage as disabled to avoid blocking PRs", () => {
+    expect(parseRequestChangesFlag("yes")).toBe(false);
+    expect(parseRequestChangesFlag("always")).toBe(false);
+  });
+
+  it("resolves explicit option over env", () => {
+    const prior = process.env.PI_REVIEWER_REQUEST_CHANGES;
+    try {
+      process.env.PI_REVIEWER_REQUEST_CHANGES = "true";
+      expect(resolveRequestChanges(undefined)).toBe(true);
+      expect(resolveRequestChanges(false)).toBe(false);
+      expect(resolveRequestChanges(true)).toBe(true);
+      process.env.PI_REVIEWER_REQUEST_CHANGES = "false";
+      expect(resolveRequestChanges(undefined)).toBe(false);
+    } finally {
+      if (prior === undefined) delete process.env.PI_REVIEWER_REQUEST_CHANGES;
+      else process.env.PI_REVIEWER_REQUEST_CHANGES = prior;
+    }
   });
 });

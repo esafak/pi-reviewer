@@ -9,6 +9,7 @@ import {
   normalizeFinding,
   reconcileFindingUpdates,
   renderPrSummary,
+  shouldRequestChanges,
   stripPrSummaryBlock,
   upsertPrSummaryBlock,
   renderSkippedDiffNotice,
@@ -3935,5 +3936,205 @@ describe("sendOutput skipped-diff notice", () => {
     const body = JSON.parse((fetchMock.mock.calls[0][1] as { body: string }).body).body as string;
     expect(body).toContain("> [!WARNING]");
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/reactions"))).toBe(false);
+  });
+});
+
+describe("shouldRequestChanges", () => {
+  const critical = {
+    file: "src/a.ts",
+    line: 1,
+    side: "RIGHT" as const,
+    severity: "CRITICAL" as const,
+    body: "Fix it",
+  };
+  const warn = { ...critical, severity: "WARN" as const };
+  it("requires the opt-in flag and a critical finding", () => {
+    expect(shouldRequestChanges([critical], true)).toBe(true);
+    expect(shouldRequestChanges([critical], false)).toBe(false);
+    expect(shouldRequestChanges([critical], undefined)).toBe(false);
+    expect(shouldRequestChanges([warn], true)).toBe(false);
+    expect(shouldRequestChanges([], true)).toBe(false);
+  });
+});
+
+describe("sendOutput request-changes", () => {
+  const criticalComment = {
+    file: "src/a.ts",
+    line: 1,
+    side: "RIGHT" as const,
+    severity: "CRITICAL" as const,
+    // Has AI-fix prose so isReviewComment passes.
+    body: "Fix it",
+  };
+  const warnComment = { ...criticalComment, severity: "WARN" as const };
+
+  function reviewEventOf(call: unknown): string | undefined {
+    const init = call as { body: string };
+    try {
+      return (JSON.parse(init.body) as { event?: string }).event;
+    } catch {
+      return undefined;
+    }
+  }
+
+  it("posts REQUEST_CHANGES when critical and opted in", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ id: 1 }))
+      .mockResolvedValueOnce(jsonResponse({ login: "review-bot" }))
+      .mockResolvedValueOnce(jsonResponse([]));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await sendOutput({
+      target: "comment",
+      structuredResult: { summary: "Needs work", comments: [criticalComment] },
+      githubToken: "token123",
+      prNumber: 42,
+      repo: "owner/repo",
+      commitId: "abc123",
+      requestChanges: true,
+    });
+
+    const reviewCall = fetchMock.mock.calls.find(([url]) =>
+      String(url).endsWith("/pulls/42/reviews"),
+    );
+    expect(reviewCall).toBeDefined();
+    expect(reviewEventOf(reviewCall![1])).toBe("REQUEST_CHANGES");
+  });
+
+  it("posts COMMENT for critical when not opted in", async () => {
+    for (const requestChanges of [undefined, false] as const) {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(jsonResponse({ id: 1 }))
+        .mockResolvedValueOnce(jsonResponse({ login: "review-bot" }))
+        .mockResolvedValueOnce(jsonResponse([]));
+      vi.stubGlobal("fetch", fetchMock);
+
+      await sendOutput({
+        target: "comment",
+        structuredResult: { summary: "Needs work", comments: [criticalComment] },
+        githubToken: "token123",
+        prNumber: 42,
+        repo: "owner/repo",
+        commitId: "abc123",
+        requestChanges,
+      });
+
+      const reviewCall = fetchMock.mock.calls.find(([url]) =>
+        String(url).endsWith("/pulls/42/reviews"),
+      );
+      expect(reviewCall).toBeDefined();
+      expect(reviewEventOf(reviewCall![1])).toBe("COMMENT");
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("posts COMMENT for warn-only even when opted in", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ id: 1 }))
+      .mockResolvedValueOnce(jsonResponse({ login: "review-bot" }))
+      .mockResolvedValueOnce(jsonResponse([]));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await sendOutput({
+      target: "comment",
+      structuredResult: { summary: "Needs work", comments: [warnComment] },
+      githubToken: "token123",
+      prNumber: 42,
+      repo: "owner/repo",
+      commitId: "abc123",
+      requestChanges: true,
+    });
+
+    const reviewCall = fetchMock.mock.calls.find(([url]) =>
+      String(url).endsWith("/pulls/42/reviews"),
+    );
+    expect(reviewCall).toBeDefined();
+    expect(reviewEventOf(reviewCall![1])).toBe("COMMENT");
+  });
+
+  it("does not block on a suppressed existing critical finding", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({}));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await sendOutput({
+      target: "comment",
+      structuredResult: { summary: "Nothing new", comments: [criticalComment] },
+      githubToken: "token123",
+      prNumber: 42,
+      repo: "owner/repo",
+      requestChanges: true,
+      existingFindingKeys: new Set([
+        [
+          criticalComment.file,
+          criticalComment.line,
+          criticalComment.side,
+          criticalComment.body,
+        ].join("\0"),
+      ]),
+    });
+
+    // No new comments survive filtering, so no Reviews API post requests changes.
+    const reviewCalls = fetchMock.mock.calls.filter(([url]) =>
+      String(url).includes("/pulls/42/reviews"),
+    );
+    for (const call of reviewCalls) expect(reviewEventOf(call[1])).not.toBe("REQUEST_CHANGES");
+  });
+
+  it("preserves REQUEST_CHANGES on the 422 body-only retry", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response("", { status: 422 }))
+      .mockResolvedValueOnce(jsonResponse({ id: 2 }))
+      .mockResolvedValueOnce(jsonResponse({ login: "review-bot" }))
+      .mockResolvedValueOnce(jsonResponse([]));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await sendOutput({
+      target: "comment",
+      structuredResult: { summary: "Needs work", comments: [criticalComment] },
+      githubToken: "token123",
+      prNumber: 42,
+      repo: "owner/repo",
+      commitId: "abc123",
+      requestChanges: true,
+    });
+
+    const reviewCalls = fetchMock.mock.calls.filter(([url]) =>
+      String(url).endsWith("/pulls/42/reviews"),
+    );
+    expect(reviewCalls).toHaveLength(2);
+    for (const call of reviewCalls) expect(reviewEventOf(call[1])).toBe("REQUEST_CHANGES");
+  });
+
+  it("keeps marker-only skipped-diff notices at COMMENT when opted in", async () => {
+    const marker =
+      '<!-- pi-reviewer:batch:v1 {"version":1,"fromSha":"a","toSha":"b","kind":"opened","actor":"bot","reviewId":0} -->';
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ id: 9 }))
+      .mockResolvedValueOnce(jsonResponse({ id: 9 }))
+      .mockResolvedValueOnce(jsonResponse({ head: { sha: "head" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await sendOutput({
+      target: "comment",
+      none: true,
+      githubToken: "token123",
+      prNumber: 42,
+      repo: "owner/repo",
+      commitId: "head",
+      batchMarker: marker,
+      requestChanges: true,
+      skippedDiff: { kind: "budget", files: ["backend/app.kt"], cap: 100_000, shortfall: 1 },
+    });
+
+    const reviewCall = fetchMock.mock.calls.find(([url]) =>
+      String(url).includes("/pulls/42/reviews"),
+    );
+    expect(reviewCall).toBeDefined();
+    expect(reviewEventOf(reviewCall![1])).toBe("COMMENT");
   });
 });
