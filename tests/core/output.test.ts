@@ -37,11 +37,15 @@ async function createTempDir(): Promise<string> {
   return dir;
 }
 
-function okFetch() {
-  return vi.fn().mockResolvedValue({
-    ok: true,
-    text: vi.fn().mockResolvedValue(""),
+function jsonResponse(body: unknown, status = 200) {
+  return new Response(body === undefined ? null : JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json" },
   });
+}
+
+function okFetch() {
+  return vi.fn().mockResolvedValue(jsonResponse({}));
 }
 
 describe("parseAgentResponse", () => {
@@ -1388,12 +1392,8 @@ printf("first\\nsecond")
     // Fail the inline-positions attempt (422) and the body-only retry (500) so
     // the Issues-API fallback path via formatForGitHub is exercised.
     fetchMock
-      .mockImplementationOnce(() =>
-        Promise.resolve({ ok: false, status: 422, text: () => Promise.resolve("bad position") }),
-      )
-      .mockImplementationOnce(() =>
-        Promise.resolve({ ok: false, status: 500, text: () => Promise.resolve("boom") }),
-      );
+      .mockImplementationOnce(() => Promise.resolve(new Response("bad position", { status: 422 })))
+      .mockImplementationOnce(() => Promise.resolve(new Response("boom", { status: 500 })));
 
     await sendOutput({
       target: "comment",
@@ -1603,15 +1603,8 @@ printf("first\\nsecond")
   it("embeds validated re-raise provenance in posted inline comments", async () => {
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        text: vi.fn().mockResolvedValue(JSON.stringify({ head: { sha: "head" } })),
-      })
-      .mockResolvedValue({
-        ok: true,
-        text: vi.fn().mockResolvedValue(""),
-        clone: () => ({ json: async () => undefined }),
-      });
+      .mockResolvedValueOnce(jsonResponse({ head: { sha: "head" } }))
+      .mockResolvedValue(jsonResponse({}));
     vi.stubGlobal("fetch", fetchMock);
     await sendOutput({
       target: "comment",
@@ -1913,26 +1906,13 @@ printf("first\\nsecond")
   it("preserves ledger-backed sources when finalizing a batch marker", async () => {
     const marker =
       '<!-- pi-reviewer:batch:v1 {"version":1,"fromSha":"base","toSha":"head","reviewId":0} -->';
-    const currentHead = {
-      ok: true,
-      text: vi.fn().mockResolvedValue(JSON.stringify({ head: { sha: "head" } })),
-    };
-    const response = {
-      ok: true,
-      text: vi.fn().mockResolvedValue(""),
-      json: vi.fn().mockResolvedValue({ id: 17 }),
-      clone() {
-        return this;
-      },
-    };
+    const currentHead = jsonResponse({ head: { sha: "head" } });
+    const response = jsonResponse({ id: 17 });
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(currentHead)
       .mockResolvedValueOnce(response)
-      .mockResolvedValueOnce({
-        ok: true,
-        text: vi.fn().mockResolvedValue(""),
-      });
+      .mockResolvedValueOnce(jsonResponse({}));
     vi.stubGlobal("fetch", fetchMock);
 
     await sendOutput({
@@ -1966,26 +1946,25 @@ printf("first\\nsecond")
       .body as string;
     expect(finalized.match(/<summary>External sources<\/summary>/g)).toHaveLength(1);
     expect(finalized.match(/<a href="https:\/\/example\.com\/docs"/g)).toHaveLength(1);
+    // Exactly one batch marker survives finalization: the posted body carries
+    // the unfinalized marker, which must be replaced rather than duplicated.
+    expect(finalized.match(/"reviewId":/g)).toHaveLength(1);
+    expect(finalized).toContain('"reviewId":17');
+    expect(finalized).not.toContain('"reviewId":0');
   });
 
   it("removes the reviewer's stale thumbs-up after posting a finding", async () => {
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue("") })
-      .mockResolvedValueOnce({
-        ok: true,
-        text: vi.fn().mockResolvedValue(JSON.stringify({ login: "review-bot" })),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        text: vi.fn().mockResolvedValue(
-          JSON.stringify([
-            { id: 7, content: "+1", user: { login: "review-bot" } },
-            { id: 8, content: "+1", user: { login: "human" } },
-          ]),
-        ),
-      })
-      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue("") });
+      .mockResolvedValueOnce(jsonResponse({}))
+      .mockResolvedValueOnce(jsonResponse({ login: "review-bot" }))
+      .mockResolvedValueOnce(
+        jsonResponse([
+          { id: 7, content: "+1", user: { login: "review-bot" } },
+          { id: 8, content: "+1", user: { login: "human" } },
+        ]),
+      )
+      .mockResolvedValueOnce(jsonResponse({}));
     vi.stubGlobal("fetch", fetchMock);
 
     await sendOutput({
@@ -2016,25 +1995,12 @@ printf("first\\nsecond")
   it("does not fail the posted review when stale reaction cleanup fails", async () => {
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue("") })
-      .mockResolvedValueOnce({
-        ok: true,
-        text: vi.fn().mockResolvedValue(JSON.stringify({ login: "review-bot" })),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        text: vi
-          .fn()
-          .mockResolvedValue(
-            JSON.stringify([{ id: 7, content: "+1", user: { login: "review-bot" } }]),
-          ),
-      })
-      .mockResolvedValueOnce({
-        ok: false,
-        status: 403,
-        statusText: "Forbidden",
-        text: vi.fn().mockResolvedValue(""),
-      });
+      .mockResolvedValueOnce(jsonResponse({}))
+      .mockResolvedValueOnce(jsonResponse({ login: "review-bot" }))
+      .mockResolvedValueOnce(
+        jsonResponse([{ id: 7, content: "+1", user: { login: "review-bot" } }]),
+      )
+      .mockResolvedValueOnce(new Response("", { status: 403 }));
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(
@@ -2187,15 +2153,9 @@ printf("first\\nsecond")
   it("reacts on a none decision when the PR is clear", async () => {
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        text: vi.fn().mockResolvedValue(JSON.stringify({ login: "review-bot" })),
-      })
-      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue(JSON.stringify([])) })
-      .mockResolvedValueOnce({
-        ok: true,
-        text: vi.fn().mockResolvedValue(JSON.stringify({ id: 1, content: "+1" })),
-      });
+      .mockResolvedValueOnce(jsonResponse({ login: "review-bot" }))
+      .mockResolvedValueOnce(jsonResponse([]))
+      .mockResolvedValueOnce(jsonResponse({ id: 1, content: "+1" }));
     vi.stubGlobal("fetch", fetchMock);
 
     await sendOutput({
@@ -2220,22 +2180,12 @@ printf("first\\nsecond")
   it("posts the summary body instead of reacting on a zero-findings first review", async () => {
     const marker =
       '<!-- pi-reviewer:batch:v1 {"version":1,"fromSha":"base","toSha":"head","kind":"opened","actor":"review-bot","reviewId":0} -->';
-    const postedReview = {
-      ok: true,
-      text: vi.fn().mockResolvedValue(""),
-      json: vi.fn().mockResolvedValue({ id: 17 }),
-      clone() {
-        return this;
-      },
-    };
+    const postedReview = jsonResponse({ id: 17 });
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        text: vi.fn().mockResolvedValue(JSON.stringify({ head: { sha: "head" } })),
-      })
+      .mockResolvedValueOnce(jsonResponse({ head: { sha: "head" } }))
       .mockResolvedValueOnce(postedReview)
-      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue("") });
+      .mockResolvedValueOnce(jsonResponse({}));
     vi.stubGlobal("fetch", fetchMock);
 
     await sendOutput({
@@ -2290,15 +2240,9 @@ printf("first\\nsecond")
   it("acknowledges a findings-free review with a reaction", async () => {
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        text: vi.fn().mockResolvedValue(JSON.stringify({ login: "review-bot" })),
-      })
-      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue(JSON.stringify([])) })
-      .mockResolvedValueOnce({
-        ok: true,
-        text: vi.fn().mockResolvedValue(JSON.stringify({ id: 1, content: "+1" })),
-      });
+      .mockResolvedValueOnce(jsonResponse({ login: "review-bot" }))
+      .mockResolvedValueOnce(jsonResponse([]))
+      .mockResolvedValueOnce(jsonResponse({ id: 1, content: "+1" }));
     vi.stubGlobal("fetch", fetchMock);
 
     // The reaction is keyed on state, not on the model declaring "none": a
@@ -2461,12 +2405,9 @@ printf("first\\nsecond")
   it("does not react while an existing finding remains outstanding", async () => {
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        text: vi.fn().mockResolvedValue(JSON.stringify({ head: { sha: "head" } })),
-      })
-      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue(JSON.stringify([])) })
-      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue("") });
+      .mockResolvedValueOnce(jsonResponse({ head: { sha: "head" } }))
+      .mockResolvedValueOnce(jsonResponse([]))
+      .mockResolvedValueOnce(jsonResponse({}));
     vi.stubGlobal("fetch", fetchMock);
 
     await sendOutput({
@@ -2486,17 +2427,9 @@ printf("first\\nsecond")
   it("stays silent when the acknowledgement reaction cannot be posted", async () => {
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        text: vi.fn().mockResolvedValue(JSON.stringify({ login: "review-bot" })),
-      })
-      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue(JSON.stringify([])) })
-      .mockResolvedValueOnce({
-        ok: false,
-        status: 403,
-        statusText: "Forbidden",
-        text: vi.fn().mockResolvedValue(""),
-      });
+      .mockResolvedValueOnce(jsonResponse({ login: "review-bot" }))
+      .mockResolvedValueOnce(jsonResponse([]))
+      .mockResolvedValueOnce(new Response("", { status: 403 }));
     vi.stubGlobal("fetch", fetchMock);
 
     await sendOutput({
@@ -2519,25 +2452,11 @@ printf("first\\nsecond")
       '<!-- pi-reviewer:batch:v1 {"version":1,"fromSha":"base","toSha":"head","kind":"synchronize","actor":"review-bot","reviewId":0} -->';
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        text: vi.fn().mockResolvedValue(JSON.stringify({ head: { sha: "head" } })),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        text: vi.fn().mockResolvedValue(JSON.stringify({ login: "review-bot" })),
-      })
-      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue(JSON.stringify([])) })
-      .mockResolvedValueOnce({
-        ok: true,
-        text: vi.fn().mockResolvedValue(JSON.stringify({ id: 1, content: "+1" })),
-      })
-      .mockResolvedValueOnce({
-        ok: false,
-        status: 500,
-        statusText: "Server Error",
-        text: vi.fn().mockResolvedValue(""),
-      });
+      .mockResolvedValueOnce(jsonResponse({ head: { sha: "head" } }))
+      .mockResolvedValueOnce(jsonResponse({ login: "review-bot" }))
+      .mockResolvedValueOnce(jsonResponse([]))
+      .mockResolvedValueOnce(jsonResponse({ id: 1, content: "+1" }))
+      .mockResolvedValueOnce(new Response("", { status: 500 }));
     vi.stubGlobal("fetch", fetchMock);
 
     await sendOutput({
@@ -2559,10 +2478,7 @@ printf("first\\nsecond")
   });
 
   it("refuses to post when the PR head changed during review", async () => {
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      text: vi.fn().mockResolvedValue(JSON.stringify({ head: { sha: "new-head" } })),
-    });
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ head: { sha: "new-head" } }));
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(
@@ -2581,10 +2497,7 @@ printf("first\\nsecond")
   });
 
   it("refuses to acknowledge a stale head on a none decision without a batch marker", async () => {
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      text: vi.fn().mockResolvedValue(JSON.stringify({ head: { sha: "new-head" } })),
-    });
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ head: { sha: "new-head" } }));
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(
@@ -2604,19 +2517,10 @@ printf("first\\nsecond")
   it("acknowledges a none decision once the pinned head is confirmed", async () => {
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        text: vi.fn().mockResolvedValue(JSON.stringify({ head: { sha: "reviewed-head" } })),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        text: vi.fn().mockResolvedValue(JSON.stringify({ login: "review-bot" })),
-      })
-      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue(JSON.stringify([])) })
-      .mockResolvedValueOnce({
-        ok: true,
-        text: vi.fn().mockResolvedValue(JSON.stringify({ id: 1, content: "+1" })),
-      });
+      .mockResolvedValueOnce(jsonResponse({ head: { sha: "reviewed-head" } }))
+      .mockResolvedValueOnce(jsonResponse({ login: "review-bot" }))
+      .mockResolvedValueOnce(jsonResponse([]))
+      .mockResolvedValueOnce(jsonResponse({ id: 1, content: "+1" }));
     vi.stubGlobal("fetch", fetchMock);
 
     await sendOutput({
@@ -2635,10 +2539,7 @@ printf("first\\nsecond")
   });
 
   it("refuses a stale head even when the none decision posts nothing visible", async () => {
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      text: vi.fn().mockResolvedValue(JSON.stringify({ head: { sha: "new-head" } })),
-    });
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ head: { sha: "new-head" } }));
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(
@@ -2659,19 +2560,11 @@ printf("first\\nsecond")
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce({
-        ok: false,
-        status: 422,
-        statusText: "Unprocessable Entity",
-        text: vi.fn().mockResolvedValue(""),
-      })
-      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue("") })
+      .mockResolvedValueOnce(new Response("", { status: 422 }))
+      .mockResolvedValueOnce(jsonResponse({}))
       // Stale-thumbs-up cleanup after posting with findings.
-      .mockResolvedValueOnce({
-        ok: true,
-        text: vi.fn().mockResolvedValue(JSON.stringify({ login: "review-bot" })),
-      })
-      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue(JSON.stringify([])) });
+      .mockResolvedValueOnce(jsonResponse({ login: "review-bot" }))
+      .mockResolvedValueOnce(jsonResponse([]));
     vi.stubGlobal("fetch", fetchMock);
 
     await sendOutput({
@@ -2734,25 +2627,12 @@ printf("first\\nsecond")
   it("falls back to Issues API when the body-only retry also fails", async () => {
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce({
-        ok: false,
-        status: 422,
-        statusText: "Unprocessable Entity",
-        text: vi.fn().mockResolvedValue(""),
-      })
-      .mockResolvedValueOnce({
-        ok: false,
-        status: 422,
-        statusText: "Unprocessable Entity",
-        text: vi.fn().mockResolvedValue(""),
-      })
-      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue("") })
+      .mockResolvedValueOnce(new Response("", { status: 422 }))
+      .mockResolvedValueOnce(new Response("", { status: 422 }))
+      .mockResolvedValueOnce(jsonResponse({}))
       // Stale-thumbs-up cleanup after posting with findings.
-      .mockResolvedValueOnce({
-        ok: true,
-        text: vi.fn().mockResolvedValue(JSON.stringify({ login: "review-bot" })),
-      })
-      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue(JSON.stringify([])) });
+      .mockResolvedValueOnce(jsonResponse({ login: "review-bot" }))
+      .mockResolvedValueOnce(jsonResponse([]));
     vi.stubGlobal("fetch", fetchMock);
 
     await sendOutput({
@@ -2784,6 +2664,63 @@ printf("first\\nsecond")
       .body as string;
     expect(issueCommentBody).not.toContain("suggestion");
     expect(issueCommentBody).not.toContain("if (user) use(user);");
+  });
+
+  it("does not post an Issues fallback when reconciliation fails after a posted review", async () => {
+    // A posted review followed by a reconciliation failure must propagate the
+    // error, not treat the posted review as rejected and double-post.
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ id: 1 }))
+      .mockResolvedValueOnce(new Response("denied", { status: 403 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      sendOutput({
+        target: "comment",
+        structuredResult: {
+          summary: "Needs fixes",
+          comments: [{ file: "src/a.ts", line: 1, side: "RIGHT", severity: "WARN", body: "x" }],
+          finding_updates: [{ comment_id: 7, status: "RESOLVED", explanation: "fixed" }],
+        },
+        githubToken: "token123",
+        prNumber: 42,
+        repo: "owner/repo",
+        commitId: "abc123",
+        existingFindings: [{ commentId: 7 }],
+      }),
+    ).rejects.toThrow();
+    expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("/issues/42/comments"))).toBe(
+      false,
+    );
+  });
+
+  it("does not post an Issues fallback when reconciliation fails after a body-only review", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response("bad position", { status: 422 }))
+      .mockResolvedValueOnce(jsonResponse({ id: 2 }))
+      .mockResolvedValueOnce(new Response("denied", { status: 403 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      sendOutput({
+        target: "comment",
+        structuredResult: {
+          summary: "Needs fixes",
+          comments: [{ file: "src/a.ts", line: 1, side: "RIGHT", severity: "WARN", body: "x" }],
+          finding_updates: [{ comment_id: 7, status: "RESOLVED", explanation: "fixed" }],
+        },
+        githubToken: "token123",
+        prNumber: 42,
+        repo: "owner/repo",
+        commitId: "abc123",
+        existingFindings: [{ commentId: 7 }],
+      }),
+    ).rejects.toThrow();
+    expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("/issues/42/comments"))).toBe(
+      false,
+    );
   });
 
   it("posts only positionable comments inline and moves the rest to the review body", async () => {
@@ -2992,12 +2929,7 @@ printf("first\\nsecond")
   });
 
   it("throws when fetch response is not ok", async () => {
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: false,
-      status: 403,
-      statusText: "Forbidden",
-      text: vi.fn().mockResolvedValue("Forbidden"),
-    });
+    const fetchMock = vi.fn().mockResolvedValue(new Response("Forbidden", { status: 403 }));
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(
@@ -3278,28 +3210,16 @@ describe("reconcileFindingUpdates", () => {
     const reviewBody = `visible summary\n${encodeBodyFindingMarker({ findingId: id, file: "src/a.ts", line: 1, side: "RIGHT", severity: "WARN", body: "body issue" })}\nvisible details`;
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        text: vi.fn().mockResolvedValue(JSON.stringify({ login: "bot" })),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        text: vi.fn().mockResolvedValue(JSON.stringify({ head: { sha: "head" } })),
-      })
-      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue("[]") })
-      .mockResolvedValueOnce({
-        ok: true,
-        text: vi.fn().mockResolvedValue(
-          JSON.stringify({
-            body: reviewBody.replace("visible details", "fresh visible details"),
-          }),
-        ),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        text: vi.fn().mockResolvedValue(JSON.stringify({ head: { sha: "head" } })),
-      })
-      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue("{}") });
+      .mockResolvedValueOnce(jsonResponse({ login: "bot" }))
+      .mockResolvedValueOnce(jsonResponse({ head: { sha: "head" } }))
+      .mockResolvedValueOnce(jsonResponse([]))
+      .mockResolvedValueOnce(
+        jsonResponse({
+          body: reviewBody.replace("visible details", "fresh visible details"),
+        }),
+      )
+      .mockResolvedValueOnce(jsonResponse({ head: { sha: "head" } }))
+      .mockResolvedValueOnce(jsonResponse({}));
     vi.stubGlobal("fetch", fetchMock);
     await expect(
       reconcileFindingUpdates({
@@ -3348,28 +3268,16 @@ describe("reconcileFindingUpdates", () => {
     ].join("\n");
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        text: vi.fn().mockResolvedValue(JSON.stringify({ login: "bot" })),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        text: vi.fn().mockResolvedValue(JSON.stringify({ head: { sha: "head" } })),
-      })
-      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue("[]") })
-      .mockResolvedValueOnce({
-        ok: true,
-        text: vi.fn().mockResolvedValue(
-          JSON.stringify({
-            body: reviewBody.replace("visible details", "fresh sibling details"),
-          }),
-        ),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        text: vi.fn().mockResolvedValue(JSON.stringify({ head: { sha: "head" } })),
-      })
-      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue("{}") });
+      .mockResolvedValueOnce(jsonResponse({ login: "bot" }))
+      .mockResolvedValueOnce(jsonResponse({ head: { sha: "head" } }))
+      .mockResolvedValueOnce(jsonResponse([]))
+      .mockResolvedValueOnce(
+        jsonResponse({
+          body: reviewBody.replace("visible details", "fresh sibling details"),
+        }),
+      )
+      .mockResolvedValueOnce(jsonResponse({ head: { sha: "head" } }))
+      .mockResolvedValueOnce(jsonResponse({}));
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(
@@ -3412,7 +3320,7 @@ describe("reconcileFindingUpdates", () => {
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock.mock.calls[0][1]).toMatchObject({
-      headers: expect.objectContaining({ authorization: "Bearer t" }),
+      headers: expect.objectContaining({ authorization: "token t" }),
     });
   });
   it("skips the body review PUT when the PR head changes before the body write", async () => {
@@ -3427,23 +3335,11 @@ describe("reconcileFindingUpdates", () => {
     });
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        text: vi.fn().mockResolvedValue(JSON.stringify({ login: "bot" })),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        text: vi.fn().mockResolvedValue(JSON.stringify({ head: { sha: "head" } })),
-      })
-      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue("[]") })
-      .mockResolvedValueOnce({
-        ok: true,
-        text: vi.fn().mockResolvedValue(JSON.stringify({ body: reviewBody })),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        text: vi.fn().mockResolvedValue(JSON.stringify({ head: { sha: "new-head" } })),
-      });
+      .mockResolvedValueOnce(jsonResponse({ login: "bot" }))
+      .mockResolvedValueOnce(jsonResponse({ head: { sha: "head" } }))
+      .mockResolvedValueOnce(jsonResponse([]))
+      .mockResolvedValueOnce(jsonResponse({ body: reviewBody }))
+      .mockResolvedValueOnce(jsonResponse({ head: { sha: "new-head" } }));
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(
@@ -3479,19 +3375,10 @@ describe("reconcileFindingUpdates", () => {
     });
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        text: vi.fn().mockResolvedValue(JSON.stringify({ login: "bot" })),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        text: vi.fn().mockResolvedValue(JSON.stringify({ head: { sha: "head" } })),
-      })
-      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue("[]") })
-      .mockResolvedValueOnce({
-        ok: true,
-        text: vi.fn().mockResolvedValue(JSON.stringify({ body: reviewBody })),
-      });
+      .mockResolvedValueOnce(jsonResponse({ login: "bot" }))
+      .mockResolvedValueOnce(jsonResponse({ head: { sha: "head" } }))
+      .mockResolvedValueOnce(jsonResponse([]))
+      .mockResolvedValueOnce(jsonResponse({ body: reviewBody }));
     vi.stubGlobal("fetch", fetchMock);
     await expect(
       reconcileFindingUpdates({
@@ -3508,32 +3395,17 @@ describe("reconcileFindingUpdates", () => {
   it("replies and resolves a resolved finding", async () => {
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        text: vi.fn().mockResolvedValue(JSON.stringify({ login: "bot" })),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        text: vi.fn().mockResolvedValue(JSON.stringify({ head: { sha: "head" } })),
-      })
-      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue("[]") })
-      .mockResolvedValueOnce({
-        ok: true,
-        text: vi.fn().mockResolvedValue(JSON.stringify({ head: { sha: "head" } })),
-      })
-      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue("{}") })
-      .mockResolvedValueOnce({
-        ok: true,
-        text: vi.fn().mockResolvedValue(JSON.stringify({ head: { sha: "head" } })),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        text: vi.fn().mockResolvedValue(
-          JSON.stringify({
-            data: { resolveReviewThread: { thread: { id: "thread", isResolved: true } } },
-          }),
-        ),
-      });
+      .mockResolvedValueOnce(jsonResponse({ login: "bot" }))
+      .mockResolvedValueOnce(jsonResponse({ head: { sha: "head" } }))
+      .mockResolvedValueOnce(jsonResponse([]))
+      .mockResolvedValueOnce(jsonResponse({ head: { sha: "head" } }))
+      .mockResolvedValueOnce(jsonResponse({}))
+      .mockResolvedValueOnce(jsonResponse({ head: { sha: "head" } }))
+      .mockResolvedValueOnce(
+        jsonResponse({
+          data: { resolveReviewThread: { thread: { id: "thread", isResolved: true } } },
+        }),
+      );
     vi.stubGlobal("fetch", fetchMock);
     await reconcileFindingUpdates({
       token: "t",
@@ -3548,25 +3420,11 @@ describe("reconcileFindingUpdates", () => {
   it("continues after reply or resolve failures", async () => {
     const replyFailure = vi
       .fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        text: vi.fn().mockResolvedValue(JSON.stringify({ login: "bot" })),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        text: vi.fn().mockResolvedValue(JSON.stringify({ head: { sha: "head" } })),
-      })
-      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue("[]") })
-      .mockResolvedValueOnce({
-        ok: true,
-        text: vi.fn().mockResolvedValue(JSON.stringify({ head: { sha: "head" } })),
-      })
-      .mockResolvedValueOnce({
-        ok: false,
-        status: 500,
-        statusText: "error",
-        text: vi.fn().mockResolvedValue("failed"),
-      });
+      .mockResolvedValueOnce(jsonResponse({ login: "bot" }))
+      .mockResolvedValueOnce(jsonResponse({ head: { sha: "head" } }))
+      .mockResolvedValueOnce(jsonResponse([]))
+      .mockResolvedValueOnce(jsonResponse({ head: { sha: "head" } }))
+      .mockResolvedValueOnce(new Response("failed", { status: 500 }));
     vi.stubGlobal("fetch", replyFailure);
     await expect(
       reconcileFindingUpdates({
@@ -3582,28 +3440,13 @@ describe("reconcileFindingUpdates", () => {
 
     const resolveFailure = vi
       .fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        text: vi.fn().mockResolvedValue(JSON.stringify({ login: "bot" })),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        text: vi.fn().mockResolvedValue(JSON.stringify({ head: { sha: "head" } })),
-      })
-      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue("[]") })
-      .mockResolvedValueOnce({
-        ok: true,
-        text: vi.fn().mockResolvedValue(JSON.stringify({ head: { sha: "head" } })),
-      })
-      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue("{}") })
-      .mockResolvedValueOnce({
-        ok: true,
-        text: vi.fn().mockResolvedValue(JSON.stringify({ head: { sha: "head" } })),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        text: vi.fn().mockResolvedValue(JSON.stringify({ errors: [{ message: "failed" }] })),
-      });
+      .mockResolvedValueOnce(jsonResponse({ login: "bot" }))
+      .mockResolvedValueOnce(jsonResponse({ head: { sha: "head" } }))
+      .mockResolvedValueOnce(jsonResponse([]))
+      .mockResolvedValueOnce(jsonResponse({ head: { sha: "head" } }))
+      .mockResolvedValueOnce(jsonResponse({}))
+      .mockResolvedValueOnce(jsonResponse({ head: { sha: "head" } }))
+      .mockResolvedValueOnce(jsonResponse({ errors: [{ message: "failed" }] }));
     vi.stubGlobal("fetch", resolveFailure);
     await expect(
       reconcileFindingUpdates({
@@ -3620,19 +3463,10 @@ describe("reconcileFindingUpdates", () => {
   it("does not resolve a finding when the head changes during reconciliation", async () => {
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        text: vi.fn().mockResolvedValue(JSON.stringify({ login: "bot" })),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        text: vi.fn().mockResolvedValue(JSON.stringify({ head: { sha: "old-head" } })),
-      })
-      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue("[]") })
-      .mockResolvedValueOnce({
-        ok: true,
-        text: vi.fn().mockResolvedValue(JSON.stringify({ head: { sha: "new-head" } })),
-      });
+      .mockResolvedValueOnce(jsonResponse({ login: "bot" }))
+      .mockResolvedValueOnce(jsonResponse({ head: { sha: "old-head" } }))
+      .mockResolvedValueOnce(jsonResponse([]))
+      .mockResolvedValueOnce(jsonResponse({ head: { sha: "new-head" } }));
     vi.stubGlobal("fetch", fetchMock);
     await reconcileFindingUpdates({
       token: "t",
@@ -3648,20 +3482,11 @@ describe("reconcileFindingUpdates", () => {
   it("persists the reconciliation status in the status marker", async () => {
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        text: vi.fn().mockResolvedValue(JSON.stringify({ login: "bot" })),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        text: vi.fn().mockResolvedValue(JSON.stringify({ head: { sha: "head" } })),
-      })
-      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue("[]") })
-      .mockResolvedValueOnce({
-        ok: true,
-        text: vi.fn().mockResolvedValue(JSON.stringify({ head: { sha: "head" } })),
-      })
-      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue("{}") });
+      .mockResolvedValueOnce(jsonResponse({ login: "bot" }))
+      .mockResolvedValueOnce(jsonResponse({ head: { sha: "head" } }))
+      .mockResolvedValueOnce(jsonResponse([]))
+      .mockResolvedValueOnce(jsonResponse({ head: { sha: "head" } }))
+      .mockResolvedValueOnce(jsonResponse({}));
     vi.stubGlobal("fetch", fetchMock);
     await expect(
       reconcileFindingUpdates({
@@ -3680,45 +3505,17 @@ describe("reconcileFindingUpdates", () => {
   it("uses exactly the first seven SHA characters in lifecycle wording", async () => {
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        text: vi.fn().mockResolvedValue(JSON.stringify({ login: "bot" })),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        text: vi.fn().mockResolvedValue(JSON.stringify({ head: { sha: "345879342abcdef" } })),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        text: vi.fn().mockResolvedValue(JSON.stringify([])),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        text: vi.fn().mockResolvedValue(JSON.stringify({ head: { sha: "345879342abcdef" } })),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        text: vi.fn().mockResolvedValue(JSON.stringify({ id: 10 })),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        text: vi.fn().mockResolvedValue(JSON.stringify({ head: { sha: "345879342abcdef" } })),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        text: vi.fn().mockResolvedValue(
-          JSON.stringify({
-            data: { resolveReviewThread: { thread: { id: "thread", isResolved: true } } },
-          }),
-        ),
-      });
+      .mockResolvedValueOnce(jsonResponse({ login: "bot" }))
+      .mockResolvedValueOnce(jsonResponse({ head: { sha: "345879342abcdef" } }))
+      .mockResolvedValueOnce(jsonResponse([]))
+      .mockResolvedValueOnce(jsonResponse({ head: { sha: "345879342abcdef" } }))
+      .mockResolvedValueOnce(jsonResponse({ id: 10 }))
+      .mockResolvedValueOnce(jsonResponse({ head: { sha: "345879342abcdef" } }))
+      .mockResolvedValueOnce(
+        jsonResponse({
+          data: { resolveReviewThread: { thread: { id: "thread", isResolved: true } } },
+        }),
+      );
     vi.stubGlobal("fetch", fetchMock);
     await expect(
       reconcileFindingUpdates({
@@ -3737,27 +3534,18 @@ describe("reconcileFindingUpdates", () => {
   it("leaves partial findings open and skips an already-posted reply", async () => {
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        text: vi.fn().mockResolvedValue(JSON.stringify({ login: "bot" })),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        text: vi.fn().mockResolvedValue(JSON.stringify({ head: { sha: "head" } })),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        text: vi.fn().mockResolvedValue(
-          JSON.stringify([
-            {
-              id: 9,
-              in_reply_to_id: 3,
-              user: { login: "bot" },
-              body: '"targetSha":"head","status":"PARTIALLY_RESOLVED"',
-            },
-          ]),
-        ),
-      });
+      .mockResolvedValueOnce(jsonResponse({ login: "bot" }))
+      .mockResolvedValueOnce(jsonResponse({ head: { sha: "head" } }))
+      .mockResolvedValueOnce(
+        jsonResponse([
+          {
+            id: 9,
+            in_reply_to_id: 3,
+            user: { login: "bot" },
+            body: '"targetSha":"head","status":"PARTIALLY_RESOLVED"',
+          },
+        ]),
+      );
     vi.stubGlobal("fetch", fetchMock);
     await reconcileFindingUpdates({
       token: "t",
@@ -3778,44 +3566,26 @@ describe("reconcileFindingUpdates", () => {
   it("does not deduplicate a transition from partial to resolved", async () => {
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        text: vi.fn().mockResolvedValue(JSON.stringify({ login: "bot" })),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        text: vi.fn().mockResolvedValue(JSON.stringify({ head: { sha: "head" } })),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        text: vi.fn().mockResolvedValue(
-          JSON.stringify([
-            {
-              id: 9,
-              in_reply_to_id: 3,
-              user: { login: "bot" },
-              body: '"targetSha":"head","status":"PARTIALLY_RESOLVED"',
-            },
-          ]),
-        ),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        text: vi.fn().mockResolvedValue(JSON.stringify({ head: { sha: "head" } })),
-      })
-      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue("{}") })
-      .mockResolvedValueOnce({
-        ok: true,
-        text: vi.fn().mockResolvedValue(JSON.stringify({ head: { sha: "head" } })),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        text: vi.fn().mockResolvedValue(
-          JSON.stringify({
-            data: { resolveReviewThread: { thread: { id: "thread", isResolved: true } } },
-          }),
-        ),
-      });
+      .mockResolvedValueOnce(jsonResponse({ login: "bot" }))
+      .mockResolvedValueOnce(jsonResponse({ head: { sha: "head" } }))
+      .mockResolvedValueOnce(
+        jsonResponse([
+          {
+            id: 9,
+            in_reply_to_id: 3,
+            user: { login: "bot" },
+            body: '"targetSha":"head","status":"PARTIALLY_RESOLVED"',
+          },
+        ]),
+      )
+      .mockResolvedValueOnce(jsonResponse({ head: { sha: "head" } }))
+      .mockResolvedValueOnce(jsonResponse({}))
+      .mockResolvedValueOnce(jsonResponse({ head: { sha: "head" } }))
+      .mockResolvedValueOnce(
+        jsonResponse({
+          data: { resolveReviewThread: { thread: { id: "thread", isResolved: true } } },
+        }),
+      );
     vi.stubGlobal("fetch", fetchMock);
     await reconcileFindingUpdates({
       token: "t",
@@ -3830,29 +3600,15 @@ describe("reconcileFindingUpdates", () => {
   it("does not treat a participant's forged status reply as an existing lifecycle reply", async () => {
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        text: vi.fn().mockResolvedValue(JSON.stringify({ login: "bot" })),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        text: vi.fn().mockResolvedValue(JSON.stringify({ head: { sha: "head" } })),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        text: vi
-          .fn()
-          .mockResolvedValue(
-            JSON.stringify([
-              { id: 9, in_reply_to_id: 3, user: { login: "human" }, body: '"targetSha":"head"' },
-            ]),
-          ),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        text: vi.fn().mockResolvedValue(JSON.stringify({ head: { sha: "head" } })),
-      })
-      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue("{}") });
+      .mockResolvedValueOnce(jsonResponse({ login: "bot" }))
+      .mockResolvedValueOnce(jsonResponse({ head: { sha: "head" } }))
+      .mockResolvedValueOnce(
+        jsonResponse([
+          { id: 9, in_reply_to_id: 3, user: { login: "human" }, body: '"targetSha":"head"' },
+        ]),
+      )
+      .mockResolvedValueOnce(jsonResponse({ head: { sha: "head" } }))
+      .mockResolvedValueOnce(jsonResponse({}));
     vi.stubGlobal("fetch", fetchMock);
     await reconcileFindingUpdates({
       token: "t",
@@ -3876,27 +3632,12 @@ describe("reconcileFindingUpdates", () => {
     });
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        text: vi.fn().mockResolvedValue(JSON.stringify({ login: "bot" })),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        text: vi.fn().mockResolvedValue(JSON.stringify({ head: { sha: "head" } })),
-      })
-      .mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue(JSON.stringify([])) })
-      .mockResolvedValueOnce({
-        ok: true,
-        text: vi.fn().mockResolvedValue(JSON.stringify({ body: `fallback comment\n${marker}` })),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        text: vi.fn().mockResolvedValue(JSON.stringify({ head: { sha: "head" } })),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        text: vi.fn().mockResolvedValue(JSON.stringify({ id: 555 })),
-      });
+      .mockResolvedValueOnce(jsonResponse({ login: "bot" }))
+      .mockResolvedValueOnce(jsonResponse({ head: { sha: "head" } }))
+      .mockResolvedValueOnce(jsonResponse([]))
+      .mockResolvedValueOnce(jsonResponse({ body: `fallback comment\n${marker}` }))
+      .mockResolvedValueOnce(jsonResponse({ head: { sha: "head" } }))
+      .mockResolvedValueOnce(jsonResponse({ id: 555 }));
     vi.stubGlobal("fetch", fetchMock);
     const outstanding = await reconcileFindingUpdates({
       token: "t",
@@ -3952,15 +3693,10 @@ describe("reconcileFindingUpdates", () => {
   it("retains a batch marker in the body-only fallback", async () => {
     const marker =
       '<!-- pi-reviewer:batch:v1 {"version":1,"fromSha":"base","toSha":"head","kind":"synchronize","actor":"bot","reviewId":0} -->';
-    const response = (body: unknown, ok = true, status = 200) => ({
-      ok,
-      status,
-      text: vi.fn().mockResolvedValue(typeof body === "string" ? body : JSON.stringify(body)),
-      json: vi.fn().mockResolvedValue(body),
-      clone() {
-        return this;
-      },
-    });
+    const response = (body: unknown, ok = true, status = 200) =>
+      ok
+        ? jsonResponse(body)
+        : new Response(typeof body === "string" ? body : JSON.stringify(body), { status });
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(response({ head: { sha: "head" } }))
@@ -4109,18 +3845,9 @@ describe("sendOutput skipped-diff notice", () => {
       '<!-- pi-reviewer:batch:v1 {"version":1,"fromSha":"a","toSha":"b","kind":"opened","actor":"bot","reviewId":0} -->';
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        text: vi.fn().mockResolvedValue(JSON.stringify({ id: 9 })),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        text: vi.fn().mockResolvedValue(JSON.stringify({ id: 9 })),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        text: vi.fn().mockResolvedValue(JSON.stringify({ head: { sha: "head" } })),
-      });
+      .mockResolvedValueOnce(jsonResponse({ id: 9 }))
+      .mockResolvedValueOnce(jsonResponse({ id: 9 }))
+      .mockResolvedValueOnce(jsonResponse({ head: { sha: "head" } }));
     vi.stubGlobal("fetch", fetchMock);
 
     await sendOutput({
@@ -4162,15 +3889,9 @@ describe("sendOutput skipped-diff notice", () => {
     try {
       const fetchMock = vi
         .fn()
-        .mockResolvedValueOnce({
-          ok: true,
-          text: vi.fn().mockResolvedValue(JSON.stringify({ id: 9 })),
-        })
+        .mockResolvedValueOnce(jsonResponse({ id: 9 }))
         .mockRejectedValueOnce(new Error("transient"))
-        .mockResolvedValueOnce({
-          ok: true,
-          text: vi.fn().mockResolvedValue(JSON.stringify({ head: { sha: "head" } })),
-        });
+        .mockResolvedValueOnce(jsonResponse({ head: { sha: "head" } }));
       vi.stubGlobal("fetch", fetchMock);
 
       await sendOutput({

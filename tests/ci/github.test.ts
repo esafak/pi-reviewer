@@ -4,19 +4,25 @@ import { GitHubClient, GitHubError, githubGraphqlDocuments } from "../../src/ci/
 afterEach(() => vi.unstubAllGlobals());
 
 function response(body: unknown, ok = true, status = 200) {
-  return {
-    ok,
+  return new Response(body === undefined ? null : JSON.stringify(body), {
     status,
     statusText: ok ? "OK" : "Bad Request",
-    text: vi.fn().mockResolvedValue(JSON.stringify(body)),
-  };
+    headers: { "content-type": "application/json" },
+  });
 }
 
 describe("GitHubClient", () => {
   it("paginates REST collections", async () => {
+    const nextLink =
+      '<https://api.github.com/repos/owner/repo/pulls/1/reviews?per_page=100&page=2>; rel="next"';
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce(response(Array.from({ length: 100 }, (_, id) => ({ id }))))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(Array.from({ length: 100 }, (_, id) => ({ id }))), {
+          status: 200,
+          headers: { "content-type": "application/json", link: nextLink },
+        }),
+      )
       .mockResolvedValueOnce(response([{ id: 100 }]));
     vi.stubGlobal("fetch", fetchMock);
     const reviews = await new GitHubClient("token").listReviews("owner/repo", 1);
@@ -43,7 +49,7 @@ describe("GitHubClient", () => {
     expect(fetchMock).toHaveBeenCalledWith(
       "https://api.github.com/user",
       expect.objectContaining({
-        headers: expect.objectContaining({ authorization: "Bearer token" }),
+        headers: expect.objectContaining({ authorization: "token token" }),
       }),
     );
   });
@@ -64,8 +70,8 @@ describe("GitHubClient", () => {
     expect(fetchMock).toHaveBeenLastCalledWith(
       "https://api.github.com/graphql",
       expect.objectContaining({
-        headers: expect.objectContaining({ authorization: "Bearer token" }),
-        body: JSON.stringify({ query: githubGraphqlDocuments.viewer, variables: {} }),
+        headers: expect.objectContaining({ authorization: "token token" }),
+        body: JSON.stringify({ query: githubGraphqlDocuments.viewer }),
       }),
     );
   });
@@ -140,7 +146,7 @@ describe("GitHubClient", () => {
     vi.stubGlobal("fetch", fetchMock);
     await new GitHubClient("token").listIssueComments("owner/repo", 42);
     expect(fetchMock).toHaveBeenCalledWith(
-      "https://api.github.com/repos/owner/repo/issues/42/comments?per_page=100&page=1",
+      "https://api.github.com/repos/owner/repo/issues/42/comments?per_page=100",
       expect.anything(),
     );
   });

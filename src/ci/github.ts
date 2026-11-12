@@ -1,3 +1,5 @@
+import { Octokit, RequestError } from "octokit";
+
 export interface PullRequest {
   number: number;
   head: { sha: string; repo?: { full_name?: string } };
@@ -54,45 +56,37 @@ export class GitHubError extends Error {
   }
 }
 
-function githubPath(...parts: (string | number)[]): string {
-  return "/" + parts.join("/");
+/** Split "owner/repo" into endpoint params. Route shapes come from octokit. */
+function splitRepo(repo: string): { owner: string; repo: string } {
+  const [owner, name] = repo.split("/");
+  return { owner, repo: name };
 }
 
-type GitHubPathRegistry = {
-  graphql: string;
-  user: () => string;
-  pullRequest: (repo: string, number: number) => string;
-  review: (repo: string, number: number, review: number) => string;
-  reviews: (repo: string, number: number) => string;
-  reviewComments: (repo: string, number: number) => string;
-  issueComments: (repo: string, number: number) => string;
-  issueComment: (repo: string, comment: number) => string;
-  reviewComment: (repo: string, comment: number) => string;
-  reviewCommentReactions: (repo: string, comment: number) => string;
-  collaboratorPermission: (repo: string, login: string) => string;
-  issueReactions: (repo: string, number: number) => string;
-  issueReaction: (repo: string, number: number, reaction: number) => string;
-};
+/** Allowed reaction bodies for review-comment and issue reactions. */
+type ReactionContent = "+1" | "-1" | "laugh" | "confused" | "heart" | "hooray" | "rocket" | "eyes";
 
-export const githubPaths = {
-  graphql: "https://api.github.com/graphql",
-  user: () => githubPath("user"),
-  pullRequest: (repo, number) => githubPath("repos", repo, "pulls", number),
-  review: (repo, number, review) => githubPath("repos", repo, "pulls", number, "reviews", review),
-  reviews: (repo, number) => githubPath("repos", repo, "pulls", number, "reviews"),
-  reviewComments: (repo, number) => githubPath("repos", repo, "pulls", number, "comments"),
-  issueComments: (repo, number) => githubPath("repos", repo, "issues", number, "comments"),
-  issueComment: (repo, comment) => githubPath("repos", repo, "issues", "comments", comment),
-  reviewComment: (repo, comment) => githubPath("repos", repo, "pulls", "comments", comment),
-  // Review-comment reactions are addressed by comment id alone; the pull-request number is not part of the route.
-  reviewCommentReactions: (repo, comment) =>
-    githubPath("repos", repo, "pulls", "comments", comment, "reactions"),
-  collaboratorPermission: (repo, login) =>
-    githubPath("repos", repo, "collaborators", login, "permission"),
-  issueReactions: (repo, number) => githubPath("repos", repo, "issues", number, "reactions"),
-  issueReaction: (repo, number, reaction) =>
-    githubPath("repos", repo, "issues", number, "reactions", reaction),
-} as const satisfies GitHubPathRegistry;
+/** Inline comment payload for review creation. */
+interface ReviewCommentInput {
+  path: string;
+  body: string;
+  line?: number;
+  side?: string;
+}
+
+/**
+ * Maps an octokit failure back into the historical GitHubError shape so
+ * callers and log-based triage observe the same status and details.
+ */
+function toGitHubError(error: unknown): GitHubError {
+  if (error instanceof RequestError) {
+    const status = error.status;
+    const data = error.response?.data as unknown;
+    const details = typeof data === "string" ? data : JSON.stringify(data ?? "");
+    return new GitHubError(status, `GitHub API ${status}: ${error.message}`, details);
+  }
+  if (error instanceof GitHubError) return error;
+  throw error;
+}
 
 /**
  * The GraphQL response types, as the schema allows them.
@@ -237,138 +231,314 @@ export const githubResearchGraphqlDocuments = {
 } as const;
 
 export class GitHubClient {
-  constructor(
-    private readonly token: string,
-    private readonly base = "https://api.github.com",
-  ) {}
-  private resolveUrl(url: string) {
-    return url.startsWith("http") ? url : this.base + url;
-  }
-  async request<T>(url: string, init: RequestInit = {}): Promise<T> {
-    const response = await fetch(this.resolveUrl(url), {
-      ...init,
-      headers: {
-        accept: "application/vnd.github+json",
-        authorization: `Bearer ${this.token}`,
-        "x-github-api-version": "2022-11-28",
-        ...(init.body ? { "content-type": "application/json" } : {}),
-        ...init.headers,
-      },
+  private readonly octokit: Octokit;
+  constructor(token: string, base = "https://api.github.com") {
+    this.octokit = new Octokit({
+      auth: token,
+      baseUrl: base,
+      // The harness owns retry policy explicitly (e.g. the 422 body-only
+      // repost): silent transport retries could double-post reviews.
+      retry: { enabled: false },
+      throttle: { enabled: false },
     });
-    const text = await response.text();
-    if (!response.ok)
-      throw new GitHubError(
-        response.status,
-        `GitHub API ${response.status}: ${response.statusText}`,
-        text,
-      );
-    return (text ? JSON.parse(text) : undefined) as T;
   }
   async getUser() {
     try {
-      return await this.request<{ login: string; id: number; type?: string }>(githubPaths.user());
+      const { data } = await this.octokit.rest.users.getAuthenticated();
+      return { login: data.login, id: data.id, type: data.type };
     } catch (error) {
+      const mapped = toGitHubError(error);
       if (
-        !(error instanceof GitHubError) ||
-        error.status !== 403 ||
-        !error.details.includes("Resource not accessible by integration")
+        !(mapped instanceof GitHubError) ||
+        mapped.status !== 403 ||
+        !mapped.details.includes("Resource not accessible by integration")
       )
-        throw error;
+        throw mapped;
       const data = await this.graphql<{
         viewer: { login: string; id: string; __typename?: string };
       }>(githubGraphqlDocuments.viewer, {});
       return { login: data.viewer.login, id: data.viewer.id, type: data.viewer.__typename };
     }
   }
-  getPullRequest(repo: string, number: number) {
-    return this.request<PullRequest>(githubPaths.pullRequest(repo, number));
-  }
-  getReview(repo: string, number: number, review: number) {
-    return this.request<Review>(githubPaths.review(repo, number, review));
-  }
-  async getCollaboratorPermission(repo: string, login: string): Promise<string | undefined> {
-    const data = await this.request<{ permission?: string }>(
-      githubPaths.collaboratorPermission(repo, login),
-    );
-    return data.permission;
-  }
-  private async list<T>(url: string): Promise<T[]> {
-    const all: T[] = [];
-    for (let page = 1; ; page++) {
-      const pageUrl = new URL(this.resolveUrl(url));
-      pageUrl.searchParams.set("per_page", "100");
-      pageUrl.searchParams.set("page", String(page));
-      const values = await this.request<T[]>(pageUrl.toString());
-      all.push(...values);
-      if (values.length < 100) return all;
+  async getPullRequest(repo: string, number: number): Promise<PullRequest> {
+    try {
+      const { owner, repo: name } = splitRepo(repo);
+      const { data } = await this.octokit.rest.pulls.get({
+        owner,
+        repo: name,
+        pull_number: number,
+      });
+      return data as PullRequest;
+    } catch (error) {
+      throw toGitHubError(error);
     }
   }
-  listReviews(repo: string, number: number) {
-    return this.list<Review>(githubPaths.reviews(repo, number));
+  async getReview(repo: string, number: number, review: number): Promise<Review> {
+    try {
+      const { owner, repo: name } = splitRepo(repo);
+      const { data } = await this.octokit.rest.pulls.getReview({
+        owner,
+        repo: name,
+        pull_number: number,
+        review_id: review,
+      });
+      return data as Review;
+    } catch (error) {
+      throw toGitHubError(error);
+    }
   }
-  listComments(repo: string, number: number) {
-    return this.list<ReviewComment>(githubPaths.reviewComments(repo, number));
+  async getCollaboratorPermission(repo: string, login: string): Promise<string | undefined> {
+    try {
+      const { owner, repo: name } = splitRepo(repo);
+      const { data } = await this.octokit.rest.repos.getCollaboratorPermissionLevel({
+        owner,
+        repo: name,
+        username: login,
+      });
+      return data.permission;
+    } catch (error) {
+      throw toGitHubError(error);
+    }
   }
-  listIssueComments(repo: string, number: number) {
-    return this.list<ReviewComment>(githubPaths.issueComments(repo, number));
+  async getIssueComment(repo: string, comment: number): Promise<ReviewComment> {
+    try {
+      const { owner, repo: name } = splitRepo(repo);
+      const { data } = await this.octokit.rest.issues.getComment({
+        owner,
+        repo: name,
+        comment_id: comment,
+      });
+      return data as ReviewComment;
+    } catch (error) {
+      throw toGitHubError(error);
+    }
   }
-  createReview(repo: string, number: number, body: string, commit_id: string, comments: unknown[]) {
-    return this.request<Review>(githubPaths.reviews(repo, number), {
-      method: "POST",
-      body: JSON.stringify({ body, commit_id, event: "COMMENT", comments }),
-    });
+  async listReviews(repo: string, number: number): Promise<Review[]> {
+    try {
+      const { owner, repo: name } = splitRepo(repo);
+      const data = await this.octokit.paginate(this.octokit.rest.pulls.listReviews, {
+        owner,
+        repo: name,
+        pull_number: number,
+        per_page: 100,
+      });
+      return data as Review[];
+    } catch (error) {
+      throw toGitHubError(error);
+    }
   }
-  updateReview(repo: string, number: number, review: number, body: string) {
-    return this.request<Review>(githubPaths.review(repo, number, review), {
-      method: "PUT",
-      body: JSON.stringify({ body }),
-    });
+  async listComments(repo: string, number: number): Promise<ReviewComment[]> {
+    try {
+      const { owner, repo: name } = splitRepo(repo);
+      const data = await this.octokit.paginate(this.octokit.rest.pulls.listReviewComments, {
+        owner,
+        repo: name,
+        pull_number: number,
+        per_page: 100,
+      });
+      return data as ReviewComment[];
+    } catch (error) {
+      throw toGitHubError(error);
+    }
   }
-  updateIssueComment(repo: string, number: number, comment: number, body: string) {
-    return this.request<ReviewComment>(githubPaths.issueComment(repo, comment), {
-      method: "PATCH",
-      body: JSON.stringify({ body }),
-    });
+  async listIssueComments(repo: string, number: number): Promise<ReviewComment[]> {
+    try {
+      const { owner, repo: name } = splitRepo(repo);
+      const data = await this.octokit.paginate(this.octokit.rest.issues.listComments, {
+        owner,
+        repo: name,
+        issue_number: number,
+        per_page: 100,
+      });
+      return data as ReviewComment[];
+    } catch (error) {
+      throw toGitHubError(error);
+    }
   }
-  updateReviewComment(repo: string, number: number, comment: number, body: string) {
-    return this.request<ReviewComment>(githubPaths.reviewComment(repo, comment), {
-      method: "PATCH",
-      body: JSON.stringify({ body }),
-    });
+  async createReview(
+    repo: string,
+    number: number,
+    body: string,
+    commit_id: string,
+    comments: unknown[],
+  ): Promise<Review> {
+    try {
+      const { owner, repo: name } = splitRepo(repo);
+      const { data } = await this.octokit.rest.pulls.createReview({
+        owner,
+        repo: name,
+        pull_number: number,
+        commit_id,
+        body,
+        event: "COMMENT",
+        comments: comments as ReviewCommentInput[],
+      });
+      return data as Review;
+    } catch (error) {
+      throw toGitHubError(error);
+    }
   }
-  reply(repo: string, number: number, comment: number, body: string) {
-    return this.request<ReviewComment>(githubPaths.reviewComments(repo, number), {
-      method: "POST",
-      body: JSON.stringify({ body, in_reply_to: comment }),
-    });
+  async createIssueComment(repo: string, number: number, body: string): Promise<ReviewComment> {
+    try {
+      const { owner, repo: name } = splitRepo(repo);
+      const { data } = await this.octokit.rest.issues.createComment({
+        owner,
+        repo: name,
+        issue_number: number,
+        body,
+      });
+      return data as ReviewComment;
+    } catch (error) {
+      throw toGitHubError(error);
+    }
   }
-  createReviewCommentReaction(repo: string, comment: number, content: string) {
-    return this.request<{ id: number; content: string }>(
-      githubPaths.reviewCommentReactions(repo, comment),
-      { method: "POST", body: JSON.stringify({ content }) },
-    );
+  async updateReview(repo: string, number: number, review: number, body: string): Promise<Review> {
+    try {
+      const { owner, repo: name } = splitRepo(repo);
+      const { data } = await this.octokit.rest.pulls.updateReview({
+        owner,
+        repo: name,
+        pull_number: number,
+        review_id: review,
+        body,
+      });
+      return data as Review;
+    } catch (error) {
+      throw toGitHubError(error);
+    }
   }
-  createReaction(repo: string, number: number, content = "+1") {
-    return this.request<{ id: number; content: string }>(githubPaths.issueReactions(repo, number), {
-      method: "POST",
-      body: JSON.stringify({ content }),
-    });
+  async updateIssueComment(
+    repo: string,
+    number: number,
+    comment: number,
+    body: string,
+  ): Promise<ReviewComment> {
+    void number;
+    try {
+      const { owner, repo: name } = splitRepo(repo);
+      const { data } = await this.octokit.rest.issues.updateComment({
+        owner,
+        repo: name,
+        comment_id: comment,
+        body,
+      });
+      return data as ReviewComment;
+    } catch (error) {
+      throw toGitHubError(error);
+    }
   }
-  listReactions(repo: string, number: number) {
-    return this.list<Reaction>(githubPaths.issueReactions(repo, number));
+  async updateReviewComment(
+    repo: string,
+    number: number,
+    comment: number,
+    body: string,
+  ): Promise<ReviewComment> {
+    void number;
+    try {
+      const { owner, repo: name } = splitRepo(repo);
+      const { data } = await this.octokit.rest.pulls.updateReviewComment({
+        owner,
+        repo: name,
+        comment_id: comment,
+        body,
+      });
+      return data as ReviewComment;
+    } catch (error) {
+      throw toGitHubError(error);
+    }
   }
-  deleteReaction(repo: string, number: number, reaction: number) {
-    return this.request<void>(githubPaths.issueReaction(repo, number, reaction), {
-      method: "DELETE",
-    });
+  async reply(repo: string, number: number, comment: number, body: string): Promise<ReviewComment> {
+    try {
+      const { owner, repo: name } = splitRepo(repo);
+      // Replies address the parent comment resource directly; the endpoint
+      // takes only the parent id plus the body, so no parameter cast is
+      // needed and a wrong route fails compilation.
+      const { data } = await this.octokit.rest.pulls.createReplyForReviewComment({
+        owner,
+        repo: name,
+        pull_number: number,
+        comment_id: comment,
+        body,
+      });
+      return data as ReviewComment;
+    } catch (error) {
+      throw toGitHubError(error);
+    }
   }
-  async graphql<T>(query: string, variables: Record<string, unknown>) {
-    const result = await this.request<{ data?: T; errors?: { message: string }[] }>(
-      githubPaths.graphql,
-      { method: "POST", body: JSON.stringify({ query, variables }) },
-    );
-    if (result.errors?.length) throw new Error(result.errors.map((e) => e.message).join("; "));
-    return result.data as T;
+  async createReviewCommentReaction(
+    repo: string,
+    comment: number,
+    content: string,
+  ): Promise<{ id: number; content: string }> {
+    try {
+      const { owner, repo: name } = splitRepo(repo);
+      const { data } = await this.octokit.rest.reactions.createForPullRequestReviewComment({
+        owner,
+        repo: name,
+        comment_id: comment,
+        content: content as ReactionContent,
+      });
+      return data as { id: number; content: string };
+    } catch (error) {
+      throw toGitHubError(error);
+    }
+  }
+  async createReaction(
+    repo: string,
+    number: number,
+    content = "+1",
+  ): Promise<{ id: number; content: string }> {
+    try {
+      const { owner, repo: name } = splitRepo(repo);
+      const { data } = await this.octokit.rest.reactions.createForIssue({
+        owner,
+        repo: name,
+        issue_number: number,
+        content: content as ReactionContent,
+      });
+      return data as { id: number; content: string };
+    } catch (error) {
+      throw toGitHubError(error);
+    }
+  }
+  async listReactions(repo: string, number: number): Promise<Reaction[]> {
+    try {
+      const { owner, repo: name } = splitRepo(repo);
+      const data = await this.octokit.paginate(this.octokit.rest.reactions.listForIssue, {
+        owner,
+        repo: name,
+        issue_number: number,
+        per_page: 100,
+      });
+      return data as Reaction[];
+    } catch (error) {
+      throw toGitHubError(error);
+    }
+  }
+  async deleteReaction(repo: string, number: number, reaction: number): Promise<void> {
+    try {
+      const { owner, repo: name } = splitRepo(repo);
+      await this.octokit.rest.reactions.deleteForIssue({
+        owner,
+        repo: name,
+        issue_number: number,
+        reaction_id: reaction,
+      });
+    } catch (error) {
+      throw toGitHubError(error);
+    }
+  }
+  async graphql<T>(query: string, variables: Record<string, unknown>): Promise<T> {
+    try {
+      return await this.octokit.graphql<T>(query, variables);
+    } catch (error) {
+      const errors = (error as { errors?: { message?: string }[] }).errors;
+      if (Array.isArray(errors) && errors.length > 0)
+        throw new Error(errors.map((e) => e.message ?? "GraphQL error").join("; "));
+      // Transport failures carry no GraphQL payload; map them so callers
+      // keep observing the historical GitHubError shape.
+      throw toGitHubError(error);
+    }
   }
   resolveThread(threadId: string) {
     return this.graphql(githubGraphqlDocuments.resolveThread, { id: threadId });

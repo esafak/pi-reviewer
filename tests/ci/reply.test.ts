@@ -154,12 +154,12 @@ describe("review-comment reply action path", () => {
     };
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockResolvedValue({
-        ok: true,
-        status: 200,
-        statusText: "OK",
-        text: vi.fn().mockResolvedValue(JSON.stringify(body)),
-      }),
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify(body), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      ),
     );
     const threads = await new GitHubClient("token").listThreads("owner/repo", 42);
     const humanReply: ReviewComment = { ...triggering, author_association: "MEMBER" };
