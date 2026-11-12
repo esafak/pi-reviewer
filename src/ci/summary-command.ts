@@ -14,7 +14,7 @@ export interface SummaryRegenerationTarget {
 /** Narrowed client surface; structurally satisfied by GitHubClient and test fakes. */
 export type SummaryGitHubClient = Pick<
   GitHubClient,
-  "getPullRequest" | "getReview" | "updateReview" | "updateIssueComment" | "request"
+  "getPullRequest" | "getReview" | "getIssueComment" | "updateReview" | "updateIssueComment"
 >;
 
 export type SummaryRegenerationOutcome = "updated" | "head-changed" | "no-overview";
@@ -54,9 +54,9 @@ export async function applySummaryRegeneration(options: {
       ? ((await options.github.getReview(options.repo, options.prNumber, options.target.reviewId!))
           .body ?? "")
       : ((
-          (await options.github.request<{ body?: string }>(
-            `/repos/${options.repo}/issues/comments/${options.target.issueCommentId}`,
-          )) as { body?: string }
+          (await options.github.getIssueComment(options.repo, options.target.issueCommentId!)) as {
+            body?: string;
+          }
         ).body ?? "");
   const updated = upsertPrSummaryBlock(
     freshBody,

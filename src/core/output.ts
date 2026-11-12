@@ -5,7 +5,7 @@ import { parseDiffPositions, partitionComments } from "./diff-positions.js";
 import { escapeHtmlCommentText } from "./html-comment.js";
 import { PR_DIAGRAM_MAX_LENGTH, PR_SUMMARY_MAX_LENGTH } from "./prompts.js";
 import { SEVERITY_EMOJI, SEVERITY_RANK, type Severity } from "./severity.js";
-import { GitHubClient } from "../ci/github.js";
+import { GitHubClient, GitHubError } from "../ci/github.js";
 import {
   bodyFindingId,
   decodeBodyFindingMarkers,
@@ -232,17 +232,6 @@ export interface OutputMetadata {
   commentIds: number[];
   fallback: boolean;
 }
-async function responseJson(
-  response: Response,
-): Promise<{ id?: number; comments?: Array<{ id?: number }> } | undefined> {
-  if (typeof response.json !== "function") return undefined;
-  try {
-    return (await response.json()) as { id?: number; comments?: Array<{ id?: number }> };
-  } catch {
-    return undefined;
-  }
-}
-
 export interface ExistingFinding {
   commentId: number;
   threadId?: string;
@@ -518,9 +507,7 @@ export async function reconcileFindingUpdates(options: {
     let updatedBody: string;
     try {
       const freshReview = group.finding.issueCommentId
-        ? await client.request<{ body?: string }>(
-            `/repos/${options.repo}/issues/comments/${group.finding.issueCommentId}`,
-          )
+        ? await client.getIssueComment(options.repo, group.finding.issueCommentId)
         : await client.getReview(
             options.repo,
             options.prNumber,
@@ -1678,16 +1665,11 @@ export async function sendOutput(options: OutputOptions): Promise<OutputMetadata
                 );
           }
         } else {
-          await (
-            await fetch(`https://api.github.com/repos/${repo}/issues/${prNumber}/comments`, {
-              method: "POST",
-              headers: {
-                Authorization: `Bearer ${options.githubToken}`,
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify({ body: noticeBody }),
-            })
-          ).text();
+          await new GitHubClient(options.githubToken).createIssueComment(
+            repo,
+            prNumber,
+            noticeBody,
+          );
         }
         await acknowledgeWithoutReview({ ...options, batchMarker: undefined }, false);
       } else {
@@ -1727,11 +1709,6 @@ export async function sendOutput(options: OutputOptions): Promise<OutputMetadata
     if (!options.repo) {
       throw new Error("Repository (owner/repo) is required to post a comment");
     }
-
-    const headers = {
-      Authorization: `Bearer ${options.githubToken}`,
-      "Content-Type": "application/json",
-    };
 
     // Split comments into inline (positionable on the diff) and moved (kept in
     // the review body). Without a diff we can't validate positions, so every
@@ -1819,183 +1796,136 @@ export async function sendOutput(options: OutputOptions): Promise<OutputMetadata
         `[pi-reviewer] posting review with ${inlineComments.length} inline comment(s)` +
           (moved.length > 0 ? ` and ${moved.length} comment(s) in body` : ""),
       );
-      let reviewResponse = await fetch(
-        `https://api.github.com/repos/${options.repo}/pulls/${options.prNumber}/reviews`,
-        {
-          method: "POST",
-          headers,
-          body: JSON.stringify({
-            commit_id: options.commitId,
-            body,
-            event: "COMMENT",
-            comments: inlineComments,
-          }),
-        },
-      );
-      if (reviewResponse.ok) {
-        console.log("[pi-reviewer] review posted with inline comments");
-        if (options.batchMarker && options.githubToken && options.repo && options.prNumber) {
-          const posted = (await reviewResponse
-            .clone()
-            .json()
-            .catch(() => undefined)) as { id?: number } | undefined;
-          if (posted?.id) {
-            const finalized = options.batchMarker.replace(/("reviewId"\s*:\s*)0/, `$1${posted.id}`);
-            if (finalized !== options.batchMarker)
-              await new GitHubClient(options.githubToken)
-                .updateReview(
-                  options.repo,
-                  options.prNumber,
-                  posted.id,
-                  [finalized, buildReviewBody(result, moved, comments, options)].join("\n\n"),
-                )
-                .catch((error) =>
-                  console.warn(
-                    `[pi-reviewer] could not finalize batch marker: ${error instanceof Error ? error.message : String(error)}`,
-                  ),
-                );
-          }
-        }
-        if (
-          result.finding_updates?.length &&
-          options.existingFindings &&
-          options.githubToken &&
-          options.repo &&
-          options.prNumber &&
-          options.commitId
-        ) {
+      const poster = new GitHubClient(options.githubToken);
+      const repo = options.repo;
+      const prNumber = options.prNumber;
+      const token = options.githubToken;
+      const finalizePostedReview = (
+        postedId: number | undefined,
+        reviewBody: string,
+      ): Promise<void> => {
+        if (!postedId || !options.batchMarker) return Promise.resolve();
+        const finalized = options.batchMarker.replace(/("reviewId"\s*:\s*)0/, `$1${postedId}`);
+        if (finalized === options.batchMarker) return Promise.resolve();
+        return poster
+          .updateReview(repo, prNumber, postedId, [finalized, reviewBody].join("\n\n"))
+          .then(() => undefined)
+          .catch((error) =>
+            console.warn(
+              `[pi-reviewer] could not finalize batch marker: ${error instanceof Error ? error.message : String(error)}`,
+            ),
+          );
+      };
+      const reconcileAndCleanup = async (): Promise<void> => {
+        if (result.finding_updates?.length && options.existingFindings && options.commitId) {
           await reconcileFindingUpdates({
-            token: options.githubToken,
-            repo: options.repo,
-            prNumber: options.prNumber,
+            token,
+            repo,
+            prNumber,
             targetSha: options.commitId,
             updates: result.finding_updates,
             findings: options.existingFindings,
           });
         }
-        if (comments.length > 0)
-          await clearStaleThumbsUp(options.githubToken, options.repo, options.prNumber);
-        const posted = await responseJson(reviewResponse);
+        if (comments.length > 0) await clearStaleThumbsUp(token, repo, prNumber);
+      };
+      type PostedReview = { id?: number; comments?: Array<{ id?: number }> };
+      // Creation attempts only: a posted review must never fall through to
+      // the Issues fallback below (that would double-post). Finalization and
+      // reconciliation run outside this block and propagate their own errors.
+      let posted: PostedReview | undefined;
+      let bodyOnly = false;
+      try {
+        posted = (await poster.createReview(
+          repo,
+          prNumber,
+          body,
+          options.commitId,
+          inlineComments,
+        )) as unknown as PostedReview;
+        console.log("[pi-reviewer] review posted with inline comments");
+      } catch (error) {
+        const status = (error as GitHubError)?.status;
+        const errBody = error instanceof Error ? error.message : String(error);
+        console.warn(
+          `[pi-reviewer] inline comments rejected (${status ?? "unknown"}) — ${errBody}`,
+        );
+
+        // A 422 means GitHub couldn't resolve at least one position we thought was
+        // valid (e.g. a force-push changed the diff between resolution and post).
+        // Retry once as a body-only review, moving every comment into the body.
+        if (status === 422) {
+          const allMovedBody = [
+            options.batchMarker,
+            buildReviewBody(result, comments, comments, options),
+          ]
+            .filter(Boolean)
+            .join("\n\n");
+          try {
+            posted = (await poster.createReview(
+              repo,
+              prNumber,
+              allMovedBody,
+              options.commitId,
+              [],
+            )) as unknown as PostedReview;
+            bodyOnly = true;
+            console.log("[pi-reviewer] review posted as body-only (inline positions rejected)");
+          } catch (retryError) {
+            const retryStatus = (retryError as GitHubError)?.status;
+            const retryBody = retryError instanceof Error ? retryError.message : String(retryError);
+            console.warn(
+              `[pi-reviewer] body-only review rejected (${retryStatus ?? "unknown"}) — ${retryBody}`,
+            );
+          }
+        }
+      }
+      if (posted) {
+        // Finalization rebuilds the body around the finalized marker; the
+        // posted body still carries the unfinalized marker, so it must not
+        // be reused here or both marker generations would survive.
+        await finalizePostedReview(
+          posted?.id,
+          bodyOnly
+            ? buildReviewBody(result, comments, comments, options)
+            : buildReviewBody(result, moved, comments, options),
+        );
+        await reconcileAndCleanup();
         return {
           reviewId: posted?.id,
           commentIds: posted?.comments?.flatMap((c) => (c.id ? [c.id] : [])) ?? [],
-          fallback: false,
+          fallback: bodyOnly,
         };
-      }
-      let errBody = await reviewResponse.text().catch(() => "");
-      console.warn(
-        `[pi-reviewer] inline comments rejected (${reviewResponse.status}) — ${errBody}`,
-      );
-
-      // A 422 means GitHub couldn't resolve at least one position we thought was
-      // valid (e.g. a force-push changed the diff between resolution and post).
-      // Retry once as a body-only review, moving every comment into the body.
-      if (reviewResponse.status === 422) {
-        const allMovedBody = [
-          options.batchMarker,
-          buildReviewBody(result, comments, comments, options),
-        ]
-          .filter(Boolean)
-          .join("\n\n");
-        reviewResponse = await fetch(
-          `https://api.github.com/repos/${options.repo}/pulls/${options.prNumber}/reviews`,
-          {
-            method: "POST",
-            headers,
-            body: JSON.stringify({
-              commit_id: options.commitId,
-              body: allMovedBody,
-              event: "COMMENT",
-              comments: [],
-            }),
-          },
-        );
-        if (reviewResponse.ok) {
-          console.log("[pi-reviewer] review posted as body-only (inline positions rejected)");
-          if (options.batchMarker && options.githubToken && options.repo && options.prNumber) {
-            const posted = (await reviewResponse
-              .clone()
-              .json()
-              .catch(() => undefined)) as { id?: number } | undefined;
-            if (posted?.id) {
-              const finalized = options.batchMarker.replace(
-                /("reviewId"\s*:\s*)0/,
-                `$1${posted.id}`,
-              );
-              if (finalized !== options.batchMarker)
-                await new GitHubClient(options.githubToken)
-                  .updateReview(
-                    options.repo,
-                    options.prNumber,
-                    posted.id,
-                    [finalized, allMovedBody].join("\n\n"),
-                  )
-                  .catch((error) =>
-                    console.warn(
-                      `[pi-reviewer] could not finalize batch marker: ${error instanceof Error ? error.message : String(error)}`,
-                    ),
-                  );
-            }
-          }
-          if (
-            result.finding_updates?.length &&
-            options.existingFindings &&
-            options.githubToken &&
-            options.repo &&
-            options.prNumber &&
-            options.commitId
-          )
-            await reconcileFindingUpdates({
-              token: options.githubToken,
-              repo: options.repo,
-              prNumber: options.prNumber,
-              targetSha: options.commitId,
-              updates: result.finding_updates,
-              findings: options.existingFindings,
-            });
-          if (comments.length > 0)
-            await clearStaleThumbsUp(options.githubToken, options.repo, options.prNumber);
-          const posted = await responseJson(reviewResponse);
-          return {
-            reviewId: posted?.id,
-            commentIds: posted?.comments?.flatMap((c) => (c.id ? [c.id] : [])) ?? [],
-            fallback: true,
-          };
-        }
-        errBody = await reviewResponse.text().catch(() => "");
-        console.warn(
-          `[pi-reviewer] body-only review rejected (${reviewResponse.status}) — ${errBody}`,
-        );
       }
     }
 
     // Last-resort fallback: Issues Comments API (hard failures, no commitId, or
     // an all-unpositionable summary-only review).
-    const issueResponse = await fetch(
-      `https://api.github.com/repos/${options.repo}/issues/${options.prNumber}/comments`,
-      {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-          body: [options.batchMarker, formatForGitHub(result, options)]
-            .filter(Boolean)
-            .join("\n\n"),
-        }),
-      },
-    );
-
-    if (!issueResponse.ok) {
-      const body = await issueResponse.text().catch(() => "(unreadable)");
-      throw new Error(
-        `Failed to post GitHub comment: ${issueResponse.status} ${issueResponse.statusText}\n${body}`,
-      );
+    const fallbackBody = [options.batchMarker, formatForGitHub(result, options)]
+      .filter(Boolean)
+      .join("\n\n");
+    let postedIssueComment: { id?: number };
+    try {
+      postedIssueComment = (await new GitHubClient(options.githubToken).createIssueComment(
+        options.repo,
+        options.prNumber,
+        fallbackBody,
+      )) as unknown as { id?: number };
+    } catch (error) {
+      const status = error instanceof GitHubError ? error.status : "unknown";
+      const details =
+        error instanceof GitHubError && error.details
+          ? error.details
+          : error instanceof Error
+            ? error.message
+            : String(error);
+      throw new Error(`Failed to post GitHub comment: ${status} ${details}`);
     }
 
     console.log("[pi-reviewer] review comment posted");
     if (comments.length > 0)
       await clearStaleThumbsUp(options.githubToken, options.repo, options.prNumber);
-    const posted = await responseJson(issueResponse);
-    return { commentIds: posted?.id ? [posted.id] : [], fallback: true };
+    return { commentIds: postedIssueComment?.id ? [postedIssueComment.id] : [], fallback: true };
   }
 
   const cwd = options.cwd ?? process.cwd();

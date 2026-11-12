@@ -8,7 +8,7 @@ function fakeGithub(overrides: Record<string, unknown> = {}) {
     getReview: vi.fn().mockResolvedValue({ body: "old body" }),
     updateReview: vi.fn().mockResolvedValue({}),
     updateIssueComment: vi.fn().mockResolvedValue({}),
-    request: vi.fn().mockResolvedValue({ body: "old body" }),
+    getIssueComment: vi.fn().mockResolvedValue({ body: "old body" }),
     ...overrides,
   };
 }
@@ -75,7 +75,7 @@ describe("applySummaryRegeneration", () => {
 
   it("updates issue-comment bodies through the issue-comment path", async () => {
     const github = fakeGithub({
-      request: vi.fn().mockResolvedValue({ body: "Fallback prose" }),
+      getIssueComment: vi.fn().mockResolvedValue({ body: "Fallback prose" }),
     });
     const outcome = await applySummaryRegeneration({
       ...base,
