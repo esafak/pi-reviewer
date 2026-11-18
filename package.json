@@ -24,7 +24,7 @@
     "highlight.js": "^11.11.1",
     "octokit": "^5.0.5",
     "pi-lsp": "0.1.7",
-    "pi-mcp-adapter": "7.0.0",
+    "pi-mcp-adapter": "7.0.1",
     "tsx": "^4.20.5"
   },
   "devDependencies": {
