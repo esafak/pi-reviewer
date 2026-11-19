@@ -48,6 +48,15 @@
       "matchManagers": ["github-actions"],
       "description": "Keep GitHub Actions pinned to commit SHAs.",
       "pinDigests": true
+    },
+    // The undici@^6 pin in pnpm-workspace.yaml must stay on the major its consumers declare;
+    // without this cap Renovate offers cross-major versions for that override. Remove this rule
+    // together with the undici@^6 pin when the pi packages and openai move to undici 8.
+    {
+      "description": "undici@^6 CVE pin: consumers declare undici 6.x peers. Block 7.x+ until they move to 8.x; remove this rule AND the undici@^6 pin together when that happens. 6.x security patches still flow through.",
+      "matchDepTypes": ["pnpm-workspace.overrides"],
+      "matchDepNames": ["undici@^6"],
+      "allowedVersions": "<7"
     }
   ]
 }
