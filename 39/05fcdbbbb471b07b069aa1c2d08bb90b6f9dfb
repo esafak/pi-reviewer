@@ -1,0 +1,19 @@
+pnpm-lock.yaml
+  s_e153b489ab8b15::t_a24af44eb2ac92 224-226
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "3905fcdbbbb471b07b069aa1c2d08bb90b6f9dfb",
+  "prompts": {},
+  "sessions": {
+    "s_e153b489ab8b15": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_e0b8ea461ffec2uVq4FORPHUYU",
+        "model": "unknown"
+      },
+      "human_author": "Emre Şafak <3928300+esafak@users.noreply.github.com>"
+    }
+  }
+}
