@@ -2672,6 +2672,9 @@ printf("first\\nsecond")
     // error, not treat the posted review as rejected and double-post.
     const fetchMock = vi
       .fn()
+      // Block snapshot taken before the post: identity, then the review list.
+      .mockResolvedValueOnce(jsonResponse({ login: "review-bot" }))
+      .mockResolvedValueOnce(jsonResponse([]))
       .mockResolvedValueOnce(jsonResponse({ id: 1 }))
       .mockResolvedValueOnce(new Response("denied", { status: 403 }));
     vi.stubGlobal("fetch", fetchMock);
@@ -2699,6 +2702,8 @@ printf("first\\nsecond")
   it("does not post an Issues fallback when reconciliation fails after a body-only review", async () => {
     const fetchMock = vi
       .fn()
+      .mockResolvedValueOnce(jsonResponse({ login: "review-bot" }))
+      .mockResolvedValueOnce(jsonResponse([]))
       .mockResolvedValueOnce(new Response("bad position", { status: 422 }))
       .mockResolvedValueOnce(jsonResponse({ id: 2 }))
       .mockResolvedValueOnce(new Response("denied", { status: 403 }));
@@ -3688,7 +3693,10 @@ describe("reconcileFindingUpdates", () => {
       // has outstanding work and must post rather than acknowledge.
       existingFindings: [{ commentId: 7 }],
     });
-    const payload = JSON.parse((fetchMock.mock.calls[0][1] as { body: string }).body);
+    const reviewCall = fetchMock.mock.calls.find(([url]) =>
+      String(url).endsWith("/pulls/1/reviews"),
+    );
+    const payload = JSON.parse((reviewCall![1] as { body: string }).body);
     expect(payload.comments).toEqual([]);
   });
   it("retains a batch marker in the body-only fallback", async () => {
@@ -4136,5 +4144,361 @@ describe("sendOutput request-changes", () => {
     );
     expect(reviewCall).toBeDefined();
     expect(reviewEventOf(reviewCall![1])).toBe("COMMENT");
+  });
+});
+
+describe("sendOutput blocking-review withdrawal", () => {
+  const warnFinding = { commentId: 700, body: "🟡 open warning", severity: "WARN" as const };
+  const standingBlock = [{ id: 555, state: "CHANGES_REQUESTED", user: { login: "Review-Bot" } }];
+
+  /**
+   * Endpoint router: order-insensitive so each test asserts the protocol rather
+   * than a call sequence. `reviewsAfter` lets a test simulate a block that
+   * appears between the pre-post snapshot and the withdrawal.
+   */
+  function stubGitHub(
+    options: {
+      reviews?: unknown[];
+      reviewsAfter?: unknown[];
+      dismissStatus?: number;
+      reviewStatus?: number;
+      denySecondIdentity?: boolean;
+    } = {},
+  ) {
+    let listCalls = 0;
+    let identityCalls = 0;
+    const fetchMock = vi.fn(async (input: unknown, init?: { method?: string }) => {
+      const url = String(input);
+      const method = (init?.method ?? "GET").toUpperCase();
+      if (url.endsWith("/user") && method === "GET") {
+        identityCalls += 1;
+        if (options.denySecondIdentity && identityCalls > 1)
+          return new Response("denied", { status: 403 });
+        return jsonResponse({ login: "review-bot" });
+      }
+      if (url.endsWith("/pulls/42") && method === "GET")
+        return jsonResponse({ head: { sha: "abc123" } });
+      if (/\/reviews\/\d+\/dismissals$/.test(url))
+        return options.dismissStatus
+          ? new Response("nope", { status: options.dismissStatus })
+          : jsonResponse({});
+      if (url.includes("/pulls/42/reviews") && method === "GET") {
+        listCalls += 1;
+        const response =
+          listCalls > 1 ? (options.reviewsAfter ?? options.reviews) : options.reviews;
+        return jsonResponse(response ?? []);
+      }
+      if (url.includes("/reactions")) return jsonResponse([]);
+      if (url.includes("/issues/42/comments")) return jsonResponse({ id: 99 });
+      if (url.includes("/replies")) return jsonResponse({ id: 101 });
+      if (url.includes("/pulls/42/reviews") && method === "POST")
+        return options.reviewStatus
+          ? new Response("boom", { status: options.reviewStatus })
+          : jsonResponse({ id: 900 });
+      return jsonResponse({});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  function callsMatching(fetchMock: ReturnType<typeof stubGitHub>, pattern: RegExp) {
+    return fetchMock.mock.calls
+      .map(([url, init], index) => ({
+        index,
+        url: String(url),
+        method: ((init as { method?: string } | undefined)?.method ?? "GET").toUpperCase(),
+        matches: pattern.test(String(url)),
+      }))
+      .filter((call) => call.matches);
+  }
+
+  function dismissedIds(fetchMock: ReturnType<typeof stubGitHub>): string[] {
+    return callsMatching(fetchMock, /\/reviews\/\d+\/dismissals$/)
+      .map((call) => call.url.match(/\/reviews\/(\d+)\/dismissals$/)![1])
+      .filter((id): id is string => id !== undefined);
+  }
+
+  it("withdraws its own standing review once no critical finding remains", async () => {
+    const fetchMock = stubGitHub({ reviews: standingBlock });
+
+    await sendOutput({
+      target: "comment",
+      structuredResult: {
+        summary: "Follow-up",
+        comments: [
+          { file: "src/a.ts", line: 1, side: "RIGHT", severity: "WARN", body: "Handle it" },
+        ],
+      },
+      githubToken: "token123",
+      prNumber: 42,
+      repo: "owner/repo",
+      commitId: "abc123",
+      existingFindings: [warnFinding],
+    });
+
+    expect(dismissedIds(fetchMock)).toEqual(["555"]);
+  });
+
+  it("snapshots the block before posting so a concurrent run's block survives", async () => {
+    // The block only exists after this run posted; it belongs to a newer finding
+    // enumeration than the one being acted on, so it must not be withdrawn.
+    const fetchMock = stubGitHub({ reviews: [], reviewsAfter: standingBlock });
+
+    await sendOutput({
+      target: "comment",
+      structuredResult: {
+        summary: "Follow-up",
+        comments: [
+          { file: "src/a.ts", line: 1, side: "RIGHT", severity: "WARN", body: "Handle it" },
+        ],
+      },
+      githubToken: "token123",
+      prNumber: 42,
+      repo: "owner/repo",
+      commitId: "abc123",
+      existingFindings: [warnFinding],
+    });
+
+    expect(dismissedIds(fetchMock)).toEqual([]);
+  });
+
+  it("lists the standing reviews before it posts the review", async () => {
+    const fetchMock = stubGitHub({ reviews: standingBlock });
+
+    await sendOutput({
+      target: "comment",
+      structuredResult: {
+        summary: "Follow-up",
+        comments: [
+          { file: "src/a.ts", line: 1, side: "RIGHT", severity: "WARN", body: "Handle it" },
+        ],
+      },
+      githubToken: "token123",
+      prNumber: 42,
+      repo: "owner/repo",
+      commitId: "abc123",
+      existingFindings: [warnFinding],
+    });
+
+    const reviewCalls = callsMatching(fetchMock, /\/pulls\/42\/reviews(\?|$)/);
+    const listIndex = reviewCalls.find((call) => call.method === "GET")?.index;
+    const postIndex = reviewCalls.find((call) => call.method === "POST")?.index;
+    expect(listIndex).toBeDefined();
+    expect(postIndex).toBeDefined();
+    expect(listIndex!).toBeLessThan(postIndex!);
+  });
+
+  it("keeps the block while an open critical finding stands", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    const fetchMock = stubGitHub({ reviews: standingBlock });
+
+    await sendOutput({
+      target: "comment",
+      structuredResult: {
+        summary: "Follow-up",
+        comments: [
+          { file: "src/a.ts", line: 1, side: "RIGHT", severity: "WARN", body: "Handle it" },
+        ],
+      },
+      githubToken: "token123",
+      prNumber: 42,
+      repo: "owner/repo",
+      commitId: "abc123",
+      existingFindings: [{ ...warnFinding, severity: "CRITICAL" }],
+    });
+
+    expect(dismissedIds(fetchMock)).toEqual([]);
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("#700 CRITICAL"));
+    log.mockRestore();
+  });
+
+  it("keeps the block when an open finding's severity is unknown", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    const fetchMock = stubGitHub({ reviews: standingBlock });
+
+    await sendOutput({
+      target: "comment",
+      structuredResult: {
+        summary: "Follow-up",
+        comments: [
+          { file: "src/a.ts", line: 1, side: "RIGHT", severity: "WARN", body: "Handle it" },
+        ],
+      },
+      githubToken: "token123",
+      prNumber: 42,
+      repo: "owner/repo",
+      commitId: "abc123",
+      existingFindings: [{ commentId: 700 }],
+    });
+
+    expect(dismissedIds(fetchMock)).toEqual([]);
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("#700 severity unknown"));
+    log.mockRestore();
+  });
+
+  it("never withdraws a block this run just raised", async () => {
+    const fetchMock = stubGitHub({ reviews: standingBlock });
+
+    await sendOutput({
+      target: "comment",
+      structuredResult: {
+        summary: "Needs work",
+        comments: [
+          { file: "src/a.ts", line: 1, side: "RIGHT", severity: "CRITICAL", body: "Fix it" },
+        ],
+      },
+      githubToken: "token123",
+      prNumber: 42,
+      repo: "owner/repo",
+      commitId: "abc123",
+      requestChanges: true,
+      existingFindings: [],
+    });
+
+    expect(dismissedIds(fetchMock)).toEqual([]);
+    expect(
+      callsMatching(fetchMock, /\/pulls\/42\/reviews(\?|$)/).some((call) => call.method === "GET"),
+    ).toBe(false);
+  });
+
+  it("withdraws after an all-clear acknowledgement", async () => {
+    const fetchMock = stubGitHub({ reviews: standingBlock });
+
+    await sendOutput({
+      target: "comment",
+      none: true,
+      githubToken: "token123",
+      prNumber: 42,
+      repo: "owner/repo",
+      commitId: "abc123",
+      existingFindings: [],
+    });
+
+    expect(dismissedIds(fetchMock)).toEqual(["555"]);
+  });
+
+  it("does not touch the review state when the open findings were never enumerated", async () => {
+    const fetchMock = stubGitHub({ reviews: standingBlock });
+
+    await sendOutput({
+      target: "comment",
+      structuredResult: {
+        summary: "Follow-up",
+        comments: [
+          { file: "src/a.ts", line: 1, side: "RIGHT", severity: "WARN", body: "Handle it" },
+        ],
+      },
+      githubToken: "token123",
+      prNumber: 42,
+      repo: "owner/repo",
+      commitId: "abc123",
+    });
+
+    expect(dismissedIds(fetchMock)).toEqual([]);
+    expect(
+      callsMatching(fetchMock, /\/pulls\/42\/reviews(\?|$)/).some((call) => call.method === "GET"),
+    ).toBe(false);
+  });
+
+  it("does not withdraw without a pinned commit to detect a stale run", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    const fetchMock = stubGitHub({ reviews: standingBlock });
+
+    await sendOutput({
+      target: "comment",
+      none: true,
+      githubToken: "token123",
+      prNumber: 42,
+      repo: "owner/repo",
+      existingFindings: [],
+    });
+
+    expect(dismissedIds(fetchMock)).toEqual([]);
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("no commit is pinned"));
+    log.mockRestore();
+  });
+
+  it("still posts the review when the withdrawal is rejected", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const fetchMock = stubGitHub({ reviews: standingBlock, dismissStatus: 403 });
+
+    await expect(
+      sendOutput({
+        target: "comment",
+        structuredResult: {
+          summary: "Follow-up",
+          comments: [
+            { file: "src/a.ts", line: 1, side: "RIGHT", severity: "WARN", body: "Handle it" },
+          ],
+        },
+        githubToken: "token123",
+        prNumber: 42,
+        repo: "owner/repo",
+        commitId: "abc123",
+        existingFindings: [warnFinding],
+      }),
+    ).resolves.toBeDefined();
+
+    expect(dismissedIds(fetchMock)).toEqual(["555"]);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("could not withdraw"));
+    warn.mockRestore();
+  });
+
+  it("applies finding updates on the Issues fallback after a hard review failure", async () => {
+    const fetchMock = stubGitHub({ reviewStatus: 500 });
+
+    await sendOutput({
+      target: "comment",
+      structuredResult: {
+        summary: "Needs fixes",
+        comments: [
+          { file: "src/a.ts", line: 1, side: "RIGHT", severity: "WARN", body: "still open" },
+        ],
+        finding_updates: [{ comment_id: 7, status: "RESOLVED", explanation: "fixed" }],
+      },
+      githubToken: "token123",
+      prNumber: 42,
+      repo: "owner/repo",
+      commitId: "abc123",
+      existingFindings: [{ commentId: 7, severity: "WARN" }],
+    });
+
+    expect(
+      fetchMock.mock.calls.some(([url, init]) => {
+        const method = (init as { method?: string } | undefined)?.method ?? "GET";
+        return String(url).endsWith("/pulls/42/comments/7/replies") && method === "POST";
+      }),
+    ).toBe(true);
+    expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("/issues/42/comments"))).toBe(
+      true,
+    );
+  });
+
+  it("does not fail the run when the fallback's lifecycle cleanup fails", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    stubGitHub({ reviewStatus: 500, denySecondIdentity: true });
+
+    await expect(
+      sendOutput({
+        target: "comment",
+        structuredResult: {
+          summary: "Needs fixes",
+          comments: [
+            { file: "src/a.ts", line: 1, side: "RIGHT", severity: "WARN", body: "still open" },
+          ],
+          finding_updates: [{ comment_id: 7, status: "RESOLVED", explanation: "fixed" }],
+        },
+        githubToken: "token123",
+        prNumber: 42,
+        repo: "owner/repo",
+        commitId: "abc123",
+        existingFindings: [{ commentId: 7, severity: "WARN" }],
+      }),
+    ).resolves.toBeDefined();
+
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("could not reconcile finding lifecycle after the fallback post"),
+    );
+    warn.mockRestore();
   });
 });

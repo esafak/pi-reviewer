@@ -15,6 +15,8 @@ export interface Review {
   user?: { login?: string; type?: string };
   commit_id?: string;
   created_at?: string;
+  /** Lifecycle state as GitHub reports it; a withdrawn review reads as `DISMISSED`. */
+  state?: string;
 }
 export interface ReviewComment {
   id: number;
@@ -402,6 +404,31 @@ export class GitHubClient {
         pull_number: number,
         review_id: review,
         body,
+      });
+      return data as Review;
+    } catch (error) {
+      throw toGitHubError(error);
+    }
+  }
+  /**
+   * Withdraws a submitted review. GitHub keeps a `REQUEST_CHANGES` review
+   * blocking until its author approves or dismisses it, so this is the only
+   * way a reviewer closes the gate it opened.
+   */
+  async dismissReview(
+    repo: string,
+    number: number,
+    review: number,
+    message: string,
+  ): Promise<Review> {
+    try {
+      const { owner, repo: name } = splitRepo(repo);
+      const { data } = await this.octokit.rest.pulls.dismissReview({
+        owner,
+        repo: name,
+        pull_number: number,
+        review_id: review,
+        message,
       });
       return data as Review;
     } catch (error) {
