@@ -2,6 +2,7 @@ import type { ContextFile, ContextResult } from "./context.js";
 import { PROMPTS } from "./prompts.js";
 import type { DiffShard, SkippedFile } from "./diff-filter.js";
 import type { ReviewComment } from "./output.js";
+import type { Severity } from "./severity.js";
 import type { DigestEntry } from "./shard-tool.js";
 
 export type MinSeverity = "CRITICAL" | "WARN" | "INFO";
@@ -16,6 +17,8 @@ export interface ActiveFindingContext {
   line?: number;
   side?: string;
   body: string;
+  /** Severity the finding was posted with; absent when the posted body carries no badge. */
+  severity?: Severity;
   sourceBatch?: string;
   latestStatus?: string;
 }

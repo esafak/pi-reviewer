@@ -1592,6 +1592,7 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
         issueCommentId: f.issueCommentId,
         bodyFinding: f.bodyFinding,
         reviewBody: f.reviewBody,
+        severity: f.severity,
       })),
       existingFindingKeys: new Set(
         options.activeFindings
@@ -1723,6 +1724,7 @@ export async function review(options: ReviewOptions): Promise<SummaryOverview | 
       issueCommentId: f.issueCommentId,
       bodyFinding: f.bodyFinding,
       reviewBody: f.reviewBody,
+      severity: f.severity,
     })),
     existingFindingKeys: new Set(
       options.activeFindings

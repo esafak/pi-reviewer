@@ -1,4 +1,5 @@
 import { escapeHtmlCommentText } from "../core/html-comment.js";
+import { isSeverity, severityFromFindingBody } from "../core/severity.js";
 
 export type BatchKind = "opened" | "synchronize" | "manual";
 export type EventKind = BatchKind | "reply";
@@ -21,7 +22,8 @@ export interface BodyFinding {
   file: string;
   line: number;
   side: "LEFT" | "RIGHT";
-  severity: "CRITICAL" | "WARN" | "INFO";
+  /** Absent when a marker carries a value this version does not recognize. */
+  severity?: "CRITICAL" | "WARN" | "INFO";
   body: string;
   status: BodyFindingStatus;
   targetSha?: string;
@@ -86,6 +88,13 @@ export function encodeBodyFindingMarker(
   const json = escapeHtmlCommentText(JSON.stringify({ version: 1, status: "ACTIVE", ...value }));
   return `<!-- pi-reviewer:body-finding:v1 ${json} -->`;
 }
+/**
+ * Validates the structural marker fields. Severity is deliberately not part of
+ * the gate: an unrecognized value must still decode to a finding, with its
+ * severity dropped, so a marker from a newer version fails closed (an unknown
+ * severity keeps a changes-requested review standing) instead of vanishing from
+ * the finding history altogether.
+ */
 function isBodyFinding(value: unknown): value is BodyFinding {
   if (!value || typeof value !== "object") return false;
   const v = value as Record<string, unknown>;
@@ -96,7 +105,6 @@ function isBodyFinding(value: unknown): value is BodyFinding {
     typeof v.file === "string" &&
     Number.isInteger(v.line) &&
     (v.side === "LEFT" || v.side === "RIGHT") &&
-    ["CRITICAL", "WARN", "INFO"].includes(v.severity as string) &&
     typeof v.body === "string" &&
     ["ACTIVE", "PARTIALLY_RESOLVED", "RESOLVED"].includes(v.status as string)
   );
@@ -108,7 +116,11 @@ export function decodeBodyFindingMarkers(body: string | null | undefined): BodyF
   for (const match of body.matchAll(bodyFindingMarker)) {
     try {
       const value = JSON.parse(match[1]);
-      if (isBodyFinding(value)) findings.push(value);
+      if (!isBodyFinding(value)) continue;
+      const severity = isSeverity((value as { severity?: unknown }).severity)
+        ? (value as BodyFinding).severity
+        : undefined;
+      findings.push({ ...value, severity });
     } catch {
       /* ignore malformed hidden metadata */
     }
@@ -194,6 +206,7 @@ export function collectFindingHistory(input: {
         line: c.line,
         side: c.side,
         body: c.body,
+        severity: severityFromFindingBody(c.body),
         sourceBatch: batch ? `${batch.fromSha}..${batch.toSha}` : undefined,
         latestStatus: statusReplies.at(-1)
           ? decodeStatusMarker(statusReplies.at(-1)!.body)?.status
@@ -271,6 +284,7 @@ export function collectFindingHistory(input: {
         line: f.line,
         side: f.side,
         body: f.body,
+        severity: f.severity,
         originalBody: f.body,
         status: f.status,
         latestStatus: f.status === "PARTIALLY_RESOLVED" ? "PARTIALLY_RESOLVED" : undefined,

@@ -7,6 +7,12 @@ import { PR_DIAGRAM_MAX_LENGTH, PR_SUMMARY_MAX_LENGTH } from "./prompts.js";
 import { SEVERITY_EMOJI, SEVERITY_RANK, type Severity } from "./severity.js";
 import { GitHubClient, GitHubError } from "../ci/github.js";
 import {
+  blockingFindings,
+  describeBlockingFindings,
+  listOwnBlockingReviews,
+  withdrawBlockingReviews,
+} from "../ci/blocking-review.js";
+import {
   bodyFindingId,
   decodeBodyFindingMarkers,
   encodeBodyFindingMarker,
@@ -245,6 +251,8 @@ export interface ExistingFinding {
   issueCommentId?: number;
   bodyFinding?: boolean;
   reviewBody?: string;
+  /** Severity the finding was posted with, when the posted record carries it. */
+  severity?: Severity;
 }
 
 const FINDING_STATUSES = ["RESOLVED", "PARTIALLY_RESOLVED", "STILL_OPEN"] as const;
@@ -286,6 +294,64 @@ async function clearStaleThumbsUp(token: string, repo: string, prNumber: number)
       `[pi-reviewer] could not remove stale thumbs-up reaction: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
+}
+
+/**
+ * Snapshots the reviewer's standing blocks before a posting step. Returns
+ * `undefined` when the answer cannot be trusted — no pinned commit to detect a
+ * stale run, or a failed read — and nothing is withdrawn in that case.
+ */
+async function snapshotBlockingReviews(
+  options: Pick<OutputOptions, "githubToken" | "repo" | "prNumber" | "commitId">,
+): Promise<readonly number[] | undefined> {
+  if (!options.githubToken || !options.repo || typeof options.prNumber !== "number")
+    return undefined;
+  if (!options.commitId) {
+    console.log(
+      "[pi-reviewer] skipping changes-requested reconciliation: no commit is pinned to this run",
+    );
+    return undefined;
+  }
+  return listOwnBlockingReviews({
+    client: new GitHubClient(options.githubToken),
+    repo: options.repo,
+    prNumber: options.prNumber,
+  });
+}
+
+/**
+ * Closes the gate an earlier run opened. GitHub keeps a changes-requested
+ * review blocking until its author withdraws it, so resolving the findings is
+ * not enough — the review itself has to be dismissed. Only the reviews that
+ * already stood before this posting step are withdrawn: anything newer belongs
+ * to a finding enumeration this run never saw.
+ */
+async function reconcileBlockingReview(
+  options: Pick<OutputOptions, "githubToken" | "repo" | "prNumber" | "commitId">,
+  open: readonly ExistingFinding[] | undefined,
+  posted: readonly ReviewComment[],
+  standing: readonly number[] | undefined,
+): Promise<void> {
+  if (!options.githubToken || !options.repo || typeof options.prNumber !== "number") return;
+  // An absent open set means the caller never enumerated the PR's findings, so
+  // nothing here can prove the block obsolete.
+  if (open === undefined) return;
+  const blockers = blockingFindings(open, posted);
+  if (blockers.length > 0) {
+    console.log(
+      `[pi-reviewer] keeping the changes-requested review: ${describeBlockingFindings(blockers)}`,
+    );
+    return;
+  }
+  if (!standing?.length) return;
+  await withdrawBlockingReviews({
+    client: new GitHubClient(options.githubToken),
+    repo: options.repo,
+    prNumber: options.prNumber,
+    reviewIds: standing,
+    message: `Withdrawn: no unresolved CRITICAL finding remains${options.commitId ? ` (reviewed ${options.commitId.slice(0, 7)})` : ""}.`,
+    ...(options.commitId ? { expectedHeadSha: options.commitId } : {}),
+  });
 }
 
 function findingUpdateRejection(
@@ -1565,9 +1631,18 @@ export function formatForTerminal(result: ReviewResult): string {
  * review has nothing left to report, and record the reviewed range with the
  * batch marker. The reaction is a function of state, so the caller decides it —
  * a review with open findings must not be greeted with a thumbs-up.
+ *
+ * Returns the ids of the reviewer's standing changes-requested reviews as of
+ * just before this acknowledgement posts, so the caller can withdraw exactly
+ * those and never a block created around it.
  */
-async function acknowledgeWithoutReview(options: OutputOptions, react: boolean): Promise<void> {
-  if (!options.githubToken || typeof options.prNumber !== "number" || !options.repo) return;
+async function acknowledgeWithoutReview(
+  options: OutputOptions,
+  react: boolean,
+  snapshotStandingBlocks = false,
+): Promise<readonly number[] | undefined> {
+  if (!options.githubToken || typeof options.prNumber !== "number" || !options.repo)
+    return undefined;
   const client = new GitHubClient(options.githubToken);
   const repo = options.repo;
   const prNumber = options.prNumber;
@@ -1581,6 +1656,7 @@ async function acknowledgeWithoutReview(options: OutputOptions, react: boolean):
         "PR head changed while the review was running; refusing to post a stale review",
       );
   }
+  const standing = snapshotStandingBlocks ? await snapshotBlockingReviews(options) : undefined;
   if (!react) {
     console.log("[pi-reviewer] open findings remain — recording the range without a reaction");
   } else {
@@ -1632,6 +1708,7 @@ async function acknowledgeWithoutReview(options: OutputOptions, react: boolean):
       );
     }
   }
+  return standing;
 }
 
 export async function sendOutput(options: OutputOptions): Promise<OutputMetadata> {
@@ -1644,7 +1721,8 @@ export async function sendOutput(options: OutputOptions): Promise<OutputMetadata
       if (options.skippedDiff && options.skippedDiff.files.length > 0) {
         // The model saw a truncated diff, so its "nothing to report" is not
         // an all-clear: post the harness-owned notice instead of silently
-        // reacting, and record the range without a thumbs-up.
+        // reacting, and record the range without a thumbs-up. Coverage was
+        // incomplete, so a standing block also stays until a full run.
         const repo = options.repo;
         const prNumber = options.prNumber;
         const noticeBody = [options.batchMarker, renderSkippedDiffNotice(options.skippedDiff)]
@@ -1690,7 +1768,13 @@ export async function sendOutput(options: OutputOptions): Promise<OutputMetadata
         }
         await acknowledgeWithoutReview({ ...options, batchMarker: undefined }, false);
       } else {
-        await acknowledgeWithoutReview(options, (options.existingFindings?.length ?? 0) === 0);
+        const open = options.existingFindings;
+        const standing = await acknowledgeWithoutReview(
+          options,
+          (open?.length ?? 0) === 0,
+          open !== undefined,
+        );
+        await reconcileBlockingReview(options, open, [], standing);
       }
     } else {
       console.log("[pi-reviewer] no findings to report");
@@ -1792,7 +1876,12 @@ export async function sendOutput(options: OutputOptions): Promise<OutputMetadata
       !postsSummaryBody &&
       !(options.skippedDiff && options.skippedDiff.files.length > 0)
     ) {
-      await acknowledgeWithoutReview(options, true);
+      const standing = await acknowledgeWithoutReview(
+        options,
+        true,
+        options.existingFindings !== undefined,
+      );
+      await reconcileBlockingReview(options, [], [], standing);
       return { commentIds: [], fallback: false };
     }
 
@@ -1807,6 +1896,36 @@ export async function sendOutput(options: OutputOptions): Promise<OutputMetadata
         );
     }
 
+    const token = options.githubToken;
+    const repo = options.repo;
+    const prNumber = options.prNumber;
+    const reconcileAndCleanup = async (): Promise<ReadonlySet<number>> => {
+      let remaining = outstandingFindings;
+      if (result.finding_updates?.length && options.existingFindings && options.commitId) {
+        remaining = await reconcileFindingUpdates({
+          token,
+          repo,
+          prNumber,
+          targetSha: options.commitId,
+          updates: result.finding_updates,
+          findings: options.existingFindings,
+        });
+      }
+      if (comments.length > 0) await clearStaleThumbsUp(token, repo, prNumber);
+      return remaining;
+    };
+    const openFindings = (remaining: ReadonlySet<number>) =>
+      options.existingFindings?.filter((finding) => remaining.has(finding.commentId));
+    // Every posting path reconciles the reviewer's own gate: the findings it
+    // raised may be gone even when this run had something to say.
+    const settleReviewState = async (
+      standing: readonly number[] | undefined,
+    ): Promise<ReadonlySet<number>> => {
+      const remaining = await reconcileAndCleanup();
+      await reconcileBlockingReview(options, openFindings(remaining), comments, standing);
+      return remaining;
+    };
+
     // Try PR Reviews API first (supports inline comments and a body).
     if (options.commitId) {
       const reviewEvent = shouldRequestChanges(comments, options.requestChanges)
@@ -1817,10 +1936,14 @@ export async function sendOutput(options: OutputOptions): Promise<OutputMetadata
           (moved.length > 0 ? ` and ${moved.length} comment(s) in body` : "") +
           ` as ${reviewEvent}`,
       );
+      // Snapshot the blocks that predate this post. A review created after this
+      // point — by this run as REQUEST_CHANGES, or by a concurrent run — belongs
+      // to a newer finding enumeration and must survive the withdrawal.
+      const standing =
+        reviewEvent === "COMMENT" && options.existingFindings !== undefined
+          ? await snapshotBlockingReviews(options)
+          : undefined;
       const poster = new GitHubClient(options.githubToken);
-      const repo = options.repo;
-      const prNumber = options.prNumber;
-      const token = options.githubToken;
       const finalizePostedReview = (
         postedId: number | undefined,
         reviewBody: string,
@@ -1836,19 +1959,6 @@ export async function sendOutput(options: OutputOptions): Promise<OutputMetadata
               `[pi-reviewer] could not finalize batch marker: ${error instanceof Error ? error.message : String(error)}`,
             ),
           );
-      };
-      const reconcileAndCleanup = async (): Promise<void> => {
-        if (result.finding_updates?.length && options.existingFindings && options.commitId) {
-          await reconcileFindingUpdates({
-            token,
-            repo,
-            prNumber,
-            targetSha: options.commitId,
-            updates: result.finding_updates,
-            findings: options.existingFindings,
-          });
-        }
-        if (comments.length > 0) await clearStaleThumbsUp(token, repo, prNumber);
       };
       type PostedReview = { id?: number; comments?: Array<{ id?: number }> };
       // Creation attempts only: a posted review must never fall through to
@@ -1913,7 +2023,7 @@ export async function sendOutput(options: OutputOptions): Promise<OutputMetadata
             ? buildReviewBody(result, comments, comments, options)
             : buildReviewBody(result, moved, comments, options),
         );
-        await reconcileAndCleanup();
+        await settleReviewState(standing);
         return {
           reviewId: posted?.id,
           commentIds: posted?.comments?.flatMap((c) => (c.id ? [c.id] : [])) ?? [],
@@ -1946,8 +2056,15 @@ export async function sendOutput(options: OutputOptions): Promise<OutputMetadata
     }
 
     console.log("[pi-reviewer] review comment posted");
-    if (comments.length > 0)
-      await clearStaleThumbsUp(options.githubToken, options.repo, options.prNumber);
+    // The review is already posted and this path has no pinned commit, so the
+    // lifecycle cleanup is best-effort: it must not fail a run that succeeded.
+    try {
+      await settleReviewState(undefined);
+    } catch (error) {
+      console.warn(
+        `[pi-reviewer] could not reconcile finding lifecycle after the fallback post: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
     return { commentIds: postedIssueComment?.id ? [postedIssueComment.id] : [], fallback: true };
   }
 

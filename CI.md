@@ -124,6 +124,7 @@ To switch models without editing the workflow, put the full model name in a `MOD
 - **`/pi-review`** (top-level PR comment): re-review the current batch.
 - **`/pi-summary`** (top-level PR comment): recompute the summary over the whole PR and update the first review in place. Findings from that pass are discarded — it never files inline comments.
 - A clean run leaves a 👍 reaction instead of posting — but only when no findings are open. Otherwise it records the range and stays silent.
+- With `request-changes`, a `REQUEST_CHANGES` review is withdrawn as soon as no CRITICAL finding is left unresolved. GitHub keeps such a review blocking until its author approves or dismisses it — resolving the threads and marking the findings `RESOLVED` only closes the threads — so the reviewer dismisses its own standing review on the next posting run instead of leaving the PR blocked forever. Only reviews that already stood before that run posted are withdrawn, and never without a pinned commit. A reply-only resolution (no later push, no `/pi-review`) holds the block until the next review run.
 - Fork PRs are skipped. If the head moves mid-run, the run backs off rather than posting stale comments.
 
 ## How batching works
@@ -219,7 +220,7 @@ Mirrors [`action.yml`](./action.yml) — the action is source of truth if they d
 | `code-exec-max-stream-bytes` | `32768` | Per-stream stdout/stderr cap (1KiB–128KiB) |
 | `code-exec-image` | — | Pre-pulled Linux image for macOS Apple Container backend |
 | `review-drafts` | `false` | Review draft PRs |
-| `request-changes` | `false` | Request GitHub changes when review has CRITICAL findings; otherwise posts as comment |
+| `request-changes` | `false` | Request GitHub changes when review has CRITICAL findings, and withdraw that review once no CRITICAL finding is left unresolved; otherwise posts as comment |
 | `setup-node` | `true` | Set up Node 24 when no compatible Node is on `PATH` |
 | `cache` | `true` | Cache the pnpm store across runs |
 

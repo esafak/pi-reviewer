@@ -868,3 +868,54 @@ describe("event normalization", () => {
     expect(isRenovatePullRequest({})).toBe(false);
   });
 });
+
+describe("collectFindingHistory severities", () => {
+  it("records the severity each open finding was posted with", () => {
+    const result = collectFindingHistory({
+      login: "review-bot",
+      reviews: [
+        {
+          id: 900,
+          user: { login: "review-bot" },
+          body: `${encodeBatchMarker({ fromSha: "base", toSha: "head", kind: "opened", actor: "review-bot", reviewId: 900 })}\n${encodeBodyFindingMarker(
+            {
+              findingId: 4242,
+              file: "src/a.ts",
+              line: 7,
+              side: "RIGHT",
+              severity: "CRITICAL",
+              body: "unmoved body finding",
+            },
+          )}`,
+        },
+      ],
+      issueComments: [],
+      comments: [
+        {
+          id: 11,
+          user: { login: "review-bot" },
+          path: "src/a.ts",
+          line: 3,
+          side: "RIGHT",
+          body: "<!-- pi-reviewer:finding:v1 -->\n🟡 handle the empty list",
+        },
+        {
+          id: 12,
+          user: { login: "review-bot" },
+          path: "src/a.ts",
+          line: 4,
+          side: "RIGHT",
+          body: "<!-- pi-reviewer:finding:v1 -->\nno badge to read",
+        },
+      ],
+      threads: [],
+    });
+
+    const severityById = new Map(
+      result.activeFindings.map((finding) => [finding.commentId, finding.severity]),
+    );
+    expect(severityById.get(11)).toBe("WARN");
+    expect(severityById.get(12)).toBeUndefined();
+    expect(severityById.get(4242)).toBe("CRITICAL");
+  });
+});
