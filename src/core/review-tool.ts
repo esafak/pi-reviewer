@@ -1,5 +1,5 @@
 import type { AgentTool } from "@earendil-works/pi-agent-core";
-import { Type, type Static } from "@earendil-works/pi-ai";
+import { Type, type Static } from "typebox";
 
 import type { ReviewResult } from "./output.js";
 import { hasAiFixProse, MEANINGFUL_PROSE_PATTERN } from "./ai-fix-footer.js";

@@ -1,6 +1,6 @@
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { stat } from "node:fs/promises";
-import { Type, type Static, type TSchema } from "@earendil-works/pi-ai";
+import { Type, type Static, type TSchema } from "typebox";
 import { isRecord } from "../registry/helpers.js";
 import {
   createGitHubResearchClient,

@@ -1,5 +1,5 @@
 import type { AgentTool } from "@earendil-works/pi-agent-core";
-import { Type, type Static, type TSchema } from "@earendil-works/pi-ai";
+import { Type, type Static, type TSchema } from "typebox";
 import { createRegistryClient } from "./client.js";
 import { hasControlCharacters, MAX_TOOL_CONTENT_BYTES } from "./helpers.js";
 import type { RegistryClient, RegistryLookupParams } from "./types.js";

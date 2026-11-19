@@ -2,7 +2,8 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vite-plus/test";
-import { EventStream, getCurrentTools, Type } from "@earendil-works/pi-ai";
+import { EventStream, getCurrentTools } from "@earendil-works/pi-ai";
+import { Type } from "typebox";
 import {
   createAgentSession,
   DefaultResourceLoader,

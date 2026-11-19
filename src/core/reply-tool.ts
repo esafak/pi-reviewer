@@ -1,5 +1,5 @@
 import type { AgentTool } from "@earendil-works/pi-agent-core";
-import { Type, type Static } from "@earendil-works/pi-ai";
+import { Type, type Static } from "typebox";
 
 export const ALLOWED_REACTIONS = [
   "+1",

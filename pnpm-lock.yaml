@@ -221,6 +221,9 @@ importers:
       tsx:
         specifier: ^4.20.5
         version: 4.23.15
+      typebox:
+        specifier: 1.3.27
+        version: 1.3.27
     devDependencies:
       '@octokit/graphql-schema':
         specifier: 15.26.1
