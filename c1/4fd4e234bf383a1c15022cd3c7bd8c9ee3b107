@@ -1,0 +1,21 @@
+.github/renovate.json5
+  s_d3e1be2d064c30::t_c023e8178573ae 51-59
+pnpm-workspace.yaml
+  s_d3e1be2d064c30::t_2261baff7c87c0 22-24
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "c14fd4e234bf383a1c15022cd3c7bd8c9ee3b107",
+  "prompts": {},
+  "sessions": {
+    "s_d3e1be2d064c30": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_e0afa9114ffeHnKiu7K7gBNbh6",
+        "model": "unknown"
+      },
+      "human_author": "Emre Şafak <3928300+esafak@users.noreply.github.com>"
+    }
+  }
+}
