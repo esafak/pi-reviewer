@@ -1,5 +1,5 @@
 import type { AgentTool } from "@earendil-works/pi-agent-core";
-import { Type, type Static, type TSchema } from "@earendil-works/pi-ai";
+import { Type, type Static, type TSchema } from "typebox";
 import type { SearchCitation } from "./types.js";
 import type { SearchClient } from "./client.js";
 import { log } from "../log.js";
