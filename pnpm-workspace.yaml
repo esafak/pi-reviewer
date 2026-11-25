@@ -18,7 +18,7 @@ overrides:
   # https://github.com/esafak/pi-reviewer/security/dependabot/3
   # https://github.com/esafak/pi-reviewer/security/dependabot/4
   # CVE-2026-13149, CVE-2026-14257, CVE-2026-69152
-  brace-expansion@^5.0.0: 5.0.12
+  brace-expansion@^5.0.0: 5.0.13
   # Keep this pin on the 6.x line: the pi packages and openai declare undici 6.x peers.
   # .github/renovate.json5 caps this override at <7; remove both together when those
   # consumers move to undici 8. 6.x security patches are still allowed through.

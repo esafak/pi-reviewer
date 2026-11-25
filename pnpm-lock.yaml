@@ -186,7 +186,7 @@ catalogs:
 overrides:
   vite@*: npm:@voidzero-dev/vite-plus-core@1.5.1
   vitest@*: 5.1.0
-  brace-expansion@^5.0.0: 5.0.12
+  brace-expansion@^5.0.0: 5.0.13
   undici@^6: 6.29.1
   undici@^8: 8.12.4
   fast-uri: 4.2.3
@@ -1920,8 +1920,8 @@ packages:
   bowser@2.14.1:
     resolution: {integrity: sha512-tzPjzCxygAKWFOJP011oxFHs57HzIhOEracIgAePE4pqB3LikALKnSzUyU4MGs9/iCEUuHlAJTjTc5M+u7YEGg==}
 
-  brace-expansion@5.0.12:
-    resolution: {integrity: sha512-YovQ3rzhaLMIrDjNDMkNS01tea93qhEhG5xy8f6+R0l+dw3Ki+5sCoIoI942iuLZTHWogWktgwVDhU09iNEimQ==}
+  brace-expansion@5.0.13:
+    resolution: {integrity: sha512-Vh3dmFbc4wZeox7M9I/0L9GfFd83Su4+yCck/OF9Gi/P/dAHn0RT7X4K9R7gMNMhDck3DvhR6QXsnQdjjgwNvQ==}
     engines: {node: 20 || >=22}
 
   buffer-equal-constant-time@1.0.1:
@@ -3165,7 +3165,7 @@ snapshots:
       '@earendil-works/pi-mcp': 1.5.2
       '@earendil-works/pi-tui': 1.5.2
       '@silvia-odwyer/photon-node': 0.3.4
-      brace-expansion: 5.0.12
+      brace-expansion: 5.0.13
       chalk: 6.0.0
       cross-spawn: 7.0.6
       diff: 8.0.4
@@ -4214,7 +4214,7 @@ snapshots:
 
   bowser@2.14.1: {}
 
-  brace-expansion@5.0.12:
+  brace-expansion@5.0.13:
     dependencies:
       balanced-match: 4.0.4
 
@@ -4610,7 +4610,7 @@ snapshots:
   minimatch@11.0.7:
     dependencies:
       '@isaacs/nonrecursive-glob-match': 1.1.0
-      brace-expansion: 5.0.12
+      brace-expansion: 5.0.13
 
   mrmime@2.0.1: {}
 
